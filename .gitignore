@@ -1,0 +1,21 @@
+# 系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 编辑器
+.idea/
+.vscode/
+*.swp
+
+# 依赖与构建（技术栈确定后再细化）
+node_modules/
+target/
+dist/
+build/
+*.log
+
+# 环境与密钥
+.env
+.env.local
+*.pem
