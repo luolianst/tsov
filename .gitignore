@@ -8,14 +8,42 @@ desktop.ini
 .vscode/
 *.swp
 
-# 依赖与构建（技术栈确定后再细化）
-node_modules/
-target/
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
 dist/
 build/
-*.log
 
 # 环境与密钥
 .env
 .env.local
 *.pem
+
+# 音频/数据产物（大文件不入库，用 samples/README.md 记录来源）
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.mid
+*.midi
+output/
+samples/audio/
+*.npy
+*.npz
+
+# DSP/分析中间产物
+dsp_output/
+analysis_cache/
+*.pkl
+
+# 日志与临时
+*.log
+tmp/
+temp/
+*.bak
