@@ -43,6 +43,9 @@ dsp_output/
 analysis_cache/
 *.pkl
 
+# 第三方源码 vendor（crepe 权重 ~180MB，不入库；ADR-0007）
+vendor/
+
 # 日志与临时
 *.log
 tmp/

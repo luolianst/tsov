@@ -1,0 +1,204 @@
+"""CLI 薄壳入口（ADR-0005 决策 1/6：库 + CLI 薄壳，同一套函数两种入口）。
+
+命令（M1 可用的部分）：
+- `tsov preprocess <输入...> -o <输出目录>`：转码 16k wav + noisereduce 降噪
+- `tsov backends`：列出 DSP / 渲染后端
+其余命令（transcribe/analyze/render/midi）接口已建，实现随 M2/M3 填充，
+调了会给出明确的 NotImplemented 提示，不静默失败。
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+
+
+def _cmd_preprocess(args: argparse.Namespace) -> int:
+    from .dsp import preprocess_batch
+
+    results = preprocess_batch(
+        args.inputs,
+        args.output_dir,
+        sr=args.sr,
+        noise_reduce_strength=args.noise_reduce_strength,
+    )
+    for r in results:
+        print(f"{r.source} -> {r.denoised_path}  ({r.duration_sec}s)")
+    print(f"共 {len(results)} 个文件，manifest 在 {args.output_dir}/manifest.json")
+    return 0
+
+
+def _cmd_backends(args: argparse.Namespace) -> int:
+    from .dsp import transcribe as _t  # noqa: F401 仅确认模块可导入
+    from .render import list_backends
+
+    print("DSP backends（M2 双验证）: crepe_notes, basic-pitch")
+    print("Render backends:", list_backends())
+    return 0
+
+
+def _cmd_transcribe(args: argparse.Namespace) -> int:
+    import json
+    import os
+
+    from .dsp import transcribe
+
+    voice = transcribe(args.audio, backend=args.backend)
+    if args.output is None:
+        args.output = f"output/transcribe-{args.backend}.json"
+    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
+    with open(args.output, "w", encoding="utf-8") as f:
+        json.dump(voice.to_dict(), f, ensure_ascii=False, indent=2)
+    print(f"backend={args.backend} notes={len(voice.notes)} -> {args.output}")
+    return 0
+
+
+def _cmd_analyze(args: argparse.Namespace) -> int:
+    import json
+    import os
+
+    from .analysis import analyze
+    from .core.notes import Voice
+
+    voice = Voice.from_dict(json.load(open(args.voice_json, encoding="utf-8")))
+    result = analyze(voice, llm=not args.no_llm)
+    if args.output is None:
+        args.output = f"output/analyze-{os.path.basename(args.voice_json)}"
+    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
+    with open(args.output, "w", encoding="utf-8") as f:
+        json.dump(result.to_dict(), f, ensure_ascii=False, indent=2)
+    if result.error:
+        print(f"[降级] {result.error}")
+    print(f"key_candidates={result.key_candidates} suspicious={len(result.suspicious_notes)} -> {args.output}")
+    return 0
+
+
+def _cmd_render(args: argparse.Namespace) -> int:
+    import json
+
+    from .core.score import Score
+    from .render import render_score
+
+    score = Score.from_dict(json.load(open(args.score_json, encoding="utf-8")))
+    out = render_score(score, backend="fluidsynth", output_path=args.output, soundfont=args.soundfont)
+    print(f"回放 WAV：{out}")
+    return 0
+
+
+def _cmd_run(args: argparse.Namespace) -> int:
+    import datetime
+    import json
+
+    from .pipeline import run_closed_loop
+
+    if args.out_dir is None:
+        args.out_dir = f"output/m3-closed-loop/{datetime.date.today().isoformat()}"
+    summary = run_closed_loop(
+        args.wav,
+        out_dir=args.out_dir,
+        backend=args.backend,
+        soundfont=args.soundfont,
+        llm=not args.no_llm,
+    )
+    print("== M3 闭环完成 ==")
+    print(f"输入：{summary['input_audio']}")
+    print(f"音符数：{summary['note_count']}  backend={summary['backend']}  llm_used={summary['llm_used']}")
+    if summary["analysis_error"]:
+        print(f"[降级] LLM 分析：{summary['analysis_error']}")
+    for name, path in summary["artifacts"].items():
+        print(f"  {name}: {path}")
+    print(f"总耗时：{summary['total_elapsed_sec']}s（各阶段见 {summary['artifacts']['summary']}）")
+    return 0
+
+
+def _cmd_eval(args: argparse.Namespace) -> int:
+    import json
+
+    from .core.notes import Voice
+    from .eval import compare_to_reference, compute_self_contained
+
+    voice = Voice.from_dict(json.load(open(args.voice_json, encoding="utf-8")))
+    self_metrics = compute_self_contained(voice)
+    print("== 自足指标 ==")
+    print(json.dumps(self_metrics.to_dict(), ensure_ascii=False, indent=2))
+    if args.reference:
+        ref_metrics = compare_to_reference(voice, args.reference)
+        print("== 参考谱对比 ==")
+        print(
+            json.dumps(
+                {k: v for k, v in ref_metrics.to_dict().items() if k != "detail"},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="tsov", description="the shape of voice — AI 音乐创作 agent（原型阶段）")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("preprocess", help="m4a/mp3 → 16k 单声道 wav + noisereduce 降噪")
+    p.add_argument("inputs", nargs="+", help="输入音频文件")
+    p.add_argument("-o", "--output-dir", default="output/m1-preprocess", help="输出目录")
+    p.add_argument("--sr", type=int, default=16000, help="目标采样率")
+    p.add_argument("--noise-reduce-strength", type=float, default=0.8, help="降噪强度 0-1")
+    p.set_defaults(func=_cmd_preprocess)
+
+    p = sub.add_parser("backends", help="列出 DSP / 渲染后端")
+    p.set_defaults(func=_cmd_backends)
+
+    # 以下为接口占位（M2/M3 填充实现），调用给出明确提示，不静默失败
+    p = sub.add_parser("transcribe", help="哼唱 wav → Voice 声部对象（M2 双底座）")
+    p.add_argument("audio", help="输入 wav")
+    p.add_argument("--backend", default="crepe_notes", choices=("crepe_notes", "basic-pitch"))
+    p.add_argument("-o", "--output", default=None, help="输出 stage JSON 路径")
+    p.set_defaults(func=_cmd_transcribe)
+
+    p = sub.add_parser("analyze", help="Voice → 语义层数据集 → LLM 分析")
+    p.add_argument("voice_json", help="原始层 Voice 的 stage JSON")
+    p.add_argument("--no-llm", action="store_true", help="跳过 LLM 分析（只出规则语义层）")
+    p.add_argument("-o", "--output", default=None, help="输出 stage JSON 路径")
+    p.set_defaults(func=_cmd_analyze)
+
+    p = sub.add_parser("render", help="Score → 音频（fluidsynth 第一适配器）")
+    p.add_argument("score_json", help="Score 的 stage JSON")
+    p.add_argument("--soundfont", default=None, help=".sf2 路径；默认 vendor/soundfonts/FluidR3_GM.sf2")
+    p.add_argument("-o", "--output", default="out.wav")
+    p.set_defaults(func=_cmd_render)
+
+    p = sub.add_parser("run", help="M3 闭环：哼唱 wav → 转录 → 语义层 → LLM 分析 → MIDI → 回放 WAV")
+    p.add_argument("wav", help="输入哼唱 wav（16k 单声道，建议先 preprocess 降噪）")
+    p.add_argument("--backend", default="crepe_notes", choices=("crepe_notes", "basic-pitch"))
+    p.add_argument("--soundfont", default=None, help=".sf2 路径；默认 vendor/soundfonts/FluidR3_GM.sf2")
+    p.add_argument("--out-dir", default=None, help="输出目录；默认 output/m3-closed-loop/<日期>/")
+    p.add_argument("--no-llm", action="store_true", help="跳过 LLM 分析（离线跑通）")
+    p.set_defaults(func=_cmd_run)
+
+    p = sub.add_parser("eval", help="评估指标输出（M2：自足 + 参考谱对比）")
+    p.add_argument("voice_json", help="原始层 Voice 的 stage JSON")
+    p.add_argument("--reference", default=None, help="参考谱（MIDI/JSON 路径），可选")
+    p.set_defaults(func=_cmd_eval)
+
+    return parser
+
+
+def _raise_notimpl(cmd: str) -> int:
+    raise NotImplementedError(f"{cmd} 命令接口已建，实现随 M2/M3 填充")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return args.func(args)
+    except NotImplementedError as e:
+        print(f"[M2/M3 未实现] {e}", file=sys.stderr)
+        return 1
+    except Exception as e:  # noqa: BLE001 CLI 薄壳收口，避免裸 traceback
+        print(f"错误：{e}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

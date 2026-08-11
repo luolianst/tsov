@@ -1,0 +1,65 @@
+[project]
+name = "tsov"
+version = "0.1.0"
+description = "the shape of voice — AI 音乐创作 agent：哼唱 → 转录 → 分析 → MIDI → 回放（原型阶段，库 + CLI 薄壳）"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "noisereduce>=3.0",
+    "crepe>=0.0.11",
+    "torchcrepe>=0.0.23",
+    "basic-pitch>=0.4.0",
+    "madmom>=0.16.1",
+    "pretty_midi>=0.2.10",
+    "pyfluidsynth>=1.3.0",
+    "soundfile>=0.12",
+    "pytest>=8.0",
+]
+
+[project.scripts]
+tsov = "tsov.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# crepe 0.0.16 的 legacy setup.py 在构建时从 GitHub 下载 5 个模型权重（联网超时踩坑，M1）。
+# 解法：权重已预置在 vendor/crepe-0.0.16/crepe/*.h5（setup.py 见权重存在即跳过下载），
+# 走本地源码安装；pkg_resources 由旧版 setuptools 提供。
+[tool.uv.sources]
+crepe = { path = "vendor/crepe-0.0.16" }
+
+[tool.uv.extra-build-dependencies]
+crepe = ["setuptools<75"]
+madmom = ["Cython", "numpy"]
+
+# torchcrepe 经 resampy 引入 numba，uv 解析器选了 0.53.1（不支持 py3.12，llvmlite 0.36 无 cp312 wheel）。
+# 钉 numba>=0.60（有 py3.12 wheel），llvmlite 随之解析到兼容版。
+# setuptools<75 保 pkg_resources（madmom/crepe 运行时 import；新版 setuptools 已移除）。
+# numpy<2 兼容 madmom（np.float/np.int 别名在 numpy2 已移除）+ scipy<1.14（配合 numpy1.26，避免 np.long 问题）。
+[tool.uv]
+override-dependencies = ["numba>=0.60", "setuptools<75", "numpy<2", "scipy<1.14"]
+
+# basic-pitch 0.4.0 在 Windows+py3.12 时强制依赖 tensorflow<2.15.1（无 cp312 wheel）。
+# 实际 basic-pitch 自带 onnx/tflite 模型，无 TF 时自动回退 ONNX（__init__.py 优先级 TF→CoreML→TFLite→ONNX）。
+# 解法：重写其元数据，去掉 tensorflow、改用 onnxruntime（Windows）。
+[[tool.uv.dependency-metadata]]
+name = "basic-pitch"
+requires-dist = [
+    "librosa>=0.8.0",
+    "mir-eval>=0.6",
+    "numpy>=1.18",
+    "pretty-midi>=0.2.9",
+    "resampy<0.4.3,>=0.2.2",
+    "scikit-learn",
+    "scipy>=1.4.1",
+    "typing-extensions",
+    "onnxruntime; platform_system == 'Windows'",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["tsov"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
