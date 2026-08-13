@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 
 def _dsp_backends() -> list[str]:
@@ -187,6 +188,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reference", default=None, help="参考谱（MIDI/JSON 路径），可选")
     p.set_defaults(func=_cmd_eval)
 
+    p = sub.add_parser("style", help="M6 参考曲风格改谱闭环：MOSS 理解 → LLM 改谱")
+    p.add_argument("score_json", help="Score 的 stage JSON")
+    p.add_argument("reference_audio", help="参考曲音频（成品歌/参考曲目）")
+    p.add_argument("--extra", default="", help="补充要求（自然语言）")
+    p.add_argument("--url", default="http://127.0.0.1:8300", help="MOSS 服务地址")
+    p.add_argument("--no-llm", action="store_true", help="跳过 LLM 改谱")
+    p.add_argument("--out-dir", default=None, help="产物目录；默认 output/m6-style/<日期>/<序号>")
+    p.set_defaults(func=_cmd_style)
+
     p = sub.add_parser("understand", help="M5 参考曲目理解：MOSS-Music 服务化客户端")
     p.add_argument("audio", help="输入音频（成品歌/参考曲目）")
     p.add_argument("--url", default="http://127.0.0.1:8300", help="MOSS 服务地址")
@@ -230,6 +240,64 @@ def _cmd_edit(args: argparse.Namespace) -> int:
     if result.error:
         print(f"[降级/拒绝] {result.error}")
     print(f"-> {args.output}")
+    return 0
+
+
+def _cmd_style(args: argparse.Namespace) -> int:
+    import datetime
+    import json
+    import os
+
+    from .analysis.style import style_transfer
+    from .core.score import Score
+    from .midi.export import score_to_midi
+    from .render import render_midi
+
+    if args.out_dir is None:
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        args.out_dir = f"output/m6-style/{datetime.date.today().isoformat()}/{stamp}"
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    score = Score.from_dict(json.load(open(args.score_json, encoding="utf-8")))
+    result, request_info = style_transfer(
+        score, args.reference_audio, moss_url=args.url,
+        extra_feedback=args.extra, llm=not args.no_llm,
+    )
+
+    # 落盘
+    (out_dir / "style-request.json").write_text(
+        json.dumps(request_info, ensure_ascii=False, indent=2), encoding="utf-8")
+    (out_dir / "edit-score.json").write_text(
+        json.dumps(result.new_score.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+    (out_dir / "diff.txt").write_text(
+        "\n".join(["# style 改谱 diff", *["  " + d for d in result.diff_summary]]), encoding="utf-8")
+    if not args.no_llm:
+        score_to_midi(result.new_score, str(out_dir / "song.mid"))
+        render_midi(out_dir / "song.mid", out_dir / "song.wav")
+
+    u = request_info["understanding"]
+    (out_dir / "README.md").write_text(
+        "# M6 参考曲风格改谱\n\n"
+        f"- 输入 score：{args.score_json}\n"
+        f"- 参考曲：{args.reference_audio}\n"
+        f"- MOSS 理解：{u.get('description') or ''}（tags: {u.get('tags')}）\n"
+        f"- feedback：{request_info['feedback']}\n"
+        f"- 改动：{len(result.diff_summary)} 处（见 diff.txt）\n"
+        f"- error：{result.error or '无'}\n"
+        "- 产物：style-request.json / edit-score.json / diff.txt / song.mid / song.wav\n",
+        encoding="utf-8",
+    )
+
+    u = request_info["understanding"]
+    print("== M6 参考曲风格改谱 ==")
+    print(f"参考曲理解：{u.get('description') or ''}（tags: {u.get('tags')}）")
+    print("diff_summary:")
+    for line in result.diff_summary:
+        print("  " + line)
+    if result.error:
+        print(f"[降级/拒绝] {result.error}")
+    print(f"产物 -> {out_dir}")
     return 0
 
 
