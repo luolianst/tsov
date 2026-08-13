@@ -1,16 +1,22 @@
 """CLI 薄壳入口（ADR-0005 决策 1/6：库 + CLI 薄壳，同一套函数两种入口）。
 
-命令（M1 可用的部分）：
+命令：
 - `tsov preprocess <输入...> -o <输出目录>`：转码 16k wav + noisereduce 降噪
-- `tsov backends`：列出 DSP / 渲染后端
-其余命令（transcribe/analyze/render/midi）接口已建，实现随 M2/M3 填充，
-调了会给出明确的 NotImplemented 提示，不静默失败。
+- `tsov backends`：列出 DSP / 渲染后端（DSP 为注册表插件，M4 定案 game）
+- `tsov run <wav> [--backend game]`：M3 闭环（转录→语义层→LLM 分析→MIDI→回放）
+- `tsov transcribe/analyze/render/eval`：各阶段单跑
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+
+
+def _dsp_backends() -> list[str]:
+    from .dsp import list_backends
+
+    return list_backends()
 
 
 def _cmd_preprocess(args: argparse.Namespace) -> int:
@@ -29,10 +35,11 @@ def _cmd_preprocess(args: argparse.Namespace) -> int:
 
 
 def _cmd_backends(args: argparse.Namespace) -> int:
+    from .dsp import list_backends as list_dsp_backends
     from .dsp import transcribe as _t  # noqa: F401 仅确认模块可导入
     from .render import list_backends
 
-    print("DSP backends（M2 双验证）: crepe_notes, basic-pitch")
+    print("DSP backends（M4 插件注册表）:", ", ".join(list_dsp_backends()))
     print("Render backends:", list_backends())
     return 0
 
@@ -148,10 +155,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("backends", help="列出 DSP / 渲染后端")
     p.set_defaults(func=_cmd_backends)
 
-    # 以下为接口占位（M2/M3 填充实现），调用给出明确提示，不静默失败
-    p = sub.add_parser("transcribe", help="哼唱 wav → Voice 声部对象（M2 双底座）")
+    dsp_backends = list(_dsp_backends())
+    p = sub.add_parser("transcribe", help="音频 wav → Voice 声部对象（插件后端）")
     p.add_argument("audio", help="输入 wav")
-    p.add_argument("--backend", default="crepe_notes", choices=("crepe_notes", "basic-pitch"))
+    p.add_argument("--backend", default="game", choices=dsp_backends)
     p.add_argument("-o", "--output", default=None, help="输出 stage JSON 路径")
     p.set_defaults(func=_cmd_transcribe)
 
@@ -167,9 +174,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output", default="out.wav")
     p.set_defaults(func=_cmd_render)
 
-    p = sub.add_parser("run", help="M3 闭环：哼唱 wav → 转录 → 语义层 → LLM 分析 → MIDI → 回放 WAV")
+    p = sub.add_parser("run", help="M3 闭环：音频 wav → 转录 → 语义层 → LLM 分析 → MIDI → 回放 WAV")
     p.add_argument("wav", help="输入哼唱 wav（16k 单声道，建议先 preprocess 降噪）")
-    p.add_argument("--backend", default="crepe_notes", choices=("crepe_notes", "basic-pitch"))
+    p.add_argument("--backend", default="game", choices=dsp_backends)
     p.add_argument("--soundfont", default=None, help=".sf2 路径；默认 vendor/soundfonts/FluidR3_GM.sf2")
     p.add_argument("--out-dir", default=None, help="输出目录；默认 output/m3-closed-loop/<日期>/")
     p.add_argument("--no-llm", action="store_true", help="跳过 LLM 分析（离线跑通）")

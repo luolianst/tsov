@@ -51,7 +51,7 @@ def _write_json(path: Path, obj) -> Path:
 def run_closed_loop(
     audio_path: str | Path,
     out_dir: str | Path,
-    backend: str = "crepe_notes",
+    backend: str = "game",
     soundfont: str | None = None,
     llm: bool = True,
     title: str = "",

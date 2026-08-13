@@ -1,7 +1,9 @@
-"""M3 端到端冒烟测试（ADR-0005 测试第 3 层 smoke）：合成小星星 → 全管线 → 产物断言。
+"""M4 端到端冒烟测试（ADR-0005 测试第 3 层 smoke）：合成小星星 → 全管线 → 产物断言。
 
+- 转录后端 = game（openvpi/GAME，M4 唯一底座）：合成音频需带谐波（纯正弦 GAME 不认作人声，
+  实测 2/3 次谐波 → 14/14 音全对）
 - 离线可跑：LLM 分析 mock（不依赖外部 API）
-- 若 SoundFont 缺失（未下载 vendor/soundfonts/），回放断言跳过并提示（不误伤 CI）
+- 若 GAME 模型 / SoundFont 缺失（vendor 未下载），跳过并提示（不误伤 CI）
 """
 
 import json
@@ -24,9 +26,21 @@ GAP = 0.20
 SR = 16000
 
 
+def game_model_available() -> bool:
+    from tsov.dsp.backends.game import _default_model
+
+    try:
+        _default_model()
+        return True
+    except RuntimeError:
+        return False
+
+
 def synth_twinkle(path, sr=SR):
-    """纯 python 合成小星星：正弦 + 指数衰减包络，16k 单声道 PCM16 wav。"""
-    t = 0.0
+    """纯 python 合成"歌声化"小星星：基波 + 2/3 次谐波 + 指数衰减包络，16k 单声道 PCM16 wav。
+
+    纯正弦 GAME 不识别（无谐波不似人声），加谐波后 GAME 端到端转录 14/14 音全对。
+    """
     samples = []
     for midi in TWINKLE:
         hz = 440.0 * 2.0 ** ((midi - 69) / 12.0)
@@ -34,9 +48,15 @@ def synth_twinkle(path, sr=SR):
         n_gap = int(GAP * sr)
         tt = np.arange(n_on) / sr
         env = np.exp(-tt * 3.0)
-        samples.append(np.sin(2 * np.pi * hz * tt) * env)
+        sig = (
+            np.sin(2 * np.pi * hz * tt)
+            + 0.5 * np.sin(2 * np.pi * 2 * hz * tt)
+            + 0.25 * np.sin(2 * np.pi * 3 * hz * tt)
+        )
+        samples.append(sig * env)
         samples.append(np.zeros(n_gap))
     audio = np.concatenate(samples).astype(np.float32)
+    audio /= np.max(np.abs(audio)) + 1e-9
     sf.write(str(path), audio, sr, subtype="PCM_16")
     return path
 
@@ -46,12 +66,13 @@ def twinkle_wav(tmp_path_factory):
     return synth_twinkle(tmp_path_factory.mktemp("twinkle") / "twinkle.wav")
 
 
+@pytest.mark.skipif(not game_model_available(), reason="GAME 模型未下载（vendor/GAME/pretrained/*.pt），跳过 game 端到端")
 def test_synthetic_twinkle_pipeline_end_to_end(twinkle_wav, tmp_path):
     """合成小星星 → 全管线（转录/语义层/Score/MIDI/回放）→ 产物存在且非空。"""
     if default_soundfont() is None:
         pytest.skip("SoundFont 未下载（vendor/soundfonts/FluidR3_GM.sf2），跳过回放断言")
     out_dir = tmp_path / "run"
-    summary = run_closed_loop(twinkle_wav, out_dir=out_dir, backend="crepe_notes", llm=False)
+    summary = run_closed_loop(twinkle_wav, out_dir=out_dir, backend="game", llm=False)
 
     for key in ("voice", "semantic", "score", "midi", "wav"):
         p = Path(summary["artifacts"][key])
@@ -81,7 +102,7 @@ def test_analyze_llm_mocked(monkeypatch):
         bpm=120.0,
         segments=[],
         source_audio="mock.wav",
-        backend="crepe_notes",
+        backend="game",
     )
     fake = {
         "key_candidates": [{"key": "C major", "confidence": 0.8}],
@@ -115,7 +136,7 @@ def test_semantic_dataset_rules():
         bpm=120.0,
         segments=[],
         source_audio="mock.wav",
-        backend="crepe_notes",
+        backend="game",
     )
     s = build_semantic_dataset(voice)
     assert s["notes"][0]["note_name"] == "C4"
