@@ -187,6 +187,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reference", default=None, help="参考谱（MIDI/JSON 路径），可选")
     p.set_defaults(func=_cmd_eval)
 
+    p = sub.add_parser("understand", help="M5 参考曲目理解：MOSS-Music 服务化客户端")
+    p.add_argument("audio", help="输入音频（成品歌/参考曲目）")
+    p.add_argument("--url", default="http://127.0.0.1:8300", help="MOSS 服务地址")
+    p.set_defaults(func=_cmd_understand)
+
     p = sub.add_parser("edit", help="M4 改谱：人工标注 + LLM 修正 Score")
     p.add_argument("score_json", help="Score 的 stage JSON（如 stage-04-score.json）")
     p.add_argument("--feedback", default="", help="自然语言修改反馈（喂 LLM）")
@@ -225,6 +230,21 @@ def _cmd_edit(args: argparse.Namespace) -> int:
     if result.error:
         print(f"[降级/拒绝] {result.error}")
     print(f"-> {args.output}")
+    return 0
+
+
+def _cmd_understand(args: argparse.Namespace) -> int:
+    from .analysis.moss import understand
+
+    result = understand(args.audio, url=args.url)
+    print("== MOSS-Music 理解 ==")
+    print(f"描述：{result.get('description') or '（空）'}")
+    print(f"标签：{', '.join(result.get('tags') or []) or '（空）'}")
+    lyrics = result.get("lyrics") or ""
+    print(f"歌词：{lyrics[:120]}{'...' if len(lyrics) > 120 else ''}")
+    if result.get("error"):
+        print(f"[错误] {result['error']}")
+        return 2
     return 0
 
 
