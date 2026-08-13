@@ -15,6 +15,7 @@ from __future__ import annotations
 from ..core.notes import Note, Voice
 from .backends import get_backend, list_backends
 from .segment import split_into_segments
+from .tempo import estimate_bpm
 
 # 兼容旧引用：动态后端名列表（M2 时是硬编码元组，现从注册表取）
 BACKENDS = tuple(list_backends())
@@ -39,10 +40,11 @@ def transcribe(audio_path: str, backend: str = "game", **params) -> Voice:
 
 def _build_voice(audio_path: str, backend: str, notes: list[Note]) -> Voice:
     segments = split_into_segments(notes)
+    bpm, bpm_conf = estimate_bpm(notes)  # M7：BPM 从硬编码 120 改为 IOI 估计
     return Voice(
         notes=notes,
-        bpm=120.0,
-        bpm_confidence=0.0,
+        bpm=bpm,
+        bpm_confidence=bpm_conf,
         segments=segments,
         source_audio=audio_path,
         backend=backend,

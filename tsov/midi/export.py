@@ -1,7 +1,9 @@
-"""Score → MIDI 导出（pretty_midi）。M3 填充实现。
+"""Score → MIDI 导出（pretty_midi）。M3 填充，M7 多轨化。
 
-第一版单轨旋律：tempo 用 Voice.bpm，音符 start/end/pitch 直写，
-调性候选写入 MIDI key signature（第一个候选）。midi_to_score 反向留 M4。
+- 遍历 score.tracks 全部（每轨一个 pretty_midi.Instrument，GM program 映射）
+- 打击乐轨：is_drum=True（channel 9，kick=36/snare=38/hihat=42/crash=49）
+- tempo 用 score.tempo（Voice.bpm）；key signature 用第一个调性候选
+- 单轨场景行为不变。midi_to_score 反向留 M4。
 """
 
 from __future__ import annotations
@@ -12,6 +14,18 @@ from ..core.score import Score
 
 # 钢琴 program 号（GM：0 = Acoustic Grand Piano；ADR-0004 回放音色中性钢琴）
 PIANO_PROGRAM = 0
+
+# Instrument.program（字符串）→ GM program 号；drums 特殊（打击乐轨）
+GM_PROGRAMS = {
+    "piano": 0,
+    "bass": 33,      # Electric Bass (finger)
+    "strings": 48,   # String Ensemble 1
+    "pad": 89,       # Pad 2 (warm)
+    "drums": None,   # 打击乐：is_drum=True
+}
+
+# 打击乐 note（GM channel 9）
+DRUM_NOTES = {"kick": 36, "snare": 38, "hihat": 42, "crash": 49}
 
 # 琴键写法 → (key_number)。大调 = 主音半音序号；小调 = 12 + 主音半音序号
 _PITCH_CLASS = {
@@ -36,17 +50,30 @@ def parse_key_signature(key_str: str) -> int:
     return _PITCH_CLASS.get(lower.split()[0], 0)
 
 
+def program_number(program: str) -> int:
+    """Instrument.program 字符串 → GM program 号；未知/空 → piano。"""
+    if not program:
+        return PIANO_PROGRAM
+    p = GM_PROGRAMS.get(str(program).strip().lower())
+    return PIANO_PROGRAM if p is None else p
+
+
+def is_drum_track(program: str) -> bool:
+    return str(program).strip().lower() == "drums"
+
+
 def score_to_midi(score: Score, output_path: str) -> str:
     """Score → MIDI 文件，返回产物路径。
 
-    - 第一版单轨旋律：取 score.tracks[0]（若空则导出空 MIDI）
-    - tempo 用 score.tempo（来自 Voice.bpm）；key signature 用第一个调性候选
+    - 遍历全部 tracks：每轨一个 Instrument（GM program 映射；drums → is_drum=True）
+    - tempo 用 score.tempo；key signature 用第一个调性候选
     """
     midi = pretty_midi.PrettyMIDI(initial_tempo=float(score.tempo or 120.0))
 
-    if score.tracks:
-        track = score.tracks[0]
-        inst = pretty_midi.Instrument(program=PIANO_PROGRAM)
+    for track in score.tracks:
+        is_drum = is_drum_track(track.instrument.program)
+        prog = 0 if is_drum else program_number(track.instrument.program)
+        inst = pretty_midi.Instrument(program=prog, is_drum=is_drum)
         for n in sorted(track.notes, key=lambda n: n.start):
             velocity = max(1, min(127, int(round(float(n.velocity) * 127.0))))
             inst.notes.append(

@@ -5,6 +5,9 @@
 - `tsov backends`：列出 DSP / 渲染后端（DSP 为注册表插件，M4 定案 game）
 - `tsov run <wav> [--backend game]`：M3 闭环（转录→语义层→LLM 分析→MIDI→回放）
 - `tsov transcribe/analyze/render/eval`：各阶段单跑
+- `tsov arrange <score.json> [--key]`：自动配器（melody+harmony+bass+drums 多轨）
+- `tsov edit <score.json> [--feedback] [--annotations]`：对话式改谱（M4，人工标注+LLM）
+- `tsov understand <audio>` / `tsov style <score> <ref>`：MOSS 参考曲理解 / 风格改谱（M5/M6）
 """
 
 from __future__ import annotations
@@ -188,6 +191,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reference", default=None, help="参考谱（MIDI/JSON 路径），可选")
     p.set_defaults(func=_cmd_eval)
 
+    p = sub.add_parser("arrange", help="M7 自动配器：单轨旋律 → 多轨（melody+harmony+bass+drums）")
+    p.add_argument("score_json", help="Score 的 stage JSON")
+    p.add_argument("--style", default="pop", help="配器风格（第一版只支持 pop）")
+    p.add_argument("--key", default=None, help="调式（如 'D dorian'）；缺省取 score.key_candidates[0]")
+    p.add_argument("-o", "--output", default=None, help="输出多轨 score.json 路径")
+    p.set_defaults(func=_cmd_arrange)
+
     p = sub.add_parser("style", help="M6 参考曲风格改谱闭环：MOSS 理解 → LLM 改谱")
     p.add_argument("score_json", help="Score 的 stage JSON")
     p.add_argument("reference_audio", help="参考曲音频（成品歌/参考曲目）")
@@ -298,6 +308,29 @@ def _cmd_style(args: argparse.Namespace) -> int:
     if result.error:
         print(f"[降级/拒绝] {result.error}")
     print(f"产物 -> {out_dir}")
+    return 0
+
+
+def _cmd_arrange(args: argparse.Namespace) -> int:
+    import json
+    import os
+
+    from .arrange import arrange
+    from .core.score import Score
+
+    score = Score.from_dict(json.load(open(args.score_json, encoding="utf-8")))
+    out_score = arrange(score, style=args.style, key=args.key)
+    if args.output is None:
+        args.output = f"output/arrange-{os.path.basename(args.score_json)}"
+    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
+    with open(args.output, "w", encoding="utf-8") as f:
+        json.dump(out_score.to_dict(), f, ensure_ascii=False, indent=2)
+
+    print("== M7 自动配器 ==")
+    for t in out_score.tracks:
+        print(f"  {t.name:8s} program={t.instrument.program:8s} notes={len(t.notes)}")
+    print(f"tempo={out_score.tempo}  key={out_score.key_candidates[0].key if out_score.key_candidates else '-'}")
+    print(f"-> {args.output}")
     return 0
 
 
