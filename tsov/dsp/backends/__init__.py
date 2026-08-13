@@ -41,6 +41,7 @@ def list_backends() -> list[str]:
     return sorted(_REGISTRY)
 
 
-from . import game  # noqa: E402,F401  导入即注册
+from . import game  # noqa: E402,F401  导入即注册（成品歌底座）
+from . import rmvpe  # noqa: E402,F401  导入即注册（哼唱底座）
 
-__all__ = ["TranscribeBackend", "get_backend", "list_backends", "game"]
+__all__ = ["TranscribeBackend", "get_backend", "list_backends", "game", "rmvpe"]
