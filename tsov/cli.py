@@ -187,7 +187,45 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reference", default=None, help="参考谱（MIDI/JSON 路径），可选")
     p.set_defaults(func=_cmd_eval)
 
+    p = sub.add_parser("edit", help="M4 改谱：人工标注 + LLM 修正 Score")
+    p.add_argument("score_json", help="Score 的 stage JSON（如 stage-04-score.json）")
+    p.add_argument("--feedback", default="", help="自然语言修改反馈（喂 LLM）")
+    p.add_argument("--annotations", default=None, help="人工标注 JSON 文件（[{index, action, value}]）")
+    p.add_argument("--no-llm", action="store_true", help="跳过 LLM，只应用人工标注")
+    p.add_argument("-o", "--output", default=None, help="输出修正后 score.json 路径")
+    p.set_defaults(func=_cmd_edit)
+
     return parser
+
+
+def _cmd_edit(args: argparse.Namespace) -> int:
+    import json
+    import os
+
+    from .analysis.edit import edit_score
+    from .core.score import Score
+
+    score = Score.from_dict(json.load(open(args.score_json, encoding="utf-8")))
+    annotations = None
+    if args.annotations:
+        annotations = json.load(open(args.annotations, encoding="utf-8"))
+        if not isinstance(annotations, list):
+            raise ValueError("annotations 文件必须是 JSON 数组")
+    result = edit_score(score, feedback=args.feedback, annotations=annotations, llm=not args.no_llm)
+
+    if args.output is None:
+        args.output = f"output/edit-{os.path.basename(args.score_json)}"
+    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
+    with open(args.output, "w", encoding="utf-8") as f:
+        json.dump(result.new_score.to_dict(), f, ensure_ascii=False, indent=2)
+
+    print(f"== 编辑结果 ({len(result.new_score.tracks[0].notes)} 音) ==")
+    for line in result.diff_summary:
+        print("  " + line)
+    if result.error:
+        print(f"[降级/拒绝] {result.error}")
+    print(f"-> {args.output}")
+    return 0
 
 
 def _raise_notimpl(cmd: str) -> int:
