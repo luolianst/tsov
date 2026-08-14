@@ -160,7 +160,22 @@ class GameBackend(TranscribeBackend):
                 )
             )
         notes.sort(key=lambda n: n.start)
+        self._realize_velocity(notes)  # M8：GAME MIDI velocity 恒 64 → 时长代偿力度动态
         return notes
+
+    def _realize_velocity(self, notes: list[Note]) -> None:
+        """力度真实化（M8）：GAME 输出无真实力度/置信度（MIDI velocity 恒 64），
+        用音符时长作动态代偿——长音稍重、短音稍轻，映射到 [0.4, 0.9]，distinct ≥5 级。
+        """
+        durs = [n.end - n.start for n in notes]
+        if len(durs) < 3:
+            return
+        lo, hi = min(durs), max(durs)
+        span = (hi - lo) or 1.0
+        for n in notes:
+            v = 0.4 + 0.5 * (n.end - n.start - lo) / span
+            n.velocity = round(min(0.9, max(0.4, v)), 3)
+            n.confidence = n.velocity  # 置信度随力度代偿（无真实置信度）
 
     # ------------------------------------------------------------------
     # Voice 组装（复用 transcribe._build_voice，含乐句分割）

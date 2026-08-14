@@ -38,8 +38,28 @@ def transcribe(audio_path: str, backend: str = "game", **params) -> Voice:
 # Voice 组装（供各后端复用）
 # ---------------------------------------------------------------------------
 
+MIN_NOTE_S = 0.03  # 重叠裁剪后的残渣阈值：短于此删除（纯重叠残音）
+
+
+def _fix_overlaps(notes: list[Note]) -> list[Note]:
+    """音符重叠修复（M8）：单声部旋律不允许叠音。
+
+    - 相邻音符 note[i].end > note[i+1].start → 裁剪 note[i].end = note[i+1].start（保后音 onset）
+    - 裁剪后 end-start < MIN_NOTE_S 的微音删除（纯重叠残渣）
+    对 GAME（成品歌 81% 重叠）和 RMVPE（哼唱个别重叠）都无害。
+    """
+    if len(notes) < 2:
+        return notes
+    out = sorted(notes, key=lambda n: n.start)
+    for i in range(1, len(out)):
+        if out[i - 1].end > out[i].start:
+            out[i - 1].end = out[i].start
+    return [n for n in out if (n.end - n.start) >= MIN_NOTE_S]
+
+
 def _build_voice(audio_path: str, backend: str, notes: list[Note]) -> Voice:
-    segments = split_into_segments(notes)
+    segments = split_into_segments(notes)  # M8：先用原始间隔分割（重叠裁剪会清零 gap，破坏乐句）
+    notes = _fix_overlaps(notes)  # M8：重叠裁剪（保证落盘干净）
     bpm, bpm_conf = estimate_bpm(notes)  # M7：BPM 从硬编码 120 改为 IOI 估计
     return Voice(
         notes=notes,
