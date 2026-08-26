@@ -1,7 +1,7 @@
 # ADR-0010 · Reaper ReaScript Python 解释器：指向 uv base 完整 CPython
 
 - 日期：2026-08-14
-- 状态：已接受
+- 状态：已取代（2026-08-15，见 ADR-0011）
 - 决策人：洛怜 & Teto（VIS-REASCRIPT-TASK 调研结论）
 
 ## 背景

@@ -80,11 +80,23 @@ class RMVPEBackend(TranscribeBackend):
         if audio.shape[0] == 0:
             return self._build_voice(audio_path, [])
 
+        # RMVPE 的 mel 与时间轴按 16kHz 设计（hop=160 → 10ms/帧）；非 16k 输入重采样，否则时间轴错位
+        if sr != 16000:
+            try:
+                import librosa
+
+                audio = librosa.resample(audio, orig_sr=sr, target_sr=16000)
+                sr = 16000
+            except Exception as e:  # noqa: BLE001 librosa 缺失等 → 明确报错
+                raise ValueError(
+                    f"RMVPE 需要 16kHz 输入，当前 {sr}Hz 且重采样失败（{e}）。请先 tsov preprocess 转 16k。"
+                ) from e
+
         model = _load_model(str(model_path))
         f0, conf = model.infer_pitch(audio, thred=float(cfg["thred"]))
         f0 = f0.astype(np.float64)
         conf = conf.astype(np.float64)
-        time = np.arange(len(f0), dtype=np.float64) * (160.0 / 16000.0)  # hop=160 @16k → 10ms
+        time = np.arange(len(f0), dtype=np.float64) * (160.0 / float(sr))  # hop=160 @16k → 10ms
 
         frame_segs = _segment_frames(time, f0, conf, cfg)
         notes: list[Note] = []
@@ -147,7 +159,11 @@ def _segment_frames(time, pitch_hz, conf, cfg):
 
 def _split_on_drift(seg_start, seg_end, time, pitch_hz, cfg):
     """legato 连音漂移切分（M3-FIX）：平滑滑音帧间变化 < jump_st 不会触发跳变切分，
-    用"稳定音高水平"再细分。vibrato 不误切。"""
+    用"稳定音高水平"再细分。vibrato 不误切。
+
+    全程用段内局部索引（0..len(midi)），返回前再换算回全局索引——修复 M4 恢复时
+    "全局 cur_start + 局部 boundary" 的混用（第二次及以后的切分边界会整体后移）。
+    """
     step_s = time[1] - time[0] if len(time) > 1 else 0.01
     stable_win = int(cfg.get("drift_stable_window", 6))
     stable_range = float(cfg.get("drift_stable_range", 1.0))
@@ -158,7 +174,7 @@ def _split_on_drift(seg_start, seg_end, time, pitch_hz, cfg):
 
     midi = np.array([hz_to_midi(pitch_hz[i]) for i in range(seg_start, seg_end)])
     subs = []
-    cur_start = seg_start
+    cur_start = 0  # 段内局部索引（返回时统一加 seg_start 换回全局）
     anchor = float(np.median(midi[:stable_win]))
     recent = list(midi[:stable_win])
     confirm = 0
@@ -175,8 +191,8 @@ def _split_on_drift(seg_start, seg_end, time, pitch_hz, cfg):
                     boundary = trans_start if trans_start is not None else k - (stable_win - 1)
                 confirm += 1
                 if confirm >= hold_frames:
-                    subs.append((cur_start, cur_start + boundary))
-                    cur_start = cur_start + boundary
+                    subs.append((cur_start, boundary))
+                    cur_start = boundary
                     anchor = new_level
                     confirm = 0
                     trans_start = None
@@ -190,8 +206,8 @@ def _split_on_drift(seg_start, seg_end, time, pitch_hz, cfg):
             confirm = 0
             if trans_start is None and abs(m - anchor) >= drift_st:
                 trans_start = k - (stable_win - 1)
-    subs.append((cur_start, seg_end))
-    return subs
+    subs.append((cur_start, len(midi)))
+    return [(seg_start + a, seg_start + b) for a, b in subs]
 
 
 def _frame_group_to_note(t0, t1, group_hz, group_conf, cfg):

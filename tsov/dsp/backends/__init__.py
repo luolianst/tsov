@@ -3,7 +3,7 @@
 换转录模型 = 加一个文件（继承 TranscribeBackend，定义 name）+ import 触发自动注册。
 pipeline / CLI / eval 零改动，只认 get_backend / list_backends。
 
-M4 定案：game 为唯一后端（CREPE/basic-pitch 已弃用删除）。
+M4 定案：game（成品歌）+ rmvpe（哼唱）双后端（CREPE/basic-pitch 已弃用删除）。
 """
 
 from __future__ import annotations

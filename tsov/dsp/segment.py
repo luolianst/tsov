@@ -17,7 +17,6 @@ from ..core.notes import Note, Segment
 def split_into_segments(
     notes: list[Note],
     gap_ms: float | None = None,
-    min_seg_ms: float = 1500.0,
     **params,
 ) -> list[Segment]:
     """按规则+启发式把音符序列切成乐句/段落。

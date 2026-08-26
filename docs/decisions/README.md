@@ -42,4 +42,5 @@
 | ADR-0007 | M1 依赖安装路径：crepe 权重预置 / numpy<2 兼容 madmom / basic-pitch 走 onnxruntime | 已接受 | 2026-08-10 |
 | ADR-0008 | M3 闭环实现定案：语义层/LLM 分析/MIDI 导出/fluidsynth 回放（含 DLL 与 SoundFont 来源） | 已接受 | 2026-08-10 |
 | ADR-0009 | M4 编辑模式：人工标注 + LLM 改谱 + 程序校验（与评估模式并存） | 已接受 | 2026-08-13 |
-| ADR-0010 | Reaper ReaScript Python 解释器：指向 uv base 完整 CPython（venv 只补 DLL 实测失败） | 已接受 | 2026-08-14 |
+| ADR-0010 | Reaper ReaScript Python 解释器：指向 uv base 完整 CPython（venv 只补 DLL 实测失败） | 已取代 | 2026-08-14 |
+| ADR-0011 | Reaper ReaScript 交付物转向 Lua（Python 解释器方案卡死，退路启用） | 已接受 | 2026-08-15 |

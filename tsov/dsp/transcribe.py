@@ -1,10 +1,11 @@
 """DSP 转录入口：音频 wav → Voice（ADR-0004 两层 schema 的原始层）。
 
 M4 定案：转录层用注册表插件架构（`tsov/dsp/backends/`，照搬渲染层 backend.py）。
-- game（openvpi/GAME 歌声→MIDI 专用模型）为唯一后端——GAME 输出音乐化音符边界 +
+- game（openvpi/GAME 歌声→MIDI 专用模型）管成品歌——GAME 输出音乐化音符边界 +
   浮点音高（deviation_cents 有值），优于 CREPE 的帧级音高 + 规则分割。
+- rmvpe（RVC 歌声音高提取器）管哼唱——帧级 f0 + 规则音符化，八度稳定。
 - CREPE/basic-pitch 方案已弃用删除（M3-FIX 的八度校正/漂移切分随 crepe 代码移除，
-  不再需要规则补丁）。
+  漂移切分在 rmvpe 后端恢复）。
 
 接口不变：`transcribe(audio_path, backend, **params) -> Voice`，pipeline / CLI / eval 零改动。
 输出统一 ADR-0005 Voice / Note schema（字段冻结，不许改）。
@@ -24,7 +25,7 @@ BACKENDS = tuple(list_backends())
 def transcribe(audio_path: str, backend: str = "game", **params) -> Voice:
     """音频 → 结构化声部对象（原始层）。
 
-    - backend：注册表内任意转录后端名（当前：game）；默认 game
+    - backend：注册表内任意转录后端名（当前：game / rmvpe）；默认 game
     - 输出：Note（start/end/pitch_midi/pitch_hz/velocity/confidence/deviation_cents/is_ornament）
       + bpm / bpm_confidence / segments / source_audio / backend
     - **params 透传后端（game：model / timeout / batch_size / workdir 等）

@@ -2,7 +2,7 @@
 
 命令：
 - `tsov preprocess <输入...> -o <输出目录>`：转码 16k wav + noisereduce 降噪
-- `tsov backends`：列出 DSP / 渲染后端（DSP 为注册表插件，M4 定案 game）
+- `tsov backends`：列出 DSP / 渲染后端（DSP 为注册表插件：game 成品歌 + rmvpe 哼唱）
 - `tsov run <wav> [--backend game]`：M3 闭环（转录→语义层→LLM 分析→MIDI→回放）
 - `tsov transcribe/analyze/render/eval`：各阶段单跑
 - `tsov arrange <score.json> [--key]`：自动配器（melody+harmony+bass+drums 多轨）
@@ -244,7 +244,8 @@ def _cmd_edit(args: argparse.Namespace) -> int:
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(result.new_score.to_dict(), f, ensure_ascii=False, indent=2)
 
-    print(f"== 编辑结果 ({len(result.new_score.tracks[0].notes)} 音) ==")
+    note_count = len(result.new_score.tracks[0].notes) if result.new_score.tracks else 0
+    print(f"== 编辑结果 ({note_count} 音) ==")
     for line in result.diff_summary:
         print("  " + line)
     if result.error:
@@ -347,10 +348,6 @@ def _cmd_understand(args: argparse.Namespace) -> int:
         print(f"[错误] {result['error']}")
         return 2
     return 0
-
-
-def _raise_notimpl(cmd: str) -> int:
-    raise NotImplementedError(f"{cmd} 命令接口已建，实现随 M2/M3 填充")
 
 
 def main(argv: list[str] | None = None) -> int:

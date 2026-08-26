@@ -25,9 +25,9 @@ from ..core.score import KeyCandidate, Score
 from ..dsp.pitch import midi_to_hz
 from .dataset import midi_to_note_name
 
-LLM_ENDPOINT = os.environ.get("TSOV_LLM_ENDPOINT", "https://opencode.ai/zen/go/v1/chat/completions")
-LLM_MODEL = os.environ.get("TSOV_LLM_MODEL", "deepseek-v4-flash")
-LLM_TIMEOUT_SEC = 120.0
+from .llm import LLM_ENDPOINT, LLM_MODEL  # noqa: E402  与 analysis/llm.py 共用端点/模型（去重）
+
+LLM_TIMEOUT_SEC = 120.0  # 编辑调用超时（比分析层 240s 短）
 
 DIFF_CAP = 20  # diff_summary 最多列出的条目数
 
@@ -91,6 +91,8 @@ def apply_annotations(notes: list[Note], annotations: list[dict]) -> tuple[list[
             pm = int(value["pitch_midi"])
             if not (0 <= pm <= 127):
                 return notes, f"add 标注 pitch_midi 非法：{pm}"
+            if not (0 <= idx <= len(out)):
+                return notes, f"add 标注越界：index {idx}（允许 0..{len(out)}）"
             start = float(value.get("start", out[idx - 1].end if idx > 0 and out else 0.0))
             end = float(value.get("end", start + 0.3))
             if start >= end:
@@ -263,8 +265,6 @@ def build_diff_summary(orig: list[Note], new: list[Note]) -> list[str]:
             diffs.append(f"~ idx{j} 时长 {round(o.end - o.start, 2)}→{round(n.end - n.start, 2)}s")
         i += 1
         j += 1
-    if (len(orig) + len(new) - 2 * min(len(orig), len(new))) > 0 and len(diffs) >= DIFF_CAP:
-        pass
     # 超过 cap 的剩余差异汇总
     total_changes = _count_changes(orig, new)
     if len(diffs) >= DIFF_CAP and total_changes > DIFF_CAP:
