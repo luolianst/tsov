@@ -44,3 +44,5 @@
 | ADR-0009 | M4 编辑模式：人工标注 + LLM 改谱 + 程序校验（与评估模式并存） | 已接受 | 2026-08-13 |
 | ADR-0010 | Reaper ReaScript Python 解释器：指向 uv base 完整 CPython（venv 只补 DLL 实测失败） | 已取代 | 2026-08-14 |
 | ADR-0011 | Reaper ReaScript 交付物转向 Lua（Python 解释器方案卡死，退路启用） | 已接受 | 2026-08-15 |
+| ADR-0012 | agentloop 自建：纯 Python 移植 pi loop 结构 + dsh 机制（不依赖 harness） | 已接受 | 2026-08-15 |
+| ADR-0013 | 宿主框架自建毛胚：接口完整预留（音源/插件标准兼容） | 已接受 | 2026-08-15 |

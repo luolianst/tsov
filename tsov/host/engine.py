@@ -1,0 +1,85 @@
+"""HostEngine：宿主引擎（ADR-0013）。
+
+入口三件事：
+- `load(score)` / `load_score(score_path)` → HostSession（音轨图）
+- `render(session, out_wav)` → 离线渲染（同一 graph）
+- `play(session)` / `play_wav(wav)` → 实时回放（预渲染缓冲 + sounddevice）
+
+毛胚不实现 seek/loop 等完整 transport（接口字段先在 HostSession 层留，transport 深化随里程碑二）。
+对外控制协议（daw-cli 9 动词 + 标准错误码）后续接 agentloop 工具时再包一层。
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+
+from ..core.score import Score
+from ..render.fluidsynth_backend import default_soundfont
+from .device import mix_graph, play as play_buffer, write_wav
+from .session import HostSession
+
+
+class HostEngine:
+    """宿主引擎：Score ↔ 音轨图 ↔ 音频（离线/实时同一通路）。"""
+
+    def __init__(self, soundfont: str | None = None, samplerate: int = 44100):
+        self.soundfont = soundfont or default_soundfont()
+        if not self.soundfont:
+            raise RuntimeError("未找到 SoundFont——先下载到 vendor/soundfonts/FluidR3_GM.sf2（见 docs/ADR-0008）")
+        self.samplerate = int(samplerate)
+
+    # ------------------------------------------------------------------
+    # 加载
+    # ------------------------------------------------------------------
+
+    def load(self, score: Score) -> HostSession:
+        return HostSession.from_score(score, soundfont=self.soundfont, samplerate=self.samplerate)
+
+    def load_score(self, score_path) -> HostSession:
+        import json
+
+        score = Score.from_dict(json.loads(Path(score_path).read_text(encoding="utf-8")))
+        return self.load(score)
+
+    # ------------------------------------------------------------------
+    # 离线渲染
+    # ------------------------------------------------------------------
+
+    def render(self, session: HostSession, out_wav=None) -> np.ndarray:
+        """音轨图 → mono 音频；out_wav 给定时同时写 WAV。"""
+        audio = mix_graph(session, samplerate=self.samplerate)
+        if out_wav:
+            write_wav(audio, out_wav, samplerate=self.samplerate)
+        return audio
+
+    def render_score(self, score_path, out_wav) -> str:
+        """Score JSON → WAV（一步式，agent 工具/CLI 常用）。"""
+        session = self.load_score(score_path)
+        try:
+            self.render(session, out_wav=out_wav)
+        finally:
+            session.close()
+        return str(out_wav)
+
+    # ------------------------------------------------------------------
+    # 实时回放
+    # ------------------------------------------------------------------
+
+    def play(self, session: HostSession, blocking: bool = True) -> None:
+        audio = mix_graph(session, samplerate=self.samplerate)
+        play_buffer(audio, samplerate=self.samplerate, blocking=blocking)
+
+    def play_score(self, score_path, blocking: bool = True) -> None:
+        session = self.load_score(score_path)
+        try:
+            self.play(session, blocking=blocking)
+        finally:
+            session.close()
+
+    def play_wav(self, wav_path, blocking: bool = True) -> None:
+        import soundfile as sf
+
+        audio, sr = sf.read(str(wav_path), dtype="float32")
+        play_buffer(audio, samplerate=sr, blocking=blocking)

@@ -8,6 +8,8 @@
 - `tsov arrange <score.json> [--key]`：自动配器（melody+harmony+bass+drums 多轨）
 - `tsov edit <score.json> [--feedback] [--annotations]`：对话式改谱（M4，人工标注+LLM）
 - `tsov understand <audio>` / `tsov style <score> <ref>`：MOSS 参考曲理解 / 风格改谱（M5/M6）
+- `tsov agent run <task>`：agentloop 独立最小闭环（ADR-0012，不依赖 dsh/opencode）
+- `tsov host render/play <score.json>`：宿主框架渲染/回放（ADR-0013）
 """
 
 from __future__ import annotations
@@ -220,6 +222,28 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output", default=None, help="输出修正后 score.json 路径")
     p.set_defaults(func=_cmd_edit)
 
+    p = sub.add_parser("agent", help="agentloop 独立最小闭环（ADR-0012，不依赖 dsh/opencode）")
+    agent_sub = p.add_subparsers(dest="agent_cmd", required=True)
+    p2 = agent_sub.add_parser("run", help="一次会话跑任务：工具调用循环 → 最终回答 → 会话 JSONL 落盘")
+    p2.add_argument("task", help="任务描述（自然语言，如 '读 …json 改成 D 多利亚调式并渲染回放'）")
+    p2.add_argument("--max-turns", type=int, default=12, help="最大工具循环轮数")
+    p2.add_argument("--model", default=None, help="LLM 模型（缺省 TSOV_LLM_MODEL）")
+    p2.add_argument("--session-dir", default="output/agent-sessions", help="会话 JSONL 目录")
+    p2.set_defaults(func=_cmd_agent_run)
+
+    p = sub.add_parser("host", help="宿主框架（ADR-0013）：Score → 离线渲染 / 实时回放（同一 graph）")
+    host_sub = p.add_subparsers(dest="host_cmd", required=True)
+    p3 = host_sub.add_parser("render", help="离线渲染：Score JSON → WAV（HostEngine，SF2 音源）")
+    p3.add_argument("score_json", help="Score 的 stage JSON")
+    p3.add_argument("-o", "--output", default="output/host-render.wav", help="输出 wav 路径")
+    p3.set_defaults(func=_cmd_host_render)
+    p4 = host_sub.add_parser("play", help="实时回放 Score（预渲染缓冲 + sounddevice，阻塞到播完）")
+    p4.add_argument("score_json")
+    p4.set_defaults(func=_cmd_host_play)
+    p5 = host_sub.add_parser("play-file", help="播放已有 WAV")
+    p5.add_argument("wav")
+    p5.set_defaults(func=_cmd_host_play_file)
+
     return parser
 
 
@@ -347,6 +371,45 @@ def _cmd_understand(args: argparse.Namespace) -> int:
     if result.get("error"):
         print(f"[错误] {result['error']}")
         return 2
+    return 0
+
+
+def _cmd_agent_run(args: argparse.Namespace) -> int:
+    from .agent import AgentLoop
+
+    loop = AgentLoop(max_turns=args.max_turns, session_dir=args.session_dir, model=args.model)
+    result = loop.run(args.task)
+    print("== agent 任务 ==")
+    for note in result.notes:
+        print(f"  [工具观测] {note}")
+    print(f"轮数={result.turns} 工具调用={result.tool_calls_made} 会话={result.session_path}")
+    print("== 最终回答 ==")
+    print(result.answer)
+    return 0
+
+
+def _cmd_host_render(args: argparse.Namespace) -> int:
+    from .host import HostEngine
+
+    engine = HostEngine()
+    wav = engine.render_score(args.score_json, args.output)
+    print(f"渲染完成：{wav}（{engine.samplerate}Hz，HostEngine/SF2 音源）")
+    return 0
+
+
+def _cmd_host_play(args: argparse.Namespace) -> int:
+    from .host import HostEngine
+
+    HostEngine().play_score(args.score_json)
+    print("宿主回放完毕")
+    return 0
+
+
+def _cmd_host_play_file(args: argparse.Namespace) -> int:
+    from .host import HostEngine
+
+    HostEngine().play_wav(args.wav)
+    print("宿主回放完毕")
     return 0
 
 
