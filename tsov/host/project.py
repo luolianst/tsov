@@ -1,0 +1,196 @@
+"""工程（M-V1，ADR-0015）：Score 真相 + 快照栈 undo/redo + git 版本 + 工程摘要。
+
+- 工程根 `output/<name>/`：`score.json` 是真相；git 管版本（Score JSON + MIDI 入库，WAV 不入库）
+- undo/redo = 批级快照栈（深拷贝 Score，原型规模够用，不写命令逆运算）
+- 每轮 LLM 修改 = 一个 EditBatch = 一个 git commit（message = 标签/任务 + diff 摘要）
+- summary() = 工程摘要（LLM 上下文节流，docs/04 §四；供 agent 工具与 Web UI 共用）
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+import subprocess
+from pathlib import Path
+
+from ..analysis.dataset import midi_to_note_name
+from ..core.score import Score
+from .command import EditBatch
+from .diff import diff_notes
+
+SUMMARY_NOTE_CAP = 80  # 摘要里每轨最多列出的音符数
+
+
+class Project:
+    """一个音乐工程：Score + 历史 + git。"""
+
+    def __init__(self, score: Score, root: Path, name: str = "untitled"):
+        self.score = score
+        self.root = Path(root)
+        self.name = name
+        self._undo: list[Score] = []
+        self._redo: list[Score] = []
+        self.root.mkdir(parents=True, exist_ok=True)
+        self._ensure_git()
+        if not (self.root / "score.json").exists():
+            self.save()
+        if not self.log(1):
+            # 基线提交：任何时刻都能 rollback 回初始状态
+            self.commit(f"init: {name}")
+
+    # ------------------------------------------------------------------
+    # 载入/落盘
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def create(cls, name: str, score: Score, parent: str | Path = "output") -> "Project":
+        """新建工程：output/<name>/（git init + 初始 score.json 落盘）。"""
+        return cls(score=score, root=Path(parent) / name, name=name)
+
+    @classmethod
+    def open(cls, root: str | Path) -> "Project":
+        """打开已有工程目录（读 score.json）。"""
+        root = Path(root)
+        score = Score.from_dict(json.loads((root / "score.json").read_text(encoding="utf-8")))
+        return cls(score=score, root=root, name=root.name)
+
+    def save(self) -> Path:
+        path = self.root / "score.json"
+        path.write_text(json.dumps(self.score.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+        return path
+
+    # ------------------------------------------------------------------
+    # 编辑事务 + 历史
+    # ------------------------------------------------------------------
+
+    def apply_batch(self, batch: EditBatch, commit_message: str | None = None) -> dict:
+        """应用一批编辑命令（事务）→ 结果 dict（diff/错误/commit 号）。
+
+        - 全部命令被拒绝时：返回 {ok: False, applied: 0, errors}，工程不变
+        - 部分应用：合法命令生效并落盘，errors 列出被拒命令
+        """
+        new_score, result = batch.apply(self.score)
+        if result.applied == 0:
+            return {
+                "ok": False,
+                "applied": 0,
+                "errors": result.errors,
+                "diff": {"added": [], "removed": [], "changed": [], "summary": "无改动", "total": 0},
+                "commit": None,
+            }
+
+        old_notes = self.score.tracks[0].notes if self.score.tracks else []
+        new_notes = new_score.tracks[0].notes if new_score.tracks else []
+        note_diff = diff_notes(old_notes, new_notes)
+
+        self._undo.append(self.score)
+        self._redo.clear()
+        self.score = new_score
+        self.save()
+
+        message = commit_message or batch.label or "编辑"
+        commit_hash = self.commit(f"{message} [{note_diff.summary()}]")
+
+        return {
+            "ok": result.ok,
+            "applied": result.applied,
+            "errors": result.errors,
+            "diff": note_diff.to_dict(),
+            "commit": commit_hash,
+        }
+
+    def undo(self) -> bool:
+        if not self._undo:
+            return False
+        self._redo.append(self.score)
+        self.score = self._undo.pop()
+        self.save()
+        return True
+
+    def redo(self) -> bool:
+        if not self._redo:
+            return False
+        self._undo.append(self.score)
+        self.score = self._redo.pop()
+        self.save()
+        return True
+
+    # ------------------------------------------------------------------
+    # git 版本
+    # ------------------------------------------------------------------
+
+    def _git(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(self.root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+    def _ensure_git(self) -> None:
+        if not (self.root / ".git").exists():
+            self._git("init", "-q")
+        gitignore = self.root / ".gitignore"
+        if not gitignore.exists():
+            gitignore.write_text("# 音频产物不入库（工程版本只存 Score JSON + MIDI）\n*.wav\n*.mp3\n*.flac\n*.m4a\n", encoding="utf-8")
+
+    def commit(self, message: str) -> str | None:
+        """git add -A + commit；返回短 hash（失败返回 None）。"""
+        if not (self.root / ".git").exists():
+            return None
+        self._git("add", "-A")
+        proc = self._git("commit", "-m", message)
+        if proc.returncode == 0:
+            short = self._git("rev-parse", "--short", "HEAD")
+            return short.stdout.strip() or None
+        # 无改动可提交（commit 返回非零）不算失败
+        return None
+
+    def log(self, n: int = 20) -> list[str]:
+        if not (self.root / ".git").exists():
+            return []
+        proc = self._git("log", "--oneline", f"-{int(n)}")
+        return [ln for ln in proc.stdout.strip().splitlines() if ln]
+
+    def rollback(self, rev: str = "HEAD~1") -> bool:
+        """回滚到指定版本（只动 score.json）：当前状态压入 redo，检出目标版本并重载。"""
+        if not (self.root / ".git").exists() or not self.log():
+            return False
+        self._redo.append(copy.deepcopy(self.score))
+        proc = self._git("checkout", rev, "--", "score.json")
+        if proc.returncode != 0:
+            self._redo.pop()
+            return False
+        try:
+            self.score = Score.from_dict(json.loads((self.root / "score.json").read_text(encoding="utf-8")))
+        except Exception:  # noqa: BLE001 检出损坏 → 还原
+            self._git("checkout", "HEAD", "--", "score.json")
+            self.score = self._redo.pop()
+            return False
+        self._undo.append(copy.deepcopy(self.score))  # 回滚也是一步历史
+        return True
+
+    # ------------------------------------------------------------------
+    # 工程摘要（LLM 上下文节流）
+    # ------------------------------------------------------------------
+
+    def summary(self, cap: int = SUMMARY_NOTE_CAP) -> str:
+        score = self.score
+        lines = [
+            f"project={self.name} title={score.title or '(无标题)'} tempo={score.tempo} "
+            f"keys={[k.key for k in score.key_candidates]} tracks={len(score.tracks)}"
+        ]
+        for ti, track in enumerate(score.tracks):
+            lines.append(f"track[{ti}] name={track.name!r} program={track.instrument.program!r} "
+                         f"volume={track.instrument.volume} notes={len(track.notes)}")
+            for i, n in enumerate(track.notes):
+                if i >= cap:
+                    lines.append(f"  …共 {len(track.notes)} 音，其余省略")
+                    break
+                lines.append(
+                    f"  [{i}] {midi_to_note_name(n.pitch_midi)}({int(n.pitch_midi)}) "
+                    f"start={n.start:.3f} end={n.end:.3f} vel={n.velocity:.2f}"
+                )
+        return "\n".join(lines)

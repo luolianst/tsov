@@ -414,6 +414,15 @@ def _cmd_host_play_file(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from .env import load_env
+
+    load_env()  # 项目根 .env（gitignored，密钥走这里，不入库）
+    # GBK 控制台防崩：LLM 回答里可能有 ✅/音符等非 GBK 字符（handoff 坑 82），打印一律降级替换
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:  # noqa: BLE001 非 tty/已关闭等
+            pass
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

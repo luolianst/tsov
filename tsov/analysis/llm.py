@@ -51,7 +51,13 @@ def _dsh_credential(name: str) -> str:
 
 def resolve_api_key(**params) -> str:
     """LLM key 解析链：调用参数 > TSOV_LLM_API_KEY > DEEPSEEK_API_KEY > OPENCODE_GO_API_KEY（旧网关兜底）
-    > dsh 凭据库（$DSH_HOME/.credentials.yaml 的 DEEPSEEK_API_KEY/TSOV_LLM_API_KEY）。"""
+    > dsh 凭据库（$DSH_HOME/.credentials.yaml 的 DEEPSEEK_API_KEY/TSOV_LLM_API_KEY）。
+
+    环境变量在读取前先补一轮 .env（项目根，gitignored）。
+    """
+    from ..env import load_env
+
+    load_env()
     return (
         params.get("api_key")
         or os.environ.get("TSOV_LLM_API_KEY")
