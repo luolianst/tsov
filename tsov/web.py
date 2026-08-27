@@ -16,6 +16,7 @@ tsov 库能力零重复（Project/EditBatch/diff/HostEngine/AgentLoop 积木直�
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import threading
 import uuid
@@ -67,6 +68,19 @@ class RenderIn(BaseModel):
 class ChatIn(BaseModel):
     project: str
     message: str
+
+
+class ChatResetIn(BaseModel):
+    project: str
+
+
+class TitleIn(BaseModel):
+    title: str
+
+
+class SessionLoadIn(BaseModel):
+    project: str
+    name: str
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +138,8 @@ class WebState:
         self.projects_lock = threading.Lock()
         self.agent_lock = threading.Lock()  # 一次只跑一个 agent 会话
         self.play_lock = threading.Lock()  # 一次只跑一个后端播放
+        self.agent_stop = threading.Event()  # 用户请求停止当前 agent 会话
+        self.chat_sessions: dict[str, dict] = {}  # 工程 → {session_id}（多轮续接同一 JSONL）
         self.bus = EventBus()
         self._engine = None  # HostEngine 懒加载（soundfont 依赖）
 
@@ -210,13 +226,138 @@ def _score_from_dict(data: dict) -> Score:
 
 
 # ---------------------------------------------------------------------------
-# agent 会话（后台线程；事件推 SSE；编辑结果采用进工程）
+# agent 会话（后台线程；事件推 SSE；编辑结果采用进工程；多轮续接 + 停止 + 流式）
 # ---------------------------------------------------------------------------
+
+
+class _StopRequested(Exception):
+    """用户请求停止（agent_stop 置位时流式读取中断抛出）。"""
+
+
+def _load_session_messages(jsonl_path: Path) -> list[dict]:
+    """读会话 JSONL → wire 消息列表（role/content/tool_calls/tool_call_id）。"""
+    msgs: list[dict] = []
+    if jsonl_path.is_file():
+        for line in jsonl_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            msgs.append({k: entry[k] for k in ("role", "content", "tool_calls", "tool_call_id") if k in entry})
+    return msgs
+
+
+def _stream_chat(bus: EventBus, project: str, session_id: str, messages: list[dict],
+                 tools: list[dict] | None, stop_event: threading.Event) -> dict:
+    """流式 LLM 调用（OpenAI 兼容 SSE）：思考/正文增量推 agent_delta 事件。
+
+    返回与 tsov.agent.llm.chat 同构的 {content, tool_calls, message}；
+    连接/协议失败且尚无增量时回退非流式（行为与 AgentLoop 一致）。
+    """
+    import requests
+
+    from .agent.llm import _json_decision
+    from .analysis.llm import LLM_ENDPOINT, LLM_MODEL, resolve_api_key
+
+    api_key = resolve_api_key()
+    if not api_key:
+        raise RuntimeError("缺少 LLM key（TSOV_LLM_API_KEY / DEEPSEEK_API_KEY，agent 会话无法启动）")
+
+    payload = {"model": LLM_MODEL, "messages": messages, "temperature": 0.2, "stream": True}
+    if tools:
+        payload["tools"] = tools
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    deltas = {"n": 0}
+    try:
+        resp = requests.post(LLM_ENDPOINT, json=payload, headers=headers, timeout=(10, 300), stream=True)
+        resp.raise_for_status()
+        content_acc: list[str] = []
+        tool_acc: dict[int, dict] = {}
+        for raw in resp.iter_lines(decode_unicode=True):
+            if stop_event.is_set():
+                raise _StopRequested()
+            if not raw or not raw.startswith("data:"):
+                continue
+            data = raw[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                obj = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            choices = obj.get("choices") or []
+            if not choices:
+                continue
+            delta = choices[0].get("delta") or {}
+            rc = delta.get("reasoning_content")
+            if rc:
+                deltas["n"] += 1
+                bus.publish(project, "agent_delta", {"session_id": session_id, "kind": "thinking", "text": rc})
+            piece = delta.get("content")
+            if piece:
+                deltas["n"] += 1
+                content_acc.append(piece)
+                bus.publish(project, "agent_delta", {"session_id": session_id, "kind": "content", "text": piece})
+            for tcd in delta.get("tool_calls") or []:
+                idx = int(tcd.get("index", 0))
+                slot = tool_acc.setdefault(idx, {"id": "", "name": "", "args": ""})
+                if tcd.get("id"):
+                    slot["id"] = tcd["id"]
+                fn = tcd.get("function") or {}
+                if fn.get("name"):
+                    slot["name"] += fn["name"]
+                if fn.get("arguments"):
+                    slot["args"] += fn["arguments"]
+    except _StopRequested:
+        raise
+    except Exception as e:  # noqa: BLE001 连接/协议失败
+        if deltas["n"] == 0:
+            from .agent.llm import chat as llm_chat
+
+            return llm_chat(messages, tools=tools)
+        raise RuntimeError(f"流式 LLM 中途失败：{type(e).__name__}: {e}") from e
+
+    content = "".join(content_acc)
+    tool_calls: list[dict] = []
+    for idx in sorted(tool_acc):
+        slot = tool_acc[idx]
+        if not slot["name"]:
+            continue
+        try:
+            args = json.loads(slot["args"] or "{}")
+        except json.JSONDecodeError:
+            args = {}
+        tool_calls.append({"id": slot["id"] or f"call-{idx + 1}", "name": slot["name"],
+                           "arguments": args if isinstance(args, dict) else {}})
+
+    if not content and not tool_calls:
+        from .agent.llm import chat as llm_chat
+
+        return llm_chat(messages, tools=tools)  # 空流（思考型模型正文可能为空）→ 非流式兜底
+
+    if not tool_calls:
+        decision = _json_decision(content)
+        if decision.get("tool"):
+            name = str(decision["tool"])
+            args = decision.get("arguments") if isinstance(decision.get("arguments"), dict) else {}
+            tool_calls.append({"id": "json-1", "name": name, "arguments": args})
+
+    wire = [{"id": tc["id"], "type": "function",
+             "function": {"name": tc["name"], "arguments": json.dumps(tc["arguments"], ensure_ascii=False)}}
+            for tc in tool_calls]
+    message: dict = {"role": "assistant", "content": content}
+    if wire:
+        message["tool_calls"] = wire
+    return {"content": content, "tool_calls": tool_calls, "message": message}
 
 
 def _run_agent_session(state: WebState, project_name: str, task: str, session_id: str) -> None:
     """一次对话框 agent 会话（后台线程跑；agent_lock 由调用方获取，本函数 finally 释放）。"""
-    from .agent import AgentSession, build_default_registry, chat as llm_chat
+    from .agent import AgentSession, build_default_registry
     from .agent.prompt import SYSTEM_PROMPT
 
     bus = state.bus
@@ -243,18 +384,34 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
         f"- 完成后用中文一句话汇报改动要点（含调式与音阶名）"
     )
 
+    jsonl_path = Path(AGENT_SESSION_DIR) / f"{session_id}.jsonl"
+    session = AgentSession(task=task, session_dir=AGENT_SESSION_DIR, session_id=session_id)
+    if jsonl_path.is_file():
+        session.messages = _load_session_messages(jsonl_path)  # 续接：同一 JSONL 多轮上下文
+    else:
+        session.add("system", SYSTEM_PROMPT)
+
+    # 首轮带工程上下文；后续轮只发用户消息（上下文已在会话历史里）
+    if any(m.get("role") == "user" for m in session.messages):
+        user_msg = task
+    else:
+        user_msg = brief
+    session.add("user", user_msg)
+
     tool_count = 0
     turns = 0
+    stopped = False
     try:
-        session = AgentSession(task=task, session_dir=AGENT_SESSION_DIR, session_id=session_id)
-        session.add("system", SYSTEM_PROMPT)
-        session.add("user", brief)
         registry = build_default_registry()
 
         answer = ""
         for turn in range(1, AGENT_MAX_TURNS + 1):
             turns = turn
-            out = llm_chat(session.api_messages, tools=registry.openai_tools())
+            if state.agent_stop.is_set():
+                stopped = True
+                break
+            out = _stream_chat(bus, project_name, session_id, session.api_messages,
+                               registry.openai_tools(), state.agent_stop)
             bus.publish(
                 project_name,
                 "agent_turn",
@@ -271,6 +428,9 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
                 break
             session.add("assistant", out["content"], tool_calls=out["message"].get("tool_calls"))
             for tc in out["tool_calls"]:
+                if state.agent_stop.is_set():
+                    stopped = True
+                    break
                 try:
                     observation = registry.get(tc["name"]).handler(tc["arguments"])
                 except Exception as e:  # noqa: BLE001 工具出错也作为观测回喂（与 AgentLoop 同策略）
@@ -284,6 +444,8 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
                 session.add("tool", observation, tool_call_id=tc["id"])
         else:
             answer = f"已达最大轮次（{AGENT_MAX_TURNS}）未形成最终回答；会话已落盘。"
+        if stopped:
+            answer = "会话已被用户停止（已落盘的修改保留，未完成的轮次中断）。"
 
         # 采用编辑结果：agent-edited-score.json 存在且与现谱有差异 → 一个 commit + 三色 diff
         adopted: dict | None = None
@@ -312,7 +474,15 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
                 "turns": turns,
                 "tool_calls_made": tool_count,
                 "adopted": bool(adopted),
+                "stopped": stopped,
             },
+        )
+    except _StopRequested:
+        bus.publish(
+            project_name,
+            "agent_answer",
+            {"session_id": session_id, "content": "会话已被用户停止（流式中断）。",
+             "turns": turns, "tool_calls_made": tool_count, "adopted": False, "stopped": True},
         )
     except Exception as e:  # noqa: BLE001 LLM/致命错误 → agent_error 事件（锁在 finally 释放）
         bus.publish(project_name, "agent_error", {"session_id": session_id, "error": f"{type(e).__name__}: {e}"})
@@ -521,7 +691,12 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
         state.get_project(body.project)  # 工程存在性前置校验（404）
         if not state.agent_lock.acquire(blocking=False):
             raise HTTPException(409, "已有 agent 会话在跑（一次只跑一个）")
-        session_id = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
+        conv = state.chat_sessions.get(body.project)
+        session_id = (
+            conv["session_id"] if conv else f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
+        )
+        state.chat_sessions[body.project] = {"session_id": session_id}
+        state.agent_stop.clear()
         try:
             threading.Thread(
                 target=_run_agent_session,
@@ -536,6 +711,70 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
             "session_id": session_id,
             "session_path": str(Path(AGENT_SESSION_DIR) / f"{session_id}.jsonl"),
         }
+
+    # ---------------- 会话控制 / 工程 显示名 / 会话导入（M-V2.1 增补） ----------------
+
+    @app.post("/api/chat/stop")
+    def chat_stop() -> dict:
+        """请求停止当前 agent 会话（协作式：轮间/工具前/流式 chunk 检查）。"""
+        state = st()
+        busy = state.agent_lock.locked()
+        if busy:
+            state.agent_stop.set()
+        return {"ok": True, "stopping": busy}
+
+    @app.post("/api/chat/reset")
+    def chat_reset(body: ChatResetIn) -> dict:
+        """结束当前对话线程：下一轮 /api/chat 起新 JSONL（历史文件保留）。"""
+        state = st()
+        state.get_project(body.project)
+        if state.agent_lock.locked():
+            raise HTTPException(409, "会话进行中，先停止再开新会话")
+        state.chat_sessions.pop(body.project, None)
+        return {"ok": True}
+
+    @app.post("/api/projects/{name}/title")
+    def set_title(name: str, body: TitleIn) -> dict:
+        """改工程显示名（score.title；目录不动）。走 apply_score = 一个 commit，可撤销。"""
+        proj = st().get_project(name)
+        title = body.title.strip()
+        if not title or len(title) > 80:
+            raise HTTPException(400, "标题为空或过长（≤80 字符）")
+        new_score = copy.deepcopy(proj.score)
+        new_score.title = title
+        result = proj.apply_score(new_score, f"改名：{title[:40]}")
+        st().bus.publish(name, "state_updated", project_state(proj))
+        return {"ok": True, "title": title, "commit": result.get("commit")}
+
+    @app.get("/api/sessions")
+    def list_sessions() -> dict:
+        """列出 agent 会话 JSONL（新→旧，最多 50 条），供导入回看/续接。"""
+        d = Path(AGENT_SESSION_DIR)
+        items: list[dict] = []
+        if d.is_dir():
+            for p in sorted(d.glob("*.jsonl"), key=lambda x: x.stat().st_mtime, reverse=True)[:50]:
+                st_ = p.stat()
+                items.append({
+                    "name": p.name,
+                    "size": st_.st_size,
+                    "mtime": datetime.fromtimestamp(st_.st_mtime).isoformat(timespec="seconds"),
+                })
+        return {"sessions": items}
+
+    @app.post("/api/sessions/load")
+    def load_session(body: SessionLoadIn) -> dict:
+        """导入历史会话：消息回放给前端 + 设为当前工程的续接会话（接着聊）。"""
+        state = st()
+        state.get_project(body.project)
+        if state.agent_lock.locked():
+            raise HTTPException(409, "会话进行中，先停止再导入")
+        fname = Path(body.name).name  # 只取 basename，防路径穿越
+        path = Path(AGENT_SESSION_DIR) / fname
+        if path.suffix != ".jsonl" or not path.is_file():
+            raise HTTPException(404, f"会话文件不存在：{fname!r}")
+        sid = fname[: -len(".jsonl")]
+        state.chat_sessions[body.project] = {"session_id": sid}
+        return {"ok": True, "session_id": sid, "messages": _load_session_messages(path)}
 
     # ---------------- 静态前端（最后挂载；/api 路由先注册，不受影响） ----------------
 

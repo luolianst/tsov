@@ -234,27 +234,7 @@ def test_chat_agent_round_trip(env, monkeypatch):
     proj_root = env["dir"] / name
     c = env["client"]
 
-    calls = {"n": 0}
-
-    def fake_chat(messages, tools=None, **params):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return {
-                "content": "",
-                "tool_calls": [{
-                    "id": "call-1",
-                    "name": "edit_score",
-                    "arguments": {
-                        "score_path": str(proj_root / "score.json"),
-                        "annotations": [{"index": 0, "action": "pitch", "value": 74}],
-                        "output": str(proj_root / "agent-edited-score.json"),
-                    },
-                }],
-                "message": {"role": "assistant", "content": "", "tool_calls": []},
-            }
-        return {"content": "已把第 0 个音改成 D5(74)。", "tool_calls": [], "message": {"role": "assistant", "content": "done"}}
-
-    monkeypatch.setattr(tsov.agent, "chat", fake_chat)
+    _install_fake_stream(monkeypatch, proj_root)
 
     r = c.post("/api/chat", json={"project": name, "message": "把第一个音改成 D5"})
     assert r.status_code == 200
@@ -316,3 +296,136 @@ def test_render_and_wav(env):
     r = c.get(f"/api/projects/{name}/wav")
     assert r.status_code == 200
     assert r.content[:4] == b"RIFF"
+
+
+# ---------------------------------------------------------------------------
+# M-V2.1：多轮续接 / 停止 / 工程改名 / 会话导入
+# ---------------------------------------------------------------------------
+
+
+def _install_fake_stream(monkeypatch, proj_root, seen_messages: list[int] | None = None):
+    """把 web._stream_chat 换成假实现（工具调用→回答；可记录每轮消息数）。
+
+    奇数调 = edit_score（annotations 纯程序路径，不触网）；偶数调 = 最终回答。
+    """
+    import tsov.web as web_mod
+
+    calls = {"n": 0}
+
+    def fake_stream(bus, project, session_id, messages, tools, stop_event):
+        calls["n"] += 1
+        if seen_messages is not None:
+            seen_messages.append(len(messages))
+        if calls["n"] % 2 == 0:
+            return {"content": "完成。", "tool_calls": [], "message": {"role": "assistant", "content": "done"}}
+        return {
+            "content": "",
+            "tool_calls": [{
+                "id": "call-1",
+                "name": "edit_score",
+                "arguments": {
+                    "score_path": str(proj_root / "score.json"),
+                    "annotations": [{"index": 0, "action": "pitch", "value": 74}],
+                    "output": str(proj_root / "agent-edited-score.json"),
+                },
+            }],
+            "message": {"role": "assistant", "content": "", "tool_calls": []},
+        }
+
+    monkeypatch.setattr(web_mod, "_stream_chat", fake_stream)
+    return calls
+
+
+def _wait_agent_done(env, name, timeout=10.0):
+    """等 agent 线程落 lock（轮询 chat 会话锁）。"""
+    import time
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not env["app"].state.tsov.agent_lock.locked():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_chat_multiturn_same_session(env, monkeypatch):
+    """同工程连续两次 /api/chat 续接同一 JSONL（session_id 不变，上下文增长）。"""
+    import time as _t
+
+    name = _make_project(env)
+    proj_root = env["dir"] / name
+    c = env["client"]
+    seen: list[int] = []
+    _install_fake_stream(monkeypatch, proj_root, seen_messages=seen)
+
+    r1 = c.post("/api/chat", json={"project": name, "message": "第一轮：改第一个音"}).json()
+    assert _wait_agent_done(env, name)
+    r2 = c.post("/api/chat", json={"project": name, "message": "第二轮：继续"}).json()
+    assert r2["session_id"] == r1["session_id"], "多轮应续接同一会话"
+    assert _wait_agent_done(env, name)
+
+    import json as _json
+    lines = (proj_root.parent.parent / "agent-sessions" / (r1["session_id"] + ".jsonl")).read_text(encoding="utf-8").splitlines()
+    assert len(lines) >= 6, "两次会话应追加到同一 JSONL"
+
+    # 上下文增长：第二轮首调看到的消息数 > 第一轮首调
+    assert seen[2] > seen[0], f"第二轮上下文应更长：{seen}"
+
+    # 新会话后 id 变化
+    assert c.post("/api/chat/reset", json={"project": name}).json()["ok"] is True
+    r3 = c.post("/api/chat", json={"project": name, "message": "第三轮"}).json()
+    assert r3["session_id"] != r1["session_id"]
+    assert _wait_agent_done(env, name)
+
+
+def test_chat_stop_endpoint(env):
+    name = _make_project(env)
+    state = env["app"].state.tsov
+    assert state.agent_lock.acquire(blocking=False) is True
+    try:
+        r = env["client"].post("/api/chat/stop").json()
+        assert r["stopping"] is True and r["ok"]
+        assert state.agent_stop.is_set()
+        state.agent_stop.clear()
+    finally:
+        state.agent_lock.release()
+    r = env["client"].post("/api/chat/stop").json()
+    assert r["stopping"] is False
+
+
+def test_project_title_rename(env):
+    name = _make_project(env)
+    c = env["client"]
+    r = c.post(f"/api/projects/{name}/title", json={"title": "新的标题"})
+    assert r.status_code == 200 and r.json()["ok"]
+    s = c.get(f"/api/projects/{name}/state").json()
+    assert s["score"]["title"] == "新的标题"
+    assert any("改名" in ln for ln in s["git_log"])
+    # undo 可回标题
+    assert c.post(f"/api/projects/{name}/undo").json()["ok"] is True
+    assert c.get(f"/api/projects/{name}/state").json()["score"]["title"] != "新的标题"
+
+
+def test_sessions_list_and_load(env, monkeypatch):
+    name = _make_project(env)
+    proj_root = env["dir"] / name
+    c = env["client"]
+
+    _install_fake_stream(monkeypatch, proj_root)
+    c.post("/api/chat", json={"project": name, "message": "说点什么"})
+    assert _wait_agent_done(env, name)
+
+    r = c.get("/api/sessions").json()
+    assert r["sessions"] and r["sessions"][0]["name"].endswith(".jsonl")
+    fname = r["sessions"][0]["name"]
+
+    r = c.post("/api/sessions/load", json={"project": name, "name": fname}).json()
+    assert r["ok"] and r["messages"], "导入应回放消息"
+    # 导出的会话成为当前续接对象：下次 chat 沿用其 session_id
+    r2 = c.post("/api/chat", json={"project": name, "message": "续一段"}).json()
+    assert r2["session_id"] == r["session_id"]
+    assert _wait_agent_done(env, name)
+
+    # 防穿越：非法名 404
+    r = c.post("/api/sessions/load", json={"project": name, "name": "../../.env"})
+    assert r.status_code == 404 or r.status_code == 400

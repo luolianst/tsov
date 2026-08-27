@@ -23,7 +23,7 @@ export const bus = {
 
 /* SSE 事件类型（docs/05 §三）：原样转发到本地总线 */
 const SSE_TYPES = [
-  'agent_turn', 'agent_tool', 'agent_answer', 'agent_error',
+  'agent_turn', 'agent_tool', 'agent_answer', 'agent_error', 'agent_delta',
   'state_updated', 'diff_applied', 'playback_start', 'playback_stop',
 ];
 

@@ -14,6 +14,7 @@
     <select id="project-select" title="选择工程"></select>
     <button id="btn-refresh-projects" title="刷新工程列表">⟳</button>
     <button id="btn-new-project" title="新建工程">＋ 新建</button>
+    <button id="btn-rename" title="改工程显示名（score 标题，一个 commit，可撤销）">✏️ 改名</button>
   </div>
 
   <div class="group transport">
@@ -52,12 +53,24 @@
   </section>
 
   <aside id="chat-panel">
-    <div class="panel-title">对话框 · 语义编辑</div>
+    <div id="chat-head">
+      <div class="panel-title">对话框 · 语义编辑</div>
+      <div id="chat-head-btns">
+        <button id="btn-new-session" title="结束当前对话线程；下一轮起新会话（历史 JSONL 保留，可导入续接）">🆕 新会话</button>
+        <button id="btn-import-session" title="导入历史会话：回看消息 + 接着聊">📥 导入</button>
+        <button id="btn-stop-agent" title="停止当前 agent 会话（已落盘修改保留）" hidden>⏹ 停止</button>
+      </div>
+    </div>
+    <div id="import-row" hidden>
+      <select id="import-select"></select>
+      <button id="btn-import-confirm">载入</button>
+      <button id="btn-import-cancel">✕</button>
+    </div>
     <div id="chat-log"></div>
     <div id="chat-chips">
       <button class="chip" data-msg="改成 D 多利亚调式并渲染试听">改成 D 多利亚调式</button>
       <button class="chip" data-msg="把旋律整体升 2 个半音">整体 +2 半音</button>
-      <button class="chip" data-cmd="transpose+2">＋2（命令层 demo）</button>
+      <button class="chip" data-cmd="transpose+2" title="不走 LLM：直接用宿主命令层（EditBatch transpose）整体 +2 半音，一轮 = 一个 git commit，可撤销——用来演示命令层直编">＋2（命令层，非 LLM）</button>
     </div>
     <div id="chat-input-row">
       <input id="chat-input" placeholder="对乐谱说点什么…（如：改成 D 多利亚调式）">
@@ -71,6 +84,18 @@
     </div>
   </aside>
 </main>
+
+<div id="sel-bar" hidden>
+  <span id="sel-info" class="muted small"></span>
+  <button data-op="pitch-1" title="选中音 -1 半音">♭ −1</button>
+  <button data-op="pitch+1" title="选中音 +1 半音">♯ +1</button>
+  <button data-op="oct-1" title="降八度">−8</button>
+  <button data-op="oct+1" title="升八度">+8</button>
+  <button data-op="vel-" title="力度 -0.1">力度 −</button>
+  <button data-op="vel+" title="力度 +0.1">力度 +</button>
+  <button data-op="delete" title="删除选中音（按索引降序执行）">🗑 删除</button>
+  <button data-op="close" title="关闭工具条（保留选区）">✕</button>
+</div>
 
 <footer id="statusbar">
   <span id="status-summary" class="muted">未打开工程</span>
