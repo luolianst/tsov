@@ -25,7 +25,7 @@ from ..core.score import KeyCandidate, Score
 from ..dsp.pitch import midi_to_hz
 from .dataset import midi_to_note_name
 
-from .llm import LLM_ENDPOINT, LLM_MODEL  # noqa: E402  与 analysis/llm.py 共用端点/模型（去重）
+from .llm import LLM_ENDPOINT, LLM_MODEL, resolve_api_key  # noqa: E402  与 analysis/llm.py 共用端点/模型（去重）
 
 LLM_TIMEOUT_SEC = 120.0  # 编辑调用超时（比分析层 240s 短）
 
@@ -199,7 +199,7 @@ def _validate_llm_notes(raw_notes: list) -> list[Note]:
 
 def _call_edit_llm(notes: list[Note], feedback: str, suspicious: list[dict] | None, **params) -> tuple[list[Note], str]:
     """调 LLM 编辑，返回 (新音符列表, error)。解析/校验失败 → 拒绝（error 非空，列表为空）。"""
-    api_key = params.get("api_key") or os.environ.get("OPENCODE_GO_API_KEY", "")
+    api_key = resolve_api_key(**params)
     if not api_key:
         return [], "缺少 OPENCODE_GO_API_KEY（LLM 编辑跳过）"
     payload = {

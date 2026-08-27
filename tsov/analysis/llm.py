@@ -17,10 +17,50 @@ import requests
 
 from .prompt import SYSTEM_PROMPT, build_prompt
 
-# OpenAI 兼容端点配置（代码内默认值，CLI/env 可覆盖）
-LLM_ENDPOINT = os.environ.get("TSOV_LLM_ENDPOINT", "https://opencode.ai/zen/go/v1/chat/completions")
+# LLM 端点/模型配置（2026-08-15 起主通道 = dsh 的 DeepSeek 官方 API，deepseek-v4-flash 含 vision 能力）
+# - 端点：TSOV_LLM_ENDPOINT > DEEPSEEK_BASE_URL（dsh 部署环境提供）> api.deepseek.com 官方默认
+# - key 解析链见 resolve_api_key（key 不落盘、不入库，只走环境变量/参数）
+_DEEPSEEK_BASE = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
+LLM_ENDPOINT = os.environ.get("TSOV_LLM_ENDPOINT", f"{_DEEPSEEK_BASE}/v1/chat/completions")
 LLM_MODEL = os.environ.get("TSOV_LLM_MODEL", "deepseek-v4-flash")
 LLM_TIMEOUT_SEC = 240.0
+
+
+def _dsh_credential(name: str) -> str:
+    """从 dsh 的凭据库（$DSH_HOME/.credentials.yaml 的 refs）取 key——env 全缺时的最后兜底。
+
+    只读不回显、不入库；等洛怜在 dsh Web UI Settings→Models 的 DeepSeek 卡片填一次 key
+    （dsh 会写入该文件），tsov 即自动接上官方 DeepSeek 通道。
+    """
+    dsh_home = os.environ.get("DSH_HOME", "").strip()
+    if not dsh_home:
+        return ""
+    cred_file = os.path.join(dsh_home, ".credentials.yaml")
+    if not os.path.isfile(cred_file):
+        return ""
+    try:
+        with open(cred_file, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith(name + ":"):
+                    return line.split(":", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        return ""
+    return ""
+
+
+def resolve_api_key(**params) -> str:
+    """LLM key 解析链：调用参数 > TSOV_LLM_API_KEY > DEEPSEEK_API_KEY > OPENCODE_GO_API_KEY（旧网关兜底）
+    > dsh 凭据库（$DSH_HOME/.credentials.yaml 的 DEEPSEEK_API_KEY/TSOV_LLM_API_KEY）。"""
+    return (
+        params.get("api_key")
+        or os.environ.get("TSOV_LLM_API_KEY")
+        or os.environ.get("DEEPSEEK_API_KEY")
+        or os.environ.get("OPENCODE_GO_API_KEY")
+        or _dsh_credential("DEEPSEEK_API_KEY")
+        or _dsh_credential("TSOV_LLM_API_KEY")
+        or ""
+    )
 
 EMPTY_ANALYSIS = {
     "key_candidates": [],
@@ -121,7 +161,7 @@ def call_llm(semantic_dataset: dict[str, Any], **params) -> dict:
     - 永不抛异常：任何失败都返回空结构 + {"error": ...}
     - 可用参数：api_key / endpoint / model / timeout / prompt_builder
     """
-    api_key = params.get("api_key") or os.environ.get("OPENCODE_GO_API_KEY", "")
+    api_key = resolve_api_key(**params)
     endpoint = params.get("endpoint") or LLM_ENDPOINT
     model = params.get("model") or LLM_MODEL
     timeout = float(params.get("timeout", LLM_TIMEOUT_SEC))

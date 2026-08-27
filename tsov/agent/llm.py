@@ -9,13 +9,12 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 
 import requests
 
-LLM_ENDPOINT = os.environ.get("TSOV_LLM_ENDPOINT", "https://opencode.ai/zen/go/v1/chat/completions")
-LLM_MODEL = os.environ.get("TSOV_LLM_MODEL", "deepseek-v4-flash")
+from ..analysis.llm import LLM_ENDPOINT, LLM_MODEL, resolve_api_key
+
 LLM_TIMEOUT_SEC = 240.0
 
 
@@ -52,9 +51,9 @@ def chat(messages: list[dict], tools: list[dict] | None = None, **params) -> dic
     - tool_calls: [{"id","name","arguments":dict}]（已解析参数；可能为空 = 最终回答）
     - message: 原始助手消息（wire 格式，可原样存入会话）
     """
-    api_key = params.get("api_key") or os.environ.get("OPENCODE_GO_API_KEY", "")
+    api_key = resolve_api_key(**params)
     if not api_key:
-        raise RuntimeError("缺少 OPENCODE_GO_API_KEY（agent LLM 跳过）")
+        raise RuntimeError("缺少 LLM key（TSOV_LLM_API_KEY / DEEPSEEK_API_KEY / OPENCODE_GO_API_KEY，agent LLM 跳过）")
     endpoint = params.get("endpoint") or LLM_ENDPOINT
     model = params.get("model") or LLM_MODEL
     timeout = float(params.get("timeout", LLM_TIMEOUT_SEC))
