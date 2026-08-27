@@ -74,9 +74,8 @@ function wireEvents() {
   });
   bus.on('agent_tool', (d) => {
     if (pendingTool && pendingTool.summary.textContent.indexOf(d.tool) >= 0) {
-      pendingTool.pre.textContent += '
-观测：
-' + (d.observation || '');
+      const LF = String.fromCharCode(10);
+      pendingTool.pre.textContent += LF + '观测：' + LF + (d.observation || '');
       pendingTool = null;
     } else {
       toolCard(d.tool, d.observation || '');
