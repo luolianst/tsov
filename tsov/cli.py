@@ -10,6 +10,7 @@
 - `tsov understand <audio>` / `tsov style <score> <ref>`：MOSS 参考曲理解 / 风格改谱（M5/M6）
 - `tsov agent run <task>`：agentloop 独立最小闭环（ADR-0012，不依赖 dsh/opencode）
 - `tsov host render/play <score.json>`：宿主框架渲染/回放（ADR-0013）
+- `tsov web [--host 127.0.0.1] [--port 8790]`：可视化宿主 Web 壳（M-V2，ADR-0014，docs/05）
 """
 
 from __future__ import annotations
@@ -244,6 +245,11 @@ def build_parser() -> argparse.ArgumentParser:
     p5.add_argument("wav")
     p5.set_defaults(func=_cmd_host_play_file)
 
+    p = sub.add_parser("web", help="M-V2 可视化宿主 Web 壳（ADR-0014）：FastAPI + 静态前端 + SSE")
+    p.add_argument("--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1，仅本地回环）")
+    p.add_argument("--port", type=int, default=8790, help="监听端口（默认 8790）")
+    p.set_defaults(func=_cmd_web)
+
     return parser
 
 
@@ -410,6 +416,14 @@ def _cmd_host_play_file(args: argparse.Namespace) -> int:
 
     HostEngine().play_wav(args.wav)
     print("宿主回放完毕")
+    return 0
+
+
+def _cmd_web(args: argparse.Namespace) -> int:
+    from .web import main as web_main
+
+    print(f"tsov 可视化宿主：http://{args.host}:{args.port}（Ctrl+C 退出）")
+    web_main(host=args.host, port=args.port)
     return 0
 
 

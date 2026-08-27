@@ -99,6 +99,48 @@ class Project:
             "commit": commit_hash,
         }
 
+    @property
+    def can_undo(self) -> bool:
+        return bool(self._undo)
+
+    @property
+    def can_redo(self) -> bool:
+        return bool(self._redo)
+
+    def apply_score(self, new_score: Score, commit_message: str = "整谱替换") -> dict:
+        """整谱落定（agent 高层语义编辑结果的采用入口，与 apply_batch 同协议）。
+
+        - 与 apply_batch 的区别：不经命令动词，直接用新 Score 替换（edit_score/style 等
+          高层工具的输出是完整新谱，拆回命令动词既冗余又易错——ADR-0015 决策 4 预留此路径）
+        - 同样走 快照栈 undo + 落盘 + git commit + 音符级三色 diff（track 0）
+        - 无实际改动时：返回 {ok: False, applied: 0, ...}，工程不变、不产生空 commit
+        """
+        old_notes = self.score.tracks[0].notes if self.score.tracks else []
+        new_notes = new_score.tracks[0].notes if new_score.tracks else []
+        note_diff = diff_notes(old_notes, new_notes)
+        if note_diff.total == 0 and self.score.to_dict() == new_score.to_dict():
+            return {
+                "ok": False,
+                "applied": 0,
+                "errors": ["新旧谱一致，无改动"],
+                "diff": note_diff.to_dict(),
+                "commit": None,
+            }
+
+        self._undo.append(self.score)
+        self._redo.clear()
+        # 深拷贝隔离外部引用（调用方可能继续使用 new_score）
+        self.score = copy.deepcopy(new_score)
+        self.save()
+        commit_hash = self.commit(f"{commit_message} [{note_diff.summary()}]")
+        return {
+            "ok": True,
+            "applied": 1,
+            "errors": [],
+            "diff": note_diff.to_dict(),
+            "commit": commit_hash,
+        }
+
     def undo(self) -> bool:
         if not self._undo:
             return False

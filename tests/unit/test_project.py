@@ -136,6 +136,25 @@ def test_project_undo_redo(ws):
     assert (p.root / "score.json").exists()
 
 
+def test_project_apply_score(ws):
+    """apply_score（整谱落定）：agent 高层编辑结果采用 = diff + commit + undo。"""
+    p = Project.create("pa", _score([_note(0.0, 0.5, 60), _note(0.6, 1.0, 62)]), parent=ws)
+
+    # 相同谱 → 拒绝（无空 commit）
+    same = _score([_note(0.0, 0.5, 60), _note(0.6, 1.0, 62)])
+    out = p.apply_score(same)
+    assert out["ok"] is False and out["applied"] == 0
+
+    # 改音 → 一个 commit + diff + 可撤销
+    edited = _score([_note(0.0, 0.5, 64), _note(0.6, 1.0, 62)])
+    out = p.apply_score(edited, commit_message="agent：改第一个音")
+    assert out["ok"] is True and out["commit"] and out["diff"]["total"] >= 1
+    assert [n.pitch_midi for n in p.score.tracks[0].notes] == [64, 62]
+    assert any("agent：" in ln for ln in p.log())
+    assert p.can_undo
+    assert p.undo() and [n.pitch_midi for n in p.score.tracks[0].notes] == [60, 62]
+
+
 def test_project_summary_caps_notes(ws):
     notes = [_note(i * 0.3, i * 0.3 + 0.2, 60 + i % 5) for i in range(120)]
     p = Project.create("p2", _score(notes), parent=ws)

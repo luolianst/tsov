@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>the shape of voice — 可视化宿主</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header id="topbar">
+  <div class="brand">tsov<span class="brand-sub">可视化宿主</span></div>
+
+  <div class="group">
+    <select id="project-select" title="选择工程"></select>
+    <button id="btn-refresh-projects" title="刷新工程列表">⟳</button>
+    <button id="btn-new-project" title="新建工程">＋ 新建</button>
+  </div>
+
+  <div class="group transport">
+    <button id="btn-play-wav" title="浏览器试听（wav 流）">▶ 试听</button>
+    <button id="btn-play-host" title="后端宿主播放（sounddevice）">🔊 宿主</button>
+    <button id="btn-stop" title="停止试听">⏹</button>
+    <button id="btn-render" title="离线渲染 wav">渲染</button>
+  </div>
+
+  <div class="group">
+    <button id="btn-undo" title="撤销一步（快照栈）">↩ 撤销</button>
+    <button id="btn-redo" title="重做">↪ 重做</button>
+  </div>
+
+  <div class="group">
+    <span class="muted" title="缩放">缩放</span>
+    <button id="btn-zoom-out" title="缩小时间轴">−</button>
+    <button id="btn-zoom-in" title="放大时间轴">＋</button>
+    <button id="btn-fit" title="适配整谱">适配</button>
+  </div>
+</header>
+
+<main id="layout">
+  <aside id="tracks-panel">
+    <div class="panel-title">轨道</div>
+    <div id="track-list"></div>
+    <div class="panel-title">乐句</div>
+    <div id="segments-info" class="muted small">（无）</div>
+    <div class="panel-title">工程</div>
+    <div id="meta-info" class="muted small">（未打开）</div>
+  </aside>
+
+  <section id="roll-wrap">
+    <canvas id="ruler"></canvas>
+    <canvas id="roll"></canvas>
+  </section>
+
+  <aside id="chat-panel">
+    <div class="panel-title">对话框 · 语义编辑</div>
+    <div id="chat-log"></div>
+    <div id="chat-chips">
+      <button class="chip" data-msg="改成 D 多利亚调式并渲染试听">改成 D 多利亚调式</button>
+      <button class="chip" data-msg="把旋律整体升 2 个半音">整体 +2 半音</button>
+      <button class="chip" data-cmd="transpose+2">＋2（命令层 demo）</button>
+    </div>
+    <div id="chat-input-row">
+      <input id="chat-input" placeholder="对乐谱说点什么…（如：改成 D 多利亚调式）">
+      <button id="btn-send">发送</button>
+    </div>
+    <div id="chat-actions">
+      <button id="btn-undo-round" title="撤销最近一轮（快照栈/工程 git）">撤销本轮</button>
+      <select id="rollback-select" title="选择要回滚到的版本"></select>
+      <button id="btn-rollback" title="git 检出选定版本">回滚</button>
+      <button id="btn-clear-diff" title="清除三色 diff 叠层">清除 diff</button>
+    </div>
+  </aside>
+</main>
+
+<footer id="statusbar">
+  <span id="status-summary" class="muted">未打开工程</span>
+  <span id="status-diff"></span>
+  <span id="status-error" class="error"></span>
+</footer>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
