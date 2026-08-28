@@ -91,7 +91,7 @@ def test_doD_agent_end_to_end_read_edit_render(ws, monkeypatch):
 
     # edit 的内部 LLM 替换为确定性动作（无 key 也能跑）
     def fake_edit_llm(notes, feedback, suspicious, **kw):
-        return [replace(n, pitch_midi=n.pitch_midi + 2, pitch_hz=midi_to_hz(n.pitch_midi + 2)) for n in notes], ""
+        return [replace(n, pitch_midi=n.pitch_midi + 2, pitch_hz=midi_to_hz(n.pitch_midi + 2)) for n in notes], None, ""
 
     monkeypatch.setattr("tsov.analysis.edit._call_edit_llm", fake_edit_llm)
 

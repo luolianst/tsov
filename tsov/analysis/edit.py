@@ -43,6 +43,7 @@ class EditResult:
     diff_summary: list[str] = field(default_factory=list)
     error: str = ""  # 非空表示 LLM 编辑被拒绝/降级（new_score 保留原谱）
     llm_used: bool = True
+    actions: list[dict] | None = None  # M-V2.2：LLM 返回动作数组时的原始动作（意图级 diff 数据源）
 
 
 # ---------------------------------------------------------------------------
@@ -53,10 +54,12 @@ def apply_annotations(notes: list[Note], annotations: list[dict]) -> tuple[list[
     """按 annotations 直接改音符。返回 (新音符列表, error)。
 
     annotation: {index, action, value}
-    - pitch:  value=int 改 pitch_midi（pitch_hz=midi_to_hz(value)，deviation_cents 置 0）
-    - delete: 删 index 音
-    - add:    在 index 处插入新音，value={pitch_midi, start?, end?}（start/end 缺省用前音界）
-    - merge:  把 index 与 index+1 合并（时长取并集，音高取前音）
+    - pitch:    value=int 改 pitch_midi（pitch_hz=midi_to_hz(value)，deviation_cents 置 0）
+    - delete:   删 index 音
+    - add:      在 index 处插入新音，value={pitch_midi, start?, end?}（start/end 缺省用前音界）
+    - merge:    把 index 与 index+1 合并（时长取并集，音高取前音）
+    - set_time: value={start?, end?} 改位置/时长（未给字段保持原值）
+    - move:      value={start_delta?, end_delta?, pitch_delta?} 相对位移（M-V2.2 动作数组 / 手势同构）
     非法（越界/缺字段/格式错）→ 返回 error，不动原谱。
     """
     if not annotations:
@@ -106,8 +109,41 @@ def apply_annotations(notes: list[Note], annotations: list[dict]) -> tuple[list[
             a.start = min(a.start, b.start)
             a.end = max(a.end, b.end)
             out.pop(idx + 1)
+        elif action == "set_time":
+            if not (0 <= idx < len(out)):
+                return notes, f"set_time 标注越界：index {idx}"
+            value = ann.get("value")
+            if not isinstance(value, dict):
+                return notes, f"set_time 标注 value 需 {{start?, end?}}：{value!r}"
+            n = out[idx]
+            ns = float(value.get("start", n.start))
+            ne = float(value.get("end", n.end))
+            if not (ns >= 0 and ns < ne):
+                return notes, f"set_time 标注 start/end 非法：{ns}/{ne}"
+            n.start = round(ns, 6)
+            n.end = round(ne, 6)
+        elif action == "move":
+            if not (0 <= idx < len(out)):
+                return notes, f"move 标注越界：index {idx}"
+            value = ann.get("value")
+            if not isinstance(value, dict):
+                return notes, f"move 标注 value 需 {{start_delta?, end_delta?, pitch_delta?}}：{value!r}"
+            n = out[idx]
+            sd = float(value.get("start_delta", 0.0))
+            ed = float(value.get("end_delta", sd))
+            pd = int(value.get("pitch_delta", 0))
+            ns = max(0.0, n.start + sd)
+            ne = n.end + ed
+            pm = max(0, min(127, n.pitch_midi + pd))
+            if ns >= ne:
+                return notes, f"move 标注后 start>=end：{ns}/{ne}"
+            n.start = round(ns, 6)
+            n.end = round(ne, 6)
+            n.pitch_midi = pm
+            n.pitch_hz = midi_to_hz(pm)
+            n.deviation_cents = 0.0
         else:
-            return notes, f"标注 action 未知：{action!r}（可选 pitch/delete/add/merge）"
+            return notes, f"标注 action 未知：{action!r}（可选 pitch/delete/add/merge/set_time/move）"
     return out, ""
 
 
@@ -117,13 +153,20 @@ def apply_annotations(notes: list[Note], annotations: list[dict]) -> tuple[list[
 
 _EDIT_SYSTEM = (
     "你是 the shape of voice 的音乐编辑助手。给你一份音符序列（JSON 数组）和用户的修改反馈，"
-    "以及可选的疑似错音提示。请按反馈修改，并输出**修正后的完整音符 JSON 数组**（不是只输出改动）。"
-    "要求：\n"
-    "- 每个音符至少含 start（秒，浮点）、end（秒，浮点，start<end）、pitch_midi（整数 0-127）；"
-    "可带 deviation_cents / velocity / confidence（未改动的音原样保留原值）。\n"
-    "- 不能改的音原样保留（含字段值）。\n"
-    "- 若输入的音符序列为空（从零创作）：请按反馈创作新的完整旋律，输出至少 1 个音符。\n"
-    "- 只输出 JSON 数组，不要任何解释文字或 Markdown 代码块。"
+    "以及可选的疑似错音提示。请按反馈修改，并输出**动作 JSON 数组**（意图级编辑，只改需要动的音，"
+    "避免重写整谱）。每个动作是一个对象：\n"
+    "- 改音高：{\"action\":\"pitch\", \"index\":i, \"value\":整数（0-127，直接替换 pitch_midi）}\n"
+    "- 删除音：{\"action\":\"delete\", \"index\":i}\n"
+    "- 插入新音：{\"action\":\"add\", \"index\":i, \"value\":{\"pitch_midi\":整数, \"start\":秒, \"end\":秒}}\n"
+    "- 改时长/位置：{\"action\":\"set_time\", \"index\":i, \"value\":{\"start\":秒?, \"end\":秒?}}\n"
+    "- 合并相邻音：{\"action\":\"merge\", \"index\":i}（index 与 index+1 合并）\n"
+    "- 整体移调：{\"action\":\"transpose\", \"value\":整数（半音，可负）}\n"
+    "动作按输入序列的 index 引用（index 从 0 开始）；多个动作按顺序执行（删除/插入会影响后续 index，"
+    "请按从后往前的顺序给出 delete 类动作）。要求：\n"
+    "- 只输出动作 JSON 数组，不要输出整谱重写，不要任何解释文字或 Markdown 代码块。\n"
+    "- 若输入的音符序列为空（从零创作）：输出 add 动作（或默认 output 整谱数组也可以），至少 1 个音符。\n"
+    "- 若没有需要改动的音：输出空数组 []。"
+    "\n注：set_time 的 value 里未给的字段保持原值；pitch 的 value 是替换后的绝对音高。"
 )
 
 
@@ -163,6 +206,104 @@ def _extract_json_array(text: str) -> list:
     if not isinstance(data, list):
         raise ValueError(f"响应不是 JSON 数组：{type(data).__name__}")
     return data
+
+
+_ACTION_KINDS = {"pitch", "delete", "add", "merge", "set_time", "move", "transpose"}
+
+
+def _validate_llm_actions(raw: list) -> list[dict]:
+    """校验 LLM 输出动作数组；非法 → 抛 ValueError（调用方拒绝并保留原谱）。
+
+    允许空数组（= 无改动）。动作集合与 apply_annotations 语义一致（含命令层同构动词）。
+    """
+    if not isinstance(raw, list):
+        raise ValueError("LLM 输出不是数组（拒绝）")
+    out: list[dict] = []
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise ValueError(f"第 {i} 个动作不是对象")
+        action = item.get("action")
+        if action not in _ACTION_KINDS:
+            raise ValueError(f"第 {i} 个动作 action 未知：{action!r}（可选 {sorted(_ACTION_KINDS)}）")
+        if action == "transpose":
+            v = item.get("value")
+            try:
+                int(v)
+            except (TypeError, ValueError):
+                raise ValueError(f"transpose value 非法：{v!r}") from None
+        else:
+            if "index" not in item:
+                raise ValueError(f"第 {i} 个动作缺 index：{item!r}")
+            try:
+                int(item["index"])
+            except (TypeError, ValueError):
+                raise ValueError(f"第 {i} 个动作 index 非法：{item!r}") from None
+        out.append(item)
+    return out
+
+
+def _execute_actions(notes: list[Note], actions: list[dict]) -> tuple[list[Note], str]:
+    """执行动作数组（意图级编辑）。transpose 轨级批量；其余走 apply_annotations。
+
+    返回 (新音符列表, error)。任一动作非法 → error 非空，结果未定义（调用方丢弃）。
+    """
+    if not actions:
+        return [copy.deepcopy(n) for n in notes], ""
+    anns = [a for a in actions if a.get("action") != "transpose"]
+    out, err = apply_annotations(notes, anns)
+    if err:
+        return notes, err
+    # 轨级整体移调（只作用于 track 0 的单轨旋律；按顺序在标注之后）
+    for a in actions:
+        if a.get("action") != "transpose":
+            continue
+        st = int(a["value"])
+        for n in out:
+            if not (0 <= n.pitch_midi + st <= 127):
+                return notes, f"transpose 越界：{n.pitch_midi}+{st}"
+        for n in out:
+            n.pitch_midi += st
+            n.pitch_hz = midi_to_hz(n.pitch_midi)
+            n.deviation_cents = 0.0
+    return out, ""
+
+
+def build_intent_summary(actions: list[dict], notes: list[Note] | None = None) -> list[str]:
+    """意图级人类可读摘要（动作即 diff——不做位置对齐猜测，M-V2.2 议题 ④ 后半）。"""
+    if not actions:
+        return []
+    notes = notes or []
+    lines: list[str] = []
+    for a in actions:
+        act = a.get("action")
+        if act == "transpose":
+            lines.append(f"~ 整体 {int(a['value']):+d}st")
+            continue
+        idx = int(a.get("index", -1))
+        name = _fmt(notes[idx]) if 0 <= idx < len(notes) else f"idx{idx}"
+        if act == "pitch":
+            lines.append(f"~ idx{idx} {name}→{_fmt_note_owner(a.get('value'))} ({int(a.get('value', 0)) - (notes[idx].pitch_midi if 0 <= idx < len(notes) else 0):+d}st)")
+        elif act == "delete":
+            lines.append(f"- idx{idx} {name} (删除)")
+        elif act == "add":
+            v = a.get("value") or {}
+            lines.append(f"+ idx{idx} add {_fmt_note_owner(v.get('pitch_midi')) if isinstance(v, dict) else '?'}:{v.get('start', 0.0) if isinstance(v, dict) else 0.0}s")
+        elif act == "merge":
+            lines.append(f"~ idx{idx} merge (与 idx{idx + 1})")
+        elif act == "set_time":
+            v = a.get("value") or {}
+            lines.append(f"~ idx{idx} set_time {v}")
+        elif act == "move":
+            v = a.get("value") or {}
+            lines.append(f"~ idx{idx} move {v}")
+    return lines[:DIFF_CAP]
+
+
+def _fmt_note_owner(value) -> str:
+    try:
+        return midi_to_note_name(int(value))
+    except Exception:  # noqa: BLE001
+        return str(value)
 
 
 def _validate_llm_notes(raw_notes: list, allow_empty: bool = False) -> list[Note]:
@@ -206,11 +347,18 @@ def _validate_llm_notes(raw_notes: list, allow_empty: bool = False) -> list[Note
     return out
 
 
-def _call_edit_llm(notes: list[Note], feedback: str, suspicious: list[dict] | None, allow_empty: bool = False, **params) -> tuple[list[Note], str]:
-    """调 LLM 编辑，返回 (新音符列表, error)。解析/校验失败 → 拒绝（error 非空，列表为空）。"""
+def _call_edit_llm(notes: list[Note], feedback: str, suspicious: list[dict] | None, allow_empty: bool = False, **params) -> tuple[list[Note], list[dict] | None, str]:
+    """调 LLM 编辑，返回 (新音符列表, 动作数组|None, error)。
+
+    M-V2.2 双模式：
+    - 动作数组（含 action 键）→ _validate_llm_actions + _execute_actions（意图级，推荐）
+    - 整谱数组（legacy 兼容）→ _validate_llm_notes；actions=None
+    - 空数组 → 视为「无改动」（动作语义），返回原谱 + [] + ""
+    解析/校验失败 → 拒绝（error 非空，列表为空）。
+    """
     api_key = resolve_api_key(**params)
     if not api_key:
-        return [], "缺少 OPENCODE_GO_API_KEY（LLM 编辑跳过）"
+        return [], None, "缺少 OPENCODE_GO_API_KEY（LLM 编辑跳过）"
     payload = {
         "model": params.get("model", LLM_MODEL),
         "messages": [
@@ -235,11 +383,21 @@ def _call_edit_llm(notes: list[Note], feedback: str, suspicious: list[dict] | No
                 last_error = "LLM 空响应"
                 continue
             raw = _extract_json_array(content)
-            return _validate_llm_notes(raw, allow_empty), ""
+            # 空数组 = 动作语义「无改动」（LLM 提示词已要求无改动时返回 []）
+            if not raw:
+                return [copy.deepcopy(n) for n in notes], [], ""
+            # 鉴别：首元素含 action 键 → 动作数组；否则整谱（legacy 兼容）
+            if isinstance(raw[0], dict) and "action" in raw[0]:
+                actions = _validate_llm_actions(raw)
+                new, err = _execute_actions(notes, actions)
+                if err:
+                    raise ValueError(f"动作执行失败：{err}")
+                return new, actions, ""
+            return _validate_llm_notes(raw, allow_empty), None, ""
         except Exception as e:  # noqa: BLE001 重试/拒绝
             last_error = f"{type(e).__name__}: {e}"
             continue
-    return [], f"LLM 编辑失败（重试 {retries} 次后放弃）：{last_error}"
+    return [], None, f"LLM 编辑失败（重试 {retries} 次后放弃）：{last_error}"
 
 
 # ---------------------------------------------------------------------------
@@ -375,18 +533,24 @@ def edit_score(
     llm_used = False
     error = ""
     result_notes = ann_notes
+    actions: list[dict] | None = None
     if llm and (feedback.strip() or suspicious):
-        llm_notes, llm_err = _call_edit_llm(ann_notes, feedback, suspicious,
-                                            allow_empty=(len(ann_notes) == 0), **params)
+        llm_notes, llm_actions, llm_err = _call_edit_llm(ann_notes, feedback, suspicious,
+                                                         allow_empty=(len(ann_notes) == 0), **params)
         if llm_err:
             error = llm_err  # 保留标注结果，不阻塞
         else:
             result_notes = llm_notes
+            actions = llm_actions
             llm_used = True
 
     # 3. 落定
     track.notes = result_notes
-    diff = build_diff_summary(orig_notes, result_notes)
+    # M-V2.2：动作路径用意图级摘要（动作即 diff），legacy 整谱路径仍位置对齐
+    if actions is not None:
+        diff = build_intent_summary(actions, ann_notes)
+    else:
+        diff = build_diff_summary(orig_notes, result_notes)
     if result_notes != orig_notes:
         score.key_candidates = _detect_key(result_notes)  # M8：改谱后调性同步
-    return EditResult(score, diff, error, llm_used)
+    return EditResult(score, diff, error, llm_used, actions)

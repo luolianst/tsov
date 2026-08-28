@@ -7,7 +7,8 @@ import json
 
 import pytest
 
-from tsov.analysis.edit import EditResult, apply_annotations, build_diff_summary, edit_score, _validate_llm_notes
+from tsov.analysis.edit import (EditResult, _execute_actions, apply_annotations,
+                                  build_diff_summary, edit_score, _validate_llm_notes)
 from tsov.core.notes import Note
 from tsov.core.score import Instrument, Score, Track
 
@@ -90,10 +91,10 @@ def test_validate_allow_empty_only_for_from_scratch():
 
 
 def test_edit_score_from_empty_accepts_generated(monkeypatch):
-    # 空谱 + LLM 创作（生成音符）→ 正常落定
+    # 空谱 + LLM 创作（生成音符）→ 正常落定（legacy 整谱路径）
     def fake_llm(notes, feedback, suspicious, allow_empty=False, **params):
         raw = [{"start": 0.0, "end": 0.6, "pitch_midi": 64, "velocity": 0.8}]
-        return _validate_llm_notes(raw, allow_empty), ""
+        return _validate_llm_notes(raw, allow_empty), None, ""
 
     monkeypatch.setattr("tsov.analysis.edit._call_edit_llm", fake_llm)
     empty = Score(title="e", tempo=100.0, tracks=[Track(name="m", instrument=Instrument(), notes=[])])
@@ -128,7 +129,7 @@ def test_edit_score_annotations_only(monkeypatch):
 def test_edit_score_llm_mocked(monkeypatch):
     def fake_llm(notes, feedback, suspicious, **params):
         raw = [{"start": n.start, "end": n.end, "pitch_midi": n.pitch_midi + 12} for n in notes]
-        return _validate_llm_notes(raw), ""
+        return _validate_llm_notes(raw), None, ""
 
     monkeypatch.setattr("tsov.analysis.edit._call_edit_llm", fake_llm)
     result = edit_score(_score(), feedback="整体高八度", llm=True)
@@ -139,12 +140,38 @@ def test_edit_score_llm_mocked(monkeypatch):
 
 def test_edit_score_llm_rejected_keeps_original(monkeypatch):
     def fake_llm(notes, feedback, suspicious, **params):
-        return [], "LLM 输出非法"
+        return [], None, "LLM 输出非法"
 
     monkeypatch.setattr("tsov.analysis.edit._call_edit_llm", fake_llm)
     result = edit_score(_score(), feedback="改一下", llm=True)
     assert result.error  # 拒绝
     assert len(result.new_score.tracks[0].notes) == 3  # 保留原谱
+
+
+def test_edit_score_llm_actions_intent_diff(monkeypatch):
+    """M-V2.2：LLM 返回动作数组 → 执行 + 意图级摘要（动作即 diff，不做位置对齐）。"""
+    def fake_llm(notes, feedback, suspicious, **params):
+        acts = [
+            {"action": "pitch", "index": 0, "value": 72},
+            {"action": "delete", "index": 2},
+            {"action": "add", "index": 2, "value": {"pitch_midi": 65, "start": 1.2, "end": 1.7}},
+        ]
+        new, err = _execute_actions(notes, acts)
+        assert err == ""
+        return new, acts, ""
+
+    monkeypatch.setattr("tsov.analysis.edit._call_edit_llm", fake_llm)
+    result = edit_score(_score(), feedback="首音改 C5、删第三音、补一个 F4", llm=True)
+    assert result.llm_used and result.error == ""
+    notes = result.new_score.tracks[0].notes
+    assert len(notes) == 3
+    assert notes[0].pitch_midi == 72 and notes[1].pitch_midi == 62 and notes[2].pitch_midi == 65
+    # 意图级摘要直接来自动作（精确，非位置对齐猜）
+    assert any("idx0" in d and "+12st" in d for d in result.diff_summary)
+    assert any("idx2" in d and "删除" in d for d in result.diff_summary)
+    assert any("idx2" in d and "add" in d for d in result.diff_summary)
+    assert result.actions and len(result.actions) == 3
+    assert result.actions[0]["action"] == "pitch" and result.actions[1]["action"] == "delete"
 
 
 def test_edit_result_roundtrip_json():
