@@ -107,6 +107,9 @@ function boot() {
     importConfirm: $('btn-import-confirm'),
     importCancel: $('btn-import-cancel'),
     chipsEl: $('chat-chips'),
+    quickSel: $('quick-cmd'),
+    quickRunBtn: $('btn-quick-run'),
+    cmpSel: $('cmp-base'),
   });
   playback.init({
     playWavBtn: $('btn-play-wav'),
@@ -124,6 +127,32 @@ function boot() {
     if (d.removed && d.removed.length) parts.push('-' + d.removed.length);
     if (d.changed && d.changed.length) parts.push('~' + d.changed.length);
     box.textContent = parts.length ? ('本轮 diff ' + parts.join(' ') + (d.commit ? ' @' + String(d.commit).slice(0, 7) : '')) : '';
+  });
+
+  /* 版本对比（议题 ④）：左槽选历史版本 → 试听；base_rev 由 chat.js 读取 */
+  function refreshCmpBase() {
+    const sel = $('cmp-base');
+    sel.innerHTML = '';
+    (store.gitLog || []).forEach((line, i) => {
+      const opt = document.createElement('option');
+      opt.value = line.split(' ')[0];
+      opt.textContent = (i === 0 ? '★ HEAD · ' : '') + (line.length > 36 ? line.slice(0, 36) + '…' : line);
+      sel.appendChild(opt);
+    });
+    $('cmp-head').textContent = '↔ ' + ((store.gitLog && store.gitLog[0] && store.gitLog[0].split(' ')[0]) || 'HEAD');
+  }
+  bus.on('state', refreshCmpBase);
+  bus.on('state_updated', refreshCmpBase);
+
+  $('btn-cmp-listen').addEventListener('click', () => {
+    if (!store.project) { setError('先打开一个工程'); return; }
+    const rev = $('cmp-base').value;
+    if (!rev) { setError('先选一个版本（列表或 HEAD）'); return; }
+    const a = new Audio();
+    a.src = api.wavUrlRev(store.project, rev) + '?v=' + Date.now();
+    a.play().then(() => {
+      showToast('▶ 试听旧版 ' + rev.slice(0, 8) + '（缓存渲染，不动 HEAD）');
+    }).catch((err) => setError('听旧版失败：' + err.message));
   });
 
   /* 工具栏 */

@@ -13,6 +13,53 @@ const MAX_LOGS = 400;
 let logEl, inputEl, sendBtn;
 let undoRoundBtn, rollbackSel, rollbackBtn, stopBtn, newSessionBtn;
 let importBtn, importRow, importSelect, importConfirm, importCancel;
+let quickSel, quickRunBtn, cmpSel;
+
+/* 快捷命令（数据驱动：加命令只改这里；value 前缀 msg| 走 LLM / cmd| 走命令层直编） */
+const QUICK_CMDS = [
+  { group: 'LLM 语义编辑', items: [
+    { value: 'msg|改成 D 多利亚调式并渲染试听', label: '改成 D 多利亚调式' },
+    { value: 'msg|把旋律整体升 2 个半音', label: '整体 +2 半音' },
+  ]},
+  { group: '命令层直编（非 LLM）', items: [
+    { value: 'cmd|transpose+2', label: '整体 +2 半音（命令层）' },
+  ]},
+];
+
+function renderQuickCmds() {
+  if (!quickSel) return;
+  quickSel.innerHTML = '';
+  const ph = document.createElement('option');
+  ph.value = '';
+  ph.textContent = '快捷命令…';
+  quickSel.appendChild(ph);
+  for (const g of QUICK_CMDS) {
+    const og = document.createElement('optgroup');
+    og.label = g.group;
+    for (const it of g.items) {
+      const o = document.createElement('option');
+      o.value = it.value;
+      o.textContent = it.label;
+      og.appendChild(o);
+    }
+    quickSel.appendChild(og);
+  }
+}
+
+function runQuickCmd(value) {
+  if (!value) return;
+  if (quickSel) quickSel.value = '';   // 复位，允许重复执行同一命令
+  if (value.startsWith('msg|')) { send(value.slice(4)); return; }
+  if (value === 'cmd|transpose+2') {
+    if (!store.project) { setError('先打开一个工程'); return; }
+    api.postBatch(store.project, '+2', [{ op: 'transpose', track: 0, index: null, value: 2 }], '命令层 demo：+2 半音')
+      .then((r) => {
+        if (r.applied) toast('命令层：已 +2 半音 @' + (r.commit || '').slice(0, 7));
+        else setError('命令被拒：' + (r.errors || []).join('；'));
+      })
+      .catch((err) => setError(err.message));
+  }
+}
 
 /* ---------------- 消息记录（按工程持久化） ---------------- */
 
@@ -145,12 +192,13 @@ async function send(message) {
   if (!store.project) { setError('先打开一个工程'); return; }
   if (!message.trim() || store.agentBusy) return;
 
+  const baseRev = (cmpSel && cmpSel.value) || 'HEAD';   // 议题 ④：编辑目标版本标识（默认 HEAD）
   appendCard(text('msg user', message), { kind: 'user', text: message, ts: Date.now() });
   inputEl.value = '';
   setAgentBusy(true);
-  sysMsg('已发送（SSE 事件流，多轮会话续接同一 JSONL）…');
+  sysMsg('已发送（SSE 事件流，多轮会话续接同一 JSONL；目标版本 ' + baseRev + '）…');
   try {
-    const res = await api.chat(store.project, message);
+    const res = await api.chat(store.project, message, baseRev);
     sysMsg('session：' + res.session_id);
   } catch (e) {
     setAgentBusy(false);
@@ -335,6 +383,11 @@ export function init(opts) {
   importSelect = opts.importSelect;
   importConfirm = opts.importConfirm;
   importCancel = opts.importCancel;
+  quickSel = opts.quickSel;
+  quickRunBtn = opts.quickRunBtn;
+  cmpSel = opts.cmpSel;
+
+  renderQuickCmds();
 
   sendBtn.addEventListener('click', () => send(inputEl.value));
   inputEl.addEventListener('keydown', (e) => {
@@ -365,20 +418,8 @@ export function init(opts) {
   importConfirm.addEventListener('click', confirmImport);
   importCancel.addEventListener('click', () => { importRow.hidden = true; });
 
-  opts.chipsEl.addEventListener('click', (e) => {
-    const btn = e.target.closest('button.chip');
-    if (!btn) return;
-    if (btn.dataset.msg) { send(btn.dataset.msg); return; }
-    if (btn.dataset.cmd === 'transpose+2') {
-      if (!store.project) { setError('先打开一个工程'); return; }
-      api.postBatch(store.project, '+2', [{ op: 'transpose', track: 0, index: null, value: 2 }], '命令层 demo：+2 半音')
-        .then((r) => {
-          if (r.applied) toast('命令层：已 +2 半音 @' + (r.commit || '').slice(0, 7));
-          else setError('命令被拒：' + (r.errors || []).join('；'));
-        })
-        .catch((err) => setError(err.message));
-    }
-  });
+  opts.chipsEl.addEventListener('change', (e) => runQuickCmd(e.target.value));
+  if (quickRunBtn) quickRunBtn.addEventListener('click', () => runQuickCmd(quickSel ? quickSel.value : ''));
 
   wireEvents();
   bus.on('state', refreshRollbackOptions);

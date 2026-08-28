@@ -122,6 +122,7 @@ _EDIT_SYSTEM = (
     "- 每个音符至少含 start（秒，浮点）、end（秒，浮点，start<end）、pitch_midi（整数 0-127）；"
     "可带 deviation_cents / velocity / confidence（未改动的音原样保留原值）。\n"
     "- 不能改的音原样保留（含字段值）。\n"
+    "- 若输入的音符序列为空（从零创作）：请按反馈创作新的完整旋律，输出至少 1 个音符。\n"
     "- 只输出 JSON 数组，不要任何解释文字或 Markdown 代码块。"
 )
 
@@ -164,9 +165,17 @@ def _extract_json_array(text: str) -> list:
     return data
 
 
-def _validate_llm_notes(raw_notes: list) -> list[Note]:
-    """校验 LLM 输出；非法 → 抛 ValueError（调用方拒绝并保留原谱）。"""
-    if not isinstance(raw_notes, list) or len(raw_notes) == 0:
+def _validate_llm_notes(raw_notes: list, allow_empty: bool = False) -> list[Note]:
+    """校验 LLM 输出；非法 → 抛 ValueError（调用方拒绝并保留原谱）。
+
+    allow_empty=True（仅空谱从零创作）：允许空数组（= LLM 未创作，保留原空谱）。
+    非空输入仍硬拒空输出（防 LLM 清空已有谱）。
+    """
+    if not isinstance(raw_notes, list):
+        raise ValueError("LLM 输出不是数组（拒绝）")
+    if len(raw_notes) == 0:
+        if allow_empty:
+            return []
         raise ValueError("LLM 输出空数组（拒绝）")
     out: list[Note] = []
     for i, item in enumerate(raw_notes):
@@ -197,7 +206,7 @@ def _validate_llm_notes(raw_notes: list) -> list[Note]:
     return out
 
 
-def _call_edit_llm(notes: list[Note], feedback: str, suspicious: list[dict] | None, **params) -> tuple[list[Note], str]:
+def _call_edit_llm(notes: list[Note], feedback: str, suspicious: list[dict] | None, allow_empty: bool = False, **params) -> tuple[list[Note], str]:
     """调 LLM 编辑，返回 (新音符列表, error)。解析/校验失败 → 拒绝（error 非空，列表为空）。"""
     api_key = resolve_api_key(**params)
     if not api_key:
@@ -226,7 +235,7 @@ def _call_edit_llm(notes: list[Note], feedback: str, suspicious: list[dict] | No
                 last_error = "LLM 空响应"
                 continue
             raw = _extract_json_array(content)
-            return _validate_llm_notes(raw), ""
+            return _validate_llm_notes(raw, allow_empty), ""
         except Exception as e:  # noqa: BLE001 重试/拒绝
             last_error = f"{type(e).__name__}: {e}"
             continue
@@ -367,7 +376,8 @@ def edit_score(
     error = ""
     result_notes = ann_notes
     if llm and (feedback.strip() or suspicious):
-        llm_notes, llm_err = _call_edit_llm(ann_notes, feedback, suspicious, **params)
+        llm_notes, llm_err = _call_edit_llm(ann_notes, feedback, suspicious,
+                                            allow_empty=(len(ann_notes) == 0), **params)
         if llm_err:
             error = llm_err  # 保留标注结果，不阻塞
         else:

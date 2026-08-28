@@ -35,6 +35,13 @@
     <button id="btn-zoom-in" title="放大时间轴">＋</button>
     <button id="btn-fit" title="适配整谱">适配</button>
   </div>
+
+  <div class="group" title="A/B 对比试听（议题 ④）：左槽选任意历史版本，右槽=HEAD；试听走 git show 缓存渲染，不动 HEAD">
+    <span class="muted">版本</span>
+    <select id="cmp-base" title="对比基准（旧版本，只读参考）"></select>
+    <span id="cmp-head" class="muted small">↔ HEAD</span>
+    <button id="btn-cmp-listen" title="试听左槽版本（缓存渲染）">▶ 听旧版</button>
+  </div>
 </header>
 
 <main id="layout">
@@ -68,9 +75,10 @@
     </div>
     <div id="chat-log"></div>
     <div id="chat-chips">
-      <button class="chip" data-msg="改成 D 多利亚调式并渲染试听">改成 D 多利亚调式</button>
-      <button class="chip" data-msg="把旋律整体升 2 个半音">整体 +2 半音</button>
-      <button class="chip" data-cmd="transpose+2" title="不走 LLM：直接用宿主命令层（EditBatch transpose）整体 +2 半音，一轮 = 一个 git commit，可撤销——用来演示命令层直编">＋2（命令层，非 LLM）</button>
+      <select id="quick-cmd" title="快捷命令：选中即执行（LLM 语义命令 / 命令层直编）">
+        <option value="">快捷命令…</option>
+      </select>
+      <button id="btn-quick-run" title="执行当前选中的快捷命令">执行</button>
     </div>
     <div id="chat-input-row">
       <input id="chat-input" placeholder="对乐谱说点什么…（如：改成 D 多利亚调式）">

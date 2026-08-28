@@ -63,11 +63,13 @@ class RollbackIn(BaseModel):
 
 class RenderIn(BaseModel):
     out: str | None = None
+    rev: str | None = None   # 议题 ④：A/B 对比试听旧版（git show，不动 HEAD）
 
 
 class ChatIn(BaseModel):
     project: str
     message: str
+    base_rev: str = "HEAD"   # 议题 ④：当前编辑目标版本（注入 agent prompt，A 路不允许旧版分叉）
 
 
 class ChatResetIn(BaseModel):
@@ -355,8 +357,12 @@ def _stream_chat(bus: EventBus, project: str, session_id: str, messages: list[di
     return {"content": content, "tool_calls": tool_calls, "message": message}
 
 
-def _run_agent_session(state: WebState, project_name: str, task: str, session_id: str) -> None:
-    """一次对话框 agent 会话（后台线程跑；agent_lock 由调用方获取，本函数 finally 释放）。"""
+def _run_agent_session(state: WebState, project_name: str, task: str, session_id: str, base_rev: str = "HEAD") -> None:
+    """一次对话框 agent 会话（后台线程跑；agent_lock 由调用方获取，本函数 finally 释放）。
+
+    base_rev（议题 ④）：编辑目标版本标识，注入 brief；A 路下始终 = 用户当前工作版本（HEAD），
+    仅用于让 LLM 明确「我改的是哪个版本」，不改变工程采纳逻辑。
+    """
     from .agent import AgentSession, build_default_registry
     from .agent.prompt import SYSTEM_PROMPT
 
@@ -376,6 +382,7 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
         f"{task}\n\n"
         f"【工程上下文】\n"
         f"- 当前工程名：{proj.name}；工程 score 路径：{score_path}\n"
+        f"- 编辑目标版本：{base_rev}（工程 git 版本标识；请勿自行 git 回滚/切分支，版本切换由宿主负责）\n"
         f"- 改谱：用 edit_score 工具（score_path 用上面的工程 score 路径，feedback 写用户的修改要求），"
         f"工具会把新谱自动落盘为同目录的 {EDITED_SCORE_NAME}\n"
         f"- 改完谱自查：用 load_score 读 {EDITED_SCORE_NAME}，检查全部音高是否属于目标调式音阶"
@@ -597,9 +604,31 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
     @app.post("/api/projects/{name}/render")
     def render(name: str, body: RenderIn) -> dict:
         proj = st().get_project(name)
+        engine = st().engine()
+        if body.rev:
+            # 议题 ④：渲染任意 git 版本（git show，不进 rollback；缓存到 .render-cache/<rev8>.wav）
+            score = proj.score_at(body.rev)
+            if score is None:
+                raise HTTPException(400, f"版本不存在或内容损坏：{body.rev!r}")
+            cache_dir = proj.root / ".render-cache"
+            cache_dir.mkdir(exist_ok=True)
+            out = cache_dir / f"{body.rev[:8]}.wav"
+            if not out.is_file():
+                session = engine.load(score)
+                try:
+                    audio = engine.render(session, out_wav=out)
+                finally:
+                    session.close()
+            else:
+                import wave
+                with wave.open(str(out), "rb") as wf:
+                    frames = wf.getnframes()
+                    sr = wf.getframerate()
+                audio = None
+            duration = (frames / sr) if audio is None else round(len(audio) / engine.samplerate, 3)
+            return {"wav": str(out), "duration": duration, "sr": (sr if audio is None else engine.samplerate), "rev": body.rev[:8]}
         out = Path(body.out) if body.out else proj.root / RENDER_WAV_NAME
         proj.save()  # score.json 落最新真相（渲染与 git 版本一致）
-        engine = st().engine()
         session = engine.load(proj.score)
         try:
             audio = engine.render(session, out_wav=out)
@@ -608,11 +637,30 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
         return {"wav": str(out), "duration": round(len(audio) / engine.samplerate, 3), "sr": engine.samplerate}
 
     @app.get("/api/projects/{name}/wav")
-    def wav(name: str):
-        """浏览器试听 wav：缺失或比 score.json 旧时自动重渲（保证与工程真相一致）。"""
+    def wav(name: str, rev: str | None = None):
+        """浏览器试听 wav：缺失或比 score.json 旧时自动重渲（保证与工程真相一致）。
+
+        ?rev=<版本> （议题 ④）：渲染缓存版（git show，不动 HEAD），用于对比滑块左槽试听。
+        """
         from fastapi.responses import FileResponse
 
         proj = st().get_project(name)
+        if rev:
+            score = proj.score_at(rev)
+            if score is None:
+                raise HTTPException(400, f"版本不存在或内容损坏：{rev!r}")
+            cache_dir = proj.root / ".render-cache"
+            cache_dir.mkdir(exist_ok=True)
+            wav_path = cache_dir / f"{rev[:8]}.wav"
+            if not wav_path.is_file():
+                engine = st().engine()
+                session = engine.load(score)
+                try:
+                    engine.render(session, out_wav=wav_path)
+                finally:
+                    session.close()
+            return FileResponse(str(wav_path), media_type="audio/wav", filename=f"{name}-{rev[:8]}.wav")
+
         wav_path = proj.root / RENDER_WAV_NAME
         score_path = proj.root / "score.json"
         stale = not wav_path.is_file() or score_path.stat().st_mtime > wav_path.stat().st_mtime
@@ -700,7 +748,7 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
         try:
             threading.Thread(
                 target=_run_agent_session,
-                args=(state, body.project, body.message, session_id),
+                args=(state, body.project, body.message, session_id, body.base_rev),
                 daemon=True,
                 name=f"tsov-agent-{session_id[-8:]}",
             ).start()

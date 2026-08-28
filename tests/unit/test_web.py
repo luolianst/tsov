@@ -429,3 +429,47 @@ def test_sessions_list_and_load(env, monkeypatch):
     # 防穿越：非法名 404
     r = c.post("/api/sessions/load", json={"project": name, "name": "../../.env"})
     assert r.status_code == 404 or r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# M-V2.2 议题 ④：render?rev / wav?rev（A/B 对比试听）/ chat base_rev
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not _HAS_SF, reason="缺 vendor/soundfonts/FluidR3_GM.sf2")
+def test_render_old_rev_and_wav_rev(env):
+    """render 带 rev：git show 旧版渲染到 .render-cache，不动 HEAD；wav?rev 可取流。"""
+    name = _make_project(env)
+    c = env["client"]
+    # 先做一轮编辑，产生 HEAD~1 旧版
+    proj_root = env["dir"] / name
+    r = c.post(f"/api/projects/{name}/batch", json={"label": "+2", "commands": [{"op": "transpose", "track": 0, "index": None, "value": 2}]})
+    assert r.status_code == 200
+    log = c.get(f"/api/projects/{name}/log").json()["log"]
+    head = log[0].split(" ")[0]
+
+    # 旧版渲染（head~1 = 初始 [60]）
+    r2 = c.post(f"/api/projects/{name}/render", json={"rev": head + "~1"})
+    assert r2.status_code == 200
+    body = r2.json()
+    assert body["rev"] == (head + "~1")[:8]
+    assert (proj_root / ".render-cache" / ((head + "~1")[:8] + ".wav")).is_file()
+    # 坏版本 400
+    r3 = c.post(f"/api/projects/{name}/render", json={"rev": "NO_SUCH_REV"})
+    assert r3.status_code == 400
+    # wav?rev 取流
+    r4 = c.get(f"/api/projects/{name}/wav", params={"rev": head + "~1"})
+    assert r4.status_code == 200 and r4.content[:4] == b"RIFF"
+    # HEAD 未被改动
+    state = c.get(f"/api/projects/{name}/state").json()
+    assert state["score"]["tracks"][0]["notes"][0]["pitch_midi"] == 62
+
+
+def test_chat_accepts_base_rev(env, monkeypatch):
+    """chat 带 base_rev：路由接受并注入 fake stream 可见（不阻塞，只验证不 422）。"""
+    name = _make_project(env)
+    proj_root = env["dir"] / name
+    _install_fake_stream(monkeypatch, proj_root)
+    r = env["client"].post("/api/chat", json={"project": name, "message": "改一下", "base_rev": "HEAD"})
+    assert r.status_code == 200
+    assert _wait_agent_done(env, name)

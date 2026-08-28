@@ -168,8 +168,9 @@ select, input {
   overflow-wrap: anywhere;
 }
 
-#chat-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px; border-top: 1px solid var(--border); }
-.chip { font-size: 12px; padding: 3px 8px; border-radius: 999px; }
+#chat-chips { display: flex; gap: 6px; align-items: center; padding: 6px 10px; border-top: 1px solid var(--border); }
+#quick-cmd { flex: 1; min-width: 0; font-size: 12px; padding: 3px 8px; border-radius: 8px; max-width: 240px; }
+#btn-quick-run { font-size: 12px; padding: 3px 10px; border-radius: 8px; }
 #chat-input-row { display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--border); }
 #chat-input { flex: 1; min-width: 0; width: 100%; }
 #chat-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--border); align-items: center; }

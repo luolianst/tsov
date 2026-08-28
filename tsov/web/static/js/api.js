@@ -37,7 +37,7 @@ export const api = {
   getSummary: (name) => req('/api/projects/' + encodeURIComponent(name) + '/summary'),
   render: (name, out) => post('/api/projects/' + encodeURIComponent(name) + '/render', { out: out || null }),
   play: (name) => post('/api/projects/' + encodeURIComponent(name) + '/play'),
-  chat: (project, message) => post('/api/chat', { project, message }),
+  chat: (project, message, baseRev) => post('/api/chat', { project, message, base_rev: baseRev || 'HEAD' }),
   chatStop: () => post('/api/chat/stop', {}),
   chatReset: (project) => post('/api/chat/reset', { project }),
   setTitle: (name, title) => post('/api/projects/' + encodeURIComponent(name) + '/title', { title }),
@@ -45,5 +45,6 @@ export const api = {
   loadSession: (project, name) => post('/api/sessions/load', { project, name }),
 
   wavUrl: (name) => '/api/projects/' + encodeURIComponent(name) + '/wav',
+  wavUrlRev: (name, rev) => '/api/projects/' + encodeURIComponent(name) + '/wav?rev=' + encodeURIComponent(rev || 'HEAD'),
   eventsUrl: (name) => '/api/projects/' + encodeURIComponent(name) + '/events',
 };

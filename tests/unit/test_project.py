@@ -200,3 +200,21 @@ def test_project_open_roundtrip(ws):
     p2 = Project.open(p.root)
     assert [n.pitch_midi for n in p2.score.tracks[0].notes] == [65]
     assert p2.name == "p5"
+
+
+@pytest.mark.skipif(not _HAS_GIT, reason="git 不可用")
+def test_project_score_at_returns_any_rev(ws):
+    """score_at（议题 ④）：git show 任意版本，不改工作区/HEAD；坏版本返回 None。"""
+    p = Project.create("p6", _score([_note(0.0, 0.5, 60)]), parent=ws)
+    p.apply_batch(EditBatch(label="+2").add("transpose", value=2), commit_message="第一轮：+2")
+    head = p.log()[0].split(" ")[0]
+    # 当前 HEAD 版本
+    s_now = p.score_at("HEAD")
+    assert s_now and [n.pitch_midi for n in s_now.tracks[0].notes] == [62]
+    # 初始版本（基线提交）
+    s_init = p.score_at(head + "~1")
+    assert s_init and [n.pitch_midi for n in s_init.tracks[0].notes] == [60]
+    # 工作区未变（HEAD 仍是 [62]）
+    assert [n.pitch_midi for n in p.score.tracks[0].notes] == [62]
+    # 坏版本
+    assert p.score_at("NO_SUCH_REV") is None

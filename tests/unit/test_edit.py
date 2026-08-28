@@ -81,6 +81,28 @@ def test_validate_accepts_good():
     assert len(out) == 1 and out[0].pitch_midi == 64
 
 
+def test_validate_allow_empty_only_for_from_scratch():
+    # 空谱创作：允许空输出（保留原空谱，不再硬拒）
+    assert _validate_llm_notes([], allow_empty=True) == []
+    # 非空输入：仍硬拒空输出（防 LLM 清空已有谱）
+    with pytest.raises(ValueError):
+        _validate_llm_notes([], allow_empty=False)
+
+
+def test_edit_score_from_empty_accepts_generated(monkeypatch):
+    # 空谱 + LLM 创作（生成音符）→ 正常落定
+    def fake_llm(notes, feedback, suspicious, allow_empty=False, **params):
+        raw = [{"start": 0.0, "end": 0.6, "pitch_midi": 64, "velocity": 0.8}]
+        return _validate_llm_notes(raw, allow_empty), ""
+
+    monkeypatch.setattr("tsov.analysis.edit._call_edit_llm", fake_llm)
+    empty = Score(title="e", tempo=100.0, tracks=[Track(name="m", instrument=Instrument(), notes=[])])
+    result = edit_score(empty, feedback="写一段 C 大调旋律", llm=True)
+    assert result.error == ""
+    assert len(result.new_score.tracks[0].notes) == 1
+    assert result.new_score.tracks[0].notes[0].pitch_midi == 64
+
+
 # ---- diff_summary 格式 ----
 
 def test_diff_summary_format():

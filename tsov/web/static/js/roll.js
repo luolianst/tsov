@@ -1,6 +1,7 @@
 /* roll.js —— 钢琴卷帘 canvas：绘制/缩放/滚动/点击选择/播放头/三色 diff 叠层 */
 
 import { bus } from './events.js';
+import { api } from './api.js';
 import { KEYS_W, store, scoreBounds, tempo, setSelection, setView } from './state.js';
 import { diffLayers } from './diff.js';
 
@@ -171,9 +172,20 @@ export function draw() {
   }
   ctx.strokeStyle = '#2c313c';
   ctx.beginPath(); ctx.moveTo(KEYS_W - 3.5, 0); ctx.lineTo(KEYS_W - 3.5, H); ctx.stroke();
+
+  /* ---- 手势幽灵预览（最后画，覆盖在上层） ---- */
+  drawGhost();
 }
 
-/* ---- 命中测试（逆序=后画的优先） ---- */
+/* ---- 编辑手势（M-V2.2 议题 ③：FL/Cubase 心智） ----
+   拖音符本体 = move（set_time + set_pitch）；拖左右两端 = resize（set_time）；
+   点空白 = 铅笔创建（add）。一次手势 = 一个 EditBatch = 一个 commit。 */
+const EDGE_PX = 6;          // 两端热区宽（px）
+const MIN_DUR = 0.08;       // 最小音符时长（秒）
+let drag = null;            // {mode, track, index, orig, ghost:{start,end,pitch}}
+let mouseInCanvas = false;
+
+/* ---- 命中测试（逆序=后画的优先；edge=左右端热区） ---- */
 function hitNote(mx, my) {
   if (!store.score) return null;
   const v = store.view;
@@ -184,10 +196,81 @@ function hitNote(mx, my) {
       const n = notes[ni];
       const x = xOf(n.start), y = yOf(n.pitch_midi);
       const w = Math.max(2, (n.end - n.start) * v.pxPerSec), h = v.pxPerSemi - 1;
-      if (mx >= x - 1 && mx <= x + w + 1 && my >= y && my <= y + h) return { track: ti, index: ni };
+      if (mx >= x - 1 && mx <= x + w + 1 && my >= y && my <= y + h) {
+        let edge = 'body';
+        const ep = Math.min(EDGE_PX, Math.max(2, w / 3));
+        if (mx <= x + ep) edge = 'left';
+        else if (mx >= x + w - ep) edge = 'right';
+        return { track: ti, index: ni, edge };
+      }
     }
   }
   return null;
+}
+
+/* ---- 幽灵预览绘制（拖拽/新建时） ---- */
+function drawGhost() {
+  if (!drag) return;
+  const g = drag.ghost;
+  const v = store.view;
+  const x = xOf(g.start), y = yOf(g.pitch);
+  const w = Math.max(2, (g.end - g.start) * v.pxPerSec), h = v.pxPerSemi - 1;
+  ctx.fillStyle = drag.mode === 'create' ? 'rgba(102, 187, 106, 0.35)' : 'rgba(79, 195, 247, 0.30)';
+  ctx.fillRect(x, y + 0.5, w, h);
+  ctx.strokeStyle = drag.mode === 'create' ? '#66bb6a' : '#4fc3f7';
+  ctx.setLineDash([4, 3]);
+  ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+  ctx.setLineDash([]);
+  /* move 模式画原位置残影 */
+  if (drag.mode === 'move' && drag.orig) {
+    const ox = xOf(drag.orig.start), oy = yOf(drag.orig.pitch_midi);
+    const ow = Math.max(2, (drag.orig.end - drag.orig.start) * v.pxPerSec);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.setLineDash([2, 2]);
+    ctx.strokeRect(ox + 0.5, oy + 0.5, ow, h);
+    ctx.setLineDash([]);
+  }
+}
+
+/* ---- 手势提交：合成 EditBatch（一次手势 = 一个 commit） ---- */
+async function submitDrag() {
+  if (!drag || !store.project) { drag = null; draw(); return; }
+  const d = drag;
+  drag = null;
+  const cmd = [];
+  try {
+    if (d.mode === 'create') {
+      const { start, end, pitch } = d.ghost;
+      cmd.push({ op: 'add', track: d.track, index: null, value: { pitch_midi: pitch, start: round3(start), end: round3(end) } });
+      const r = await api.postBatch(store.project, '添加音符', cmd, '手绘：添加音符');
+      if (r.applied) showStatus('已添加 ' + midiName(pitch) + ' @' + (r.commit || '').slice(0, 7));
+      else showStatus('被拒：' + (r.errors || []).join('；'), true);
+      return;
+    }
+    const orig = d.orig;
+    const g = d.ghost;
+    const ns = round3(g.start), ne = round3(g.end), np = Math.max(0, Math.min(127, Math.round(g.pitch)));
+    if (d.mode === 'move') {
+      if (Math.abs(ns - orig.start) < 1e-6 && np === orig.pitch_midi) return;
+      cmd.push({ op: 'set_time', track: d.track, index: d.index, value: { start: ns, end: ne } });
+      if (np !== orig.pitch_midi) cmd.push({ op: 'set_pitch', track: d.track, index: d.index, value: np });
+    } else { // resize
+      if (Math.abs(ns - orig.start) < 1e-6 && Math.abs(ne - orig.end) < 1e-6) return;
+      cmd.push({ op: 'set_time', track: d.track, index: d.index, value: { start: ns, end: ne } });
+    }
+    const r = await api.postBatch(store.project, d.mode === 'move' ? '移动音符' : '缩放音符', cmd, '手绘：' + (d.mode === 'move' ? '移动' : '缩放'));
+    if (r.applied) showStatus((d.mode === 'move' ? '已移动' : '已缩放') + ' @' + (r.commit || '').slice(0, 7));
+    else showStatus('被拒：' + (r.errors || []).join('；'), true);
+  } catch (err) {
+    showStatus(err.message, true);
+  }
+}
+
+function round3(x) { return Math.round(x * 1000) / 1000; }
+function midiName(m) { return NAMES[((m % 12) + 12) % 12] + (Math.floor(m / 12) - 1); }
+function showStatus(msg, isErr) {
+  bus.dispatch('toast', msg);
+  console[isErr ? 'warn' : 'log']('[tsov hand]', msg);
 }
 
 export function init(rollCanvas) {
@@ -214,23 +297,81 @@ export function init(rollCanvas) {
   }, { passive: false });
 
   canvas.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;          // 仅左键
     const hit = hitNote(e.offsetX, e.offsetY);
-    if (!hit) { setSelection(0, []); return; }
-    const cur = store.selection;
-    let idx;
+    const v = store.view;
+
+    /* Ctrl/Shift：只管多选，不拖拽 */
     if (e.ctrlKey || e.shiftKey) {
-      idx = cur.track === hit.track ? cur.indices.slice() : [];
+      if (!hit) { setSelection(0, []); return; }
+      const cur = store.selection;
+      const idx = (cur.track === hit.track) ? cur.indices.slice() : [];
       const at = idx.indexOf(hit.index);
       if (at >= 0) idx.splice(at, 1); else idx.push(hit.index);
-    } else {
-      idx = [hit.index];
+      setSelection(hit.track, idx);
+      return;
     }
-    setSelection(hit.track, idx);
-    bus.dispatch('note-selected', hit);
+
+    if (hit) {
+      setSelection(hit.track, [hit.index]);
+      bus.dispatch('note-selected', hit);
+      const n = store.score.tracks[hit.track].notes[hit.index];
+      if (hit.edge === 'body') {
+        /* move：以点击位置为偏移量（音符在指针正下方跟随） */
+        drag = { mode: 'move', track: hit.track, index: hit.index, orig: { ...n },
+                 ghost: { start: n.start, end: n.end, pitch: n.pitch_midi } };
+        drag.grabT = n.start - tOf(e.offsetX);
+        drag.grabP = n.pitch_midi - midiOf(e.offsetY);
+      } else {
+        /* resize：拖两端（left=改 start / right=改 end） */
+        drag = { mode: 'resize-left', track: hit.track, index: hit.index, orig: { ...n },
+                 ghost: { start: n.start, end: n.end, pitch: n.pitch_midi } };
+        if (hit.edge === 'right') drag.mode = 'resize-right';
+      }
+    } else {
+      /* 铅笔：创建新音符（默认时长 = 半拍，可拖动拉长） */
+      setSelection(0, []);
+      const t0 = Math.max(0, tOf(e.offsetX));
+      const beat = 60 / tempo();
+      const dur = Math.max(MIN_DUR, beat / 2);
+      drag = { mode: 'create', track: 0, index: null, orig: null,
+               ghost: { start: t0, end: t0 + dur, pitch: midiOf(e.offsetY) } };
+    }
   });
 
   canvas.addEventListener('mousemove', (e) => {
-    canvas.style.cursor = hitNote(e.offsetX, e.offsetY) ? 'pointer' : 'default';
+    mouseInCanvas = true;
+    if (drag) {
+      const v = store.view;
+      if (drag.mode === 'move') {
+        const t = Math.max(0, tOf(e.offsetX) + drag.grabT);
+        const p = Math.max(0, Math.min(127, midiOf(e.offsetY) + drag.grabP));
+        const dur = drag.orig.end - drag.orig.start;
+        drag.ghost = { start: t, end: t + dur, pitch: p };
+      } else if (drag.mode === 'create') {
+        const t1 = Math.max(tOf(e.offsetX), drag.ghost.start + MIN_DUR);
+        drag.ghost.end = t1;
+        drag.ghost.pitch = midiOf(e.offsetY);
+      } else if (drag.mode === 'resize-left') {
+        const s = Math.min(Math.max(0, tOf(e.offsetX)), drag.ghost.end - MIN_DUR);
+        drag.ghost.start = s;
+      } else if (drag.mode === 'resize-right') {
+        drag.ghost.end = Math.max(drag.ghost.start + MIN_DUR, tOf(e.offsetX));
+      }
+      draw();
+      return;
+    }
+    const hit = hitNote(e.offsetX, e.offsetY);
+    if (hit) {
+      canvas.style.cursor = hit.edge === 'body' ? 'move' : 'ew-resize';
+    } else {
+      canvas.style.cursor = 'copy';   // 铅笔/新建
+    }
+  });
+
+  canvas.addEventListener('mouseleave', () => { mouseInCanvas = false; });
+  document.addEventListener('mouseup', (e) => {
+    if (drag) submitDrag();
   });
 
   for (const topic of ['state', 'view', 'selection', 'diff', 'playhead', 'playing']) {

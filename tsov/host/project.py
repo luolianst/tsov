@@ -196,6 +196,22 @@ class Project:
         proc = self._git("log", "--oneline", f"-{int(n)}")
         return [ln for ln in proc.stdout.strip().splitlines() if ln]
 
+    def score_at(self, rev: str = "HEAD") -> Score | None:
+        """读取任意 git 版本的 Score（git show <rev>:score.json），不改变工作区/HEAD。
+
+        用于 A/B 对比试听（议题 ④）：版本树左槽只读参考，禁止旧版分叉编辑。
+        版本不存在/损坏 → 返回 None。
+        """
+        if not (self.root / ".git").exists():
+            return None
+        proc = self._git("show", f"{rev}:score.json")
+        if proc.returncode != 0 or not proc.stdout.strip():
+            return None
+        try:
+            return Score.from_dict(json.loads(proc.stdout))
+        except Exception:  # noqa: BLE001 版本内容损坏
+            return None
+
     def rollback(self, rev: str = "HEAD~1") -> bool:
         """回滚到指定版本（只动 score.json）：当前状态压入 redo，检出目标版本并重载。"""
         if not (self.root / ".git").exists() or not self.log():
