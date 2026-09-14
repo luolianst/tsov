@@ -13,6 +13,7 @@ from __future__ import annotations
 import numpy as np
 
 from ..core.score import Bus
+from .effect import apply_effect_chain, effect_tail_seconds
 from .session import HostSession
 
 
@@ -67,7 +68,12 @@ def render_buses(
     - 返回 (n, 2) stereo；`stereo=False` 折叠为 mono (L+R)/2（与旧 mix_graph 数值一致）
     """
     samplerate = int(samplerate or session.samplerate)
-    n_frames = max(1, int(round((session.duration + 1.0) * samplerate)))
+    # 渲染长度 = 会话时长 + 1s 释放尾 + 效果链尾巴（reverb/delay；无效果时不改变既有长度）
+    fx_tail = max(
+        (effect_tail_seconds(getattr(ht.track.instrument, "effects", None)) for ht in session.tracks),
+        default=0.0,
+    )
+    n_frames = max(1, int(round((session.duration + 1.0 + fx_tail) * samplerate)))
     times = np.arange(n_frames, dtype=np.float64) / samplerate
 
     master = np.zeros((n_frames, 2), dtype=np.float32)
@@ -96,6 +102,12 @@ def render_buses(
         pan_curve = _curve(auto.get("pan"), times)
         lg, rg = _pan_gains(pan_curve if pan_curve is not None else _num(getattr(tr, "pan", 0.0), 0.0))
         stereo_buf = np.stack([buf * lg, buf * rg], axis=1).astype(np.float32)
+
+        # 效果链（ADR-0013 落地）：作用于 pan 后 stereo 缓冲（reverb 有真实立体声尾巴；
+        # mute/solo/推子已先行，静音轨不会漏出残响）
+        fx = getattr(tr.instrument, "effects", None) or []
+        if fx:
+            stereo_buf = apply_effect_chain(stereo_buf, samplerate, fx)
 
         if target == "master" or not include_bus_processing:
             master += stereo_buf

@@ -32,9 +32,22 @@ DEFAULTS = {
     "model": None,          # None → 自动找 vendor/GAME/pretrained/*.pt
     "timeout": 900.0,       # 秒（GAME 模型加载 ~20s + 推理）
     "batch_size": 1,
+    "device": "auto",       # auto|cpu|cuda|gpu —— GAME 侧 Lightning accelerator（auto=有 CUDA 就用 GPU）
+    "precision": None,      # None → GAME 默认 32-true；可试 "bf16-mixed"（Blackwell Tensor Core）
     "ornament_ms": 150.0,   # 短于此标记装饰音
     "workdir": None,        # None → 自动临时目录（output/.game-tmp/<uuid>）
 }
+
+
+def _supports_flag(flag: str) -> bool:
+    """vendor/GAME 不入库、可被替换：老版/上游版可能没有 --device / --precision。
+
+    直接查 infer.py 源码文本，避免每次转录多起一个子进程。缺失时不传该参数（行为同现状）。
+    """
+    try:
+        return flag in _GAME_INFER_PY.read_text(encoding="utf8", errors="replace")
+    except OSError:
+        return False
 
 
 def _default_model() -> Path:
@@ -87,6 +100,11 @@ class GameBackend(TranscribeBackend):
             "--pitch-format", "number",
             "--batch-size", str(int(cfg["batch_size"])),
         ]
+        # 设备/精度显式传递（P-3 GPU 落地）：GAME 缺该选项时跳过，保持与老版兼容
+        if _supports_flag("--device"):
+            cmd += ["--device", str(cfg.get("device") or "auto")]
+        if cfg.get("precision") and _supports_flag("--precision"):
+            cmd += ["--precision", str(cfg["precision"])]
         # Windows GBK 控制台 + rich 进度条冲突：强制 UTF-8（handoff 坑 33）
         env = {**os.environ, "PYTHONUTF8": "1"}
         try:

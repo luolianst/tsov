@@ -1,0 +1,13 @@
+{
+  "name": "piano-pop-reverb",
+  "title": "流行抒情钢琴 · 中等厅堂混响",
+  "description": "钢琴独奏/伴奏的中等厅堂空间：听得见空间感但不糊，适合中文流行抒情曲。",
+  "targets": ["piano"],
+  "tags": ["pop", "ballad", "piano"],
+  "chain": [
+    {"type": "compressor", "params": {"threshold_db": -18.0, "ratio": 2.5, "attack_ms": 20.0, "release_ms": 250.0}},
+    {"type": "reverb", "params": {"room_size": 0.62, "damping": 0.55, "wet_level": 0.22, "dry_level": 0.85, "width": 0.9}}
+  ],
+  "notes": "起始版本（self-seeded）：温和 2.5:1 压缩稳住动态（attack 20ms 保留琴槌起音），后接 room_size≈0.6 的厅堂混响（wet≈0.22≈口语湿度 20%）。待效果链调研子代理资料回来后复核参数。",
+  "source": "self-seeded v0；待并入 research/effect-presets-sources.md"
+}

@@ -1,0 +1,13 @@
+{
+  "name": "master-limiter",
+  "title": "母带安全限幅",
+  "description": "出口安全网：防止峰值削波，几乎不改变听感。",
+  "targets": ["master"],
+  "tags": ["master", "safety"],
+  "chain": [
+    {"type": "limiter", "params": {"threshold_db": -1.0, "release_ms": 100.0}},
+    {"type": "gain", "params": {"gain_db": -0.5}}
+  ],
+  "notes": "起始版本（self-seeded）：限幅阈 -1dB 留头寸 + 出口 -0.5dB 保险。",
+  "source": "self-seeded v0；待并入 research/effect-presets-sources.md"
+}

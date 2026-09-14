@@ -9,7 +9,7 @@
 - `tsov edit <score.json> [--feedback] [--annotations]`：对话式改谱（M4，人工标注+LLM）
 - `tsov understand <audio>` / `tsov style <score> <ref>`：MOSS 参考曲理解 / 风格改谱（M5/M6）
 - `tsov agent run <task>`：agentloop 独立最小闭环（ADR-0012，不依赖 dsh/opencode）
-- `tsov host render/play <score.json>`：宿主框架渲染/回放（ADR-0013）
+- `tsov host render/play/record <score.json>`：宿主框架渲染 / 回放 / 录制（ADR-0013）
 - `tsov web [--host 127.0.0.1] [--port 8790]`：可视化宿主 Web 壳（M-V2，ADR-0014，docs/05）
 """
 
@@ -253,6 +253,32 @@ def build_parser() -> argparse.ArgumentParser:
     p6.add_argument("--no-midi", action="store_true", help="不导 MIDI")
     p6.add_argument("--midi-stems", action="store_true", help="每轨单独 MIDI")
     p6.set_defaults(func=_cmd_host_export)
+    p7 = host_sub.add_parser("record", help="录制：输入设备采集 → WAV（可接闭环转录）")
+    p7.add_argument("-o", "--output", default="output/host-record.wav", help="输出 wav 路径")
+    p7.add_argument("--seconds", type=float, default=5.0, help="录制时长（秒；默认 5）")
+    p7.add_argument("--device", default=None, help="输入设备索引或名字子串（缺省=系统默认输入）")
+    p7.add_argument("--samplerate", type=int, default=48000, help="采样率（默认 48000）")
+    p7.add_argument("--channels", type=int, default=1, help="声道数（默认 1）")
+    p7.add_argument("--list-devices", action="store_true", help="列出可用输入设备后退出")
+    p7.add_argument("--then-transcribe", action="store_true", help="录完接 M3 闭环（转录→分析→MIDI）")
+    p7.add_argument("--backend", default="game", help="--then-transcribe 的转录后端（默认 game）")
+    p7.add_argument("--no-llm", action="store_true", help="--then-transcribe 时跳过 LLM 分析")
+    p7.set_defaults(func=_cmd_host_record)
+
+    p = sub.add_parser("presets", help="预设库：效果链预设 + 配器预设（list/show/apply-effect）")
+    presets_sub = p.add_subparsers(dest="presets_cmd", required=True)
+    q1 = presets_sub.add_parser("list", help="列出预设")
+    q1.add_argument("--type", choices=["effects", "arrangements"], default=None, help="只看某类")
+    q1.set_defaults(func=_cmd_presets)
+    q2 = presets_sub.add_parser("show", help="查看预设详情")
+    q2.add_argument("name")
+    q2.set_defaults(func=_cmd_presets)
+    q3 = presets_sub.add_parser("apply-effect", help="把效果预设应用到某轨（输出新 Score JSON）")
+    q3.add_argument("score_json")
+    q3.add_argument("track", help="轨道索引或轨名")
+    q3.add_argument("preset", help="效果预设名")
+    q3.add_argument("-o", "--output", default=None, help="输出 Score JSON（缺省 = 覆盖原文件旁 *-fx.json）")
+    q3.set_defaults(func=_cmd_presets)
 
     p = sub.add_parser("web", help="M-V2 可视化宿主 Web 壳（ADR-0014）：FastAPI + 静态前端 + SSE")
     p.add_argument("--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1，仅本地回环）")
@@ -443,6 +469,92 @@ def _cmd_host_export(args: argparse.Namespace) -> int:
     print(f"导出完成：{report['out_dir']}（{len(report['files'])} 个文件，{report['samplerate']}Hz，{mode}，缩放 {report['scale']}）")
     for f in report["files"]:
         print(f"  - {f}")
+    return 0
+
+
+def _cmd_presets(args: argparse.Namespace) -> int:
+    import json
+
+    from .presets import apply_effect_preset, load_library
+
+    lib = load_library()
+    if lib.errors:
+        print("[警告] 预设加载有错误：")
+        for e in lib.errors:
+            print(f"  - {e}")
+
+    if args.presets_cmd == "list":
+        names = lib.list_names(args.type)
+        for kind, items in names.items():
+            print(f"== {kind}（{len(items)}）==")
+            for n in items:
+                preset = lib.effects[n] if kind == "effects" else lib.arrangements[n]
+                print(f"  {n}  —  {preset.title}")
+        return 0
+
+    if args.presets_cmd == "show":
+        if args.name in lib.effects:
+            p = lib.effects[args.name]
+            print(json.dumps(p.raw, ensure_ascii=False, indent=2))
+        elif args.name in lib.arrangements:
+            p = lib.arrangements[args.name]
+            print(json.dumps(p.raw, ensure_ascii=False, indent=2))
+        else:
+            print(f"没有预设：{args.name}")
+            return 1
+        return 0
+
+    # apply-effect
+    from .core.score import Score
+
+    score = Score.from_dict(json.load(open(args.score_json, encoding="utf-8")))
+    track = int(args.track) if str(args.track).lstrip("-").isdigit() else args.track
+    new_score = apply_effect_preset(score, track, args.preset, library=lib)
+    out = args.output
+    if out is None:
+        src = args.score_json
+        out = (src[:-5] if src.lower().endswith(".json") else src) + "-fx.json"
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump(new_score.to_dict(), f, ensure_ascii=False, indent=2)
+    tr = new_score.tracks[track if isinstance(track, int) else next(i for i, t in enumerate(new_score.tracks) if t.name == track)]
+    print(f"已应用效果预设 {args.preset!r} → 轨 {tr.name!r}（{len(tr.instrument.effects)} 个效果）→ {out}")
+    return 0
+
+
+def _cmd_host_record(args: argparse.Namespace) -> int:
+    from .host.record import list_input_devices, record_to_wav
+
+    if args.list_devices:
+        for d in list_input_devices():
+            mark = "*" if d["default"] else " "
+            print(f"{mark} [{d['index']}] {d['name']}  ch={d['channels']}  sr={d['default_samplerate']:.0f}")
+        return 0
+
+    report = record_to_wav(
+        args.output,
+        seconds=args.seconds,
+        device=args.device,
+        samplerate=args.samplerate,
+        channels=args.channels,
+    )
+    ov = "  [溢出!]" if report["overflowed"] else ""
+    print(
+        f"录制完成：{report['path']}  {report['seconds']}s  {report['frames']} frames  "
+        f"{report['samplerate']}Hz/{report['channels']}ch{ov}"
+    )
+    if args.then_transcribe:
+        import datetime
+
+        from .pipeline import run_closed_loop
+
+        out_dir = f"output/m3-closed-loop/{datetime.date.today().isoformat()}"
+        summary = run_closed_loop(
+            str(report["path"]), out_dir=out_dir, backend=args.backend, llm=not args.no_llm
+        )
+        print(
+            f"闭环完成：notes={summary['note_count']} backend={summary['backend']} "
+            f"llm_used={summary['llm_used']} 产物={out_dir}"
+        )
     return 0
 
 
