@@ -49,12 +49,20 @@ class HostEngine:
     # 离线渲染
     # ------------------------------------------------------------------
 
-    def render(self, session: HostSession, out_wav=None) -> np.ndarray:
-        """音轨图 → mono 音频；out_wav 给定时同时写 WAV。"""
-        audio = mix_graph(session, samplerate=self.samplerate)
+    def render(self, session: HostSession, out_wav=None, stereo: bool = False) -> np.ndarray:
+        """音轨图 → 音频（默认 mono；stereo=True 走总线混音立体声）；out_wav 给定时同时写 WAV。"""
+        from .mix import render_buses
+
+        audio = render_buses(session, samplerate=self.samplerate, stereo=stereo)
         if out_wav:
             write_wav(audio, out_wav, samplerate=self.samplerate)
         return audio
+
+    def export(self, session: HostSession, out_dir, **opts) -> dict:
+        """导出矩阵（M-V4）：master/bus/stems WAV + MIDI；返回报告 dict。"""
+        from .export import export_matrix
+
+        return export_matrix(session, out_dir, samplerate=self.samplerate, **opts)
 
     def render_score(self, score_path, out_wav) -> str:
         """Score JSON → WAV（一步式，agent 工具/CLI 常用）。"""

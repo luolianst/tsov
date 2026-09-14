@@ -244,6 +244,15 @@ def build_parser() -> argparse.ArgumentParser:
     p5 = host_sub.add_parser("play-file", help="播放已有 WAV")
     p5.add_argument("wav")
     p5.set_defaults(func=_cmd_host_play_file)
+    p6 = host_sub.add_parser("export", help="导出矩阵（M-V4）：master/bus/stems WAV + MIDI")
+    p6.add_argument("score_json", help="Score 的 stage JSON")
+    p6.add_argument("-o", "--out-dir", default="output/host-export", help="输出目录")
+    p6.add_argument("--mono", action="store_true", help="单声道导出（默认立体声）")
+    p6.add_argument("--no-stems", action="store_true", help="不导每轨 stems")
+    p6.add_argument("--no-buses", action="store_true", help="不导总线 stems")
+    p6.add_argument("--no-midi", action="store_true", help="不导 MIDI")
+    p6.add_argument("--midi-stems", action="store_true", help="每轨单独 MIDI")
+    p6.set_defaults(func=_cmd_host_export)
 
     p = sub.add_parser("web", help="M-V2 可视化宿主 Web 壳（ADR-0014）：FastAPI + 静态前端 + SSE")
     p.add_argument("--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1，仅本地回环）")
@@ -416,6 +425,24 @@ def _cmd_host_play_file(args: argparse.Namespace) -> int:
 
     HostEngine().play_wav(args.wav)
     print("宿主回放完毕")
+    return 0
+
+
+def _cmd_host_export(args: argparse.Namespace) -> int:
+    from .host.export import export_score_file
+
+    report = export_score_file(
+        args.score_json, args.out_dir,
+        stereo=not args.mono,
+        stems=not args.no_stems,
+        buses=not args.no_buses,
+        midi=not args.no_midi,
+        midi_stems=args.midi_stems,
+    )
+    mode = "立体声" if report["stereo"] else "单声道"
+    print(f"导出完成：{report['out_dir']}（{len(report['files'])} 个文件，{report['samplerate']}Hz，{mode}，缩放 {report['scale']}）")
+    for f in report["files"]:
+        print(f"  - {f}")
     return 0
 
 

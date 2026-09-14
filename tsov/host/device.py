@@ -15,22 +15,17 @@ from .session import HostSession
 
 
 def mix_graph(session: HostSession, samplerate: int | None = None) -> np.ndarray:
-    """把音轨图混合成一条 mono 音频（音量按 Instrument.volume 加权）。
+    """（兼容入口）把音轨图混合成一条 mono 音频。
 
+    M-V4 起内部走总线化混音（host/mix.render_buses，stereo=False）——
+    track → bus → master、volume/pan/mute/solo/automation；
+    缺省数据（无 pan/mute/auto）下数值与旧实现逐位一致。
     - 时长 = session.duration + 1s 释放尾
     - 防削波：峰值 >1.0 时整体缩放（不 clip 削波）
     """
-    samplerate = samplerate or session.samplerate
-    n_frames = max(1, int(round((session.duration + 1.0) * samplerate)))
-    mix = np.zeros((n_frames,), dtype=np.float32)
-    for ht in session.tracks:
-        buf = ht.source.render(ht.notes, samplerate, n_frames)
-        vol = float(getattr(ht.track.instrument, "volume", 1.0) or 1.0)
-        mix += buf * vol
-    peak = float(np.max(np.abs(mix))) if mix.size else 0.0
-    if peak > 1.0:
-        mix = mix / peak
-    return mix
+    from .mix import render_buses
+
+    return render_buses(session, samplerate=samplerate, stereo=False)
 
 
 def write_wav(audio: np.ndarray, path, samplerate: int = 44100) -> str:

@@ -48,6 +48,12 @@ class Track:
     name: str = ""
     instrument: Instrument = field(default_factory=Instrument)
     notes: list[Note] = field(default_factory=list)
+    # ---- M-V4 混音字段（ADR-0005 向后兼容增补；缺省值与旧数据行为一致）----
+    bus: str = "master"          # 汇入哪条总线（Score.buses 的 name；未知/缺省 = master）
+    pan: float = 0.0             # -1 全左 .. +1 全右（线性平衡律：对侧衰减）
+    mute: bool = False
+    solo: bool = False
+    automation: dict = field(default_factory=dict)  # {"volume": [[t, 倍率], ...], "pan": [[t, -1..1], ...]}
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -58,6 +64,33 @@ class Track:
             name=data["name"],
             instrument=Instrument.from_dict(data["instrument"]),
             notes=[Note.from_dict(n) for n in data["notes"]],
+            bus=data.get("bus", "master") or "master",
+            pan=float(data["pan"]) if data.get("pan") is not None else 0.0,
+            mute=bool(data.get("mute", False)),
+            solo=bool(data.get("solo", False)),
+            automation=dict(data.get("automation") or {}),
+        )
+
+
+@dataclass
+class Bus:
+    """混音总线（M-V4）：若干 track 的汇聚点，经总线处理（volume/pan/automation）后进 master。"""
+
+    name: str = "master"
+    volume: float = 1.0
+    pan: float = 0.0
+    automation: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Bus":
+        return cls(
+            name=data.get("name", "master") or "master",
+            volume=float(data["volume"]) if data.get("volume") is not None else 1.0,
+            pan=float(data["pan"]) if data.get("pan") is not None else 0.0,
+            automation=dict(data.get("automation") or {}),
         )
 
 
@@ -81,6 +114,9 @@ class Score:
     key_candidates: list[KeyCandidate] = field(default_factory=list)  # 调性候选分布 {key, confidence}
     tracks: list[Track] = field(default_factory=list)
     meta: dict = field(default_factory=dict)  # 生成元信息（run-id / 时间 / 来源）
+    # ---- M-V4 混音字段（向后兼容增补）----
+    buses: list[Bus] = field(default_factory=list)  # 附加总线（master 隐式存在，不列在这里）
+    master: Bus = field(default_factory=lambda: Bus(name="master"))
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -93,4 +129,6 @@ class Score:
             key_candidates=[KeyCandidate.from_dict(k) for k in data["key_candidates"]],
             tracks=[Track.from_dict(t) for t in data["tracks"]],
             meta=data["meta"],
+            buses=[Bus.from_dict(b) for b in data.get("buses") or []],
+            master=Bus.from_dict(data["master"]) if data.get("master") else Bus(name="master"),
         )
