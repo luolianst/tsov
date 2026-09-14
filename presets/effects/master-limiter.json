@@ -1,13 +1,12 @@
 {
   "name": "master-limiter",
-  "title": "母带安全限幅",
-  "description": "出口安全网：防止峰值削波，几乎不改变听感。",
+  "title": "总线安全限幅",
+  "description": "末端兜底：清次声 + 温和限幅，只抓过冲峰值，不做响度最大化。",
   "targets": ["master"],
-  "tags": ["master", "safety"],
+  "tags": ["master", "limiter", "safety", "ceiling"],
   "chain": [
-    {"type": "limiter", "params": {"threshold_db": -1.0, "release_ms": 100.0}},
-    {"type": "gain", "params": {"gain_db": -0.5}}
+    {"type": "highpass", "params": {"cutoff_frequency_hz": 25}},
+    {"type": "limiter", "params": {"threshold_db": -1.5, "release_ms": 60.0}}
   ],
-  "notes": "起始版本（self-seeded）：限幅阈 -1dB 留头寸 + 出口 -0.5dB 保险。",
-  "source": "self-seeded v0；待并入 research/effect-presets-sources.md"
+  "notes": "① highpass 25 Hz：先切掉听不见的次声（社区标准 20–30 Hz，Music Guy Mixing 鼓总线 20 Hz），换来的 headroom 让限幅器少做无谓工作。② limiter threshold_db=-1.5：本库 pedalboard 的 Limiter 官方说明是『threshold_db 控制压缩在哪开始介入，不是输出天花板；输出会在 0 dBFS 硬削，且自动施加 makeup 增益（不可关闭）』。也就是说它不能保证 -1 dBTP 的绝对上限，只是把超过门槛的部分压平——因此本预设按『兜底』设计：门槛取 -1.5 dB（比常见母带天花板 -0.1 / -1.0 dB 更保守一点，抵掉自动 makeup 带来的响度抬升），并且它应当是全链最后一环、只抓少量峰值。若素材峰值 ≈ -6 dBFS，限幅器基本不触发=安全；若你把输入推得更响，它会开始做响度最大化，此时音质取决于素材。⚠️ 若要真正可设定的天花板，pedalboard 0.9.25 里有 BrickwallLimiter(ceiling_db=-1.0)（官方文档示例就是 ceiling_db=-1.0），但它不在本任务白名单的效果器类型里，故未使用。③ release_ms=60：限幅器释放低于 50 ms 容易产生失真/泵动（peak-studios 对压缩器释放的提示同样适用于限幅器），60 ms 属快而不失真的区间；若要更平滑可试 100 ms（本库 Limiter 默认 100 ms）。④ 本预设不含增益推进节点：『响度最大化』不是它的职责，Ozone/Streaming 目标（-14 LUFS 等）需要另外的响度节点，本库无 LUFS 表，请在上层用测量工具校准。"
 }

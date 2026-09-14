@@ -1,0 +1,16 @@
+{
+  "name": "synth-lead",
+  "title": "合成器主音",
+  "description": "Synth lead：低切让位、轻压缩、微量饱和、点八分延迟与中厅堂混响。",
+  "targets": ["synth"],
+  "tags": ["synth", "lead", "delay", "saturation"],
+  "chain": [
+    {"type": "highpass", "params": {"cutoff_frequency_hz": 120}},
+    {"type": "compressor", "params": {"threshold_db": -20.0, "ratio": 3.0, "attack_ms": 8.0, "release_ms": 80.0}},
+    {"type": "distortion", "params": {"drive_db": 8.0}},
+    {"type": "gain", "params": {"gain_db": -2.0}},
+    {"type": "delay", "params": {"delay_seconds": 0.375, "feedback": 0.35, "mix": 0.22}},
+    {"type": "reverb", "params": {"room_size": 0.6, "damping": 0.4, "wet_level": 0.18, "dry_level": 0.5, "width": 1.0}}
+  ],
+  "notes": "① 顺序：滤波→动态→饱和→时基（常规『EQ→动态→空间』+ 合成器常见的饱和放动态之后）。② highpass 120 Hz：lead 要与贝斯/kick 分层，把不做和声的低端切掉是常规做法（iZotope 低端混音指南：给每个元素划分频段、低切不参与的音乐内容）。③ 3:1 / attack 8 ms / release 80 ms：lead 需要『每个音都在同一响度』，比人声更紧一点；release 不低于 50 ms 以避免泵动/失真（peak-studios）。④ distortion drive_db=8：本库 Distortion = tanh(x·db_to_gain(drive_db))，8 dB 是『轻饱和』档（默认 25 dB 已属明显失真；档位划分为经验值），目的是增加一点谐波让 lead 在小喇叭上更突出（合成器常用做法）。⑤ gain -2 dB 补偿饱和带来的响度增长。⑥ delay 0.375 s = 80 BPM 的点八分（60/80×0.75，已校验）/ 或 120 BPM 的八分；feedback 0.35、mix 0.22：合成器 lead 的延迟通常比人声明显（MixingGPT 建议 pad 用 1/4、人声用点 1/8，feedback 25–35%），取值靠该区间上限以获得『节奏型回声』。⑦ reverb room_size 0.6（实测 T30≈1.15 s）、damping 0.4、wet_level 0.18（≈15% 湿度）、width 1.0：lead 用中等空间；NI 提示电子/密编曲适合短混响，hall 更适合原声/宽阔编曲。⚠️ 本库无 EQ 中频键，lead 的 1–3 kHz 穿透力无法在此调整。"
+}

@@ -1,0 +1,14 @@
+{
+  "name": "keys-rhodes-phase",
+  "title": "电钢琴·Phaser 摇摆（附加预设）",
+  "description": "附加预设：电钢琴/风琴类键盘过一个慢速 phaser，再做短空间（本套里唯一用到 phaser 的预设）。",
+  "targets": ["keys", "piano"],
+  "tags": ["keys", "rhodes", "phaser", "bonus"],
+  "chain": [
+    {"type": "highpass", "params": {"cutoff_frequency_hz": 60}},
+    {"type": "compressor", "params": {"threshold_db": -20.0, "ratio": 2.0, "attack_ms": 20.0, "release_ms": 130.0}},
+    {"type": "phaser", "params": {"rate_hz": 0.4, "depth": 0.6, "centre_frequency_hz": 800.0, "feedback": 0.3, "mix": 0.3}},
+    {"type": "reverb", "params": {"room_size": 0.6, "damping": 0.45, "wet_level": 0.16, "dry_level": 0.5, "width": 0.95}}
+  ],
+  "notes": "本预设是附加项（不在任务要求的清单里），存在的原因是让『phaser』这一白名单类型也有一个可用参考值。① highpass 60 Hz + 2:1 / 20 ms / 130 ms：键盘的常规轻处理，起音保留（慢 attack）与中长 release。② phaser rate_hz 0.4 / depth 0.6 / centre_frequency_hz 800 / feedback 0.3 / mix 0.3：电钢琴 + phaser 是常见搭配（摇滚/放克年代的经典音色组合），这里取慢速（0.4 Hz，一个来回约 2.5 s）、较深（0.6）、中心频率 800 Hz（键盘的有体感频段；本库默认中心 1300 Hz）、feedback 0.3 让谷/峰更明显、mix 0.3 只做『摇摆』不改变音色主体。⚠️ 诚实声明：这几个具体数值没有找到权威来源（不像混响/压缩那样有教程给出明确数字），它们是『按本库默认值（rate 1 Hz、depth 0.5、centre 1300 Hz、mix 0.5）向更慢更含蓄方向收缩』的经验取值，请当作起点而不是参考标准。③ reverb room_size 0.6（实测 T30≈1.15 s）、damping 0.45、wet_level 0.16（≈14% 湿度）、width 0.95：与 keys 类乐器一致的中等空间。"
+}

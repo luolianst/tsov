@@ -133,7 +133,7 @@ def test_validate_effect():
 
 def test_effect_kinds_include_core_set():
     kinds = set(effect_kinds())
-    assert {"reverb", "delay", "compressor", "gain", "highpass", "lowpass", "limiter"} <= kinds
+    assert {"reverb", "delay", "compressor", "gain", "highpass", "lowpass", "limiter", "brickwall"} <= kinds
 
 
 # ------------------------------------------------------------------

@@ -1,0 +1,13 @@
+{
+  "name": "piano-solo-intimate",
+  "title": "独奏钢琴·近场小房间",
+  "description": "近场感的独奏钢琴：小房间/近距离，尾音短，像坐在琴旁而不是在厅里。",
+  "targets": ["piano"],
+  "tags": ["intimate", "room", "solo-piano", "dry"],
+  "chain": [
+    {"type": "highpass", "params": {"cutoff_frequency_hz": 45}},
+    {"type": "compressor", "params": {"threshold_db": -20.0, "ratio": 1.5, "attack_ms": 30.0, "release_ms": 180.0}},
+    {"type": "reverb", "params": {"room_size": 0.5, "damping": 0.6, "wet_level": 0.22, "dry_level": 0.5, "width": 0.6}}
+  ],
+  "notes": "① highpass 45 Hz：近场钢琴不需要最低端的房间轰鸣；钢琴录音里低频堆积最容易让人声/低音打架（iZotope：混响前用 HP/LP 去掉浑浊的低频）。② 1.5:1 + 30 ms attack：只做极轻的力度平整，尽量保留演奏动态（近场预设的动态就是表情）。③ room_size 0.5 = 小房间：本库实测 room_size 0.5 的 T30 约 0.94 s，0.55 约 1.05 s，符合『小房间/近场』（iZotope、NI 都把 room reverb 描述为短衰减、反射近）。④ damping 0.6：小房间多为软装吸声，高频吸收更多——实测 damping 0.6 时 >4 kHz 频带 T30≈0.91 s、全频 ≈1.46 s，即高频先没，听起来『暖、不刺』（iZotope：damping 就是混响里的高频吸收）。⑤ wet_level 0.22（≈18% 湿度，线性近似）：小房间也要能听见湿度，否则听感只是『干』；来源对室内/自然混响给 10–25%。⑥ width 0.6：小房间的反射相关性更高，实测 width 0.5 时 L/R 相关约 0.62，比大厅(0.75→0.30)更『聚』。⑦ 本库无 pre-delay/decay 键，短衰减完全由 room_size 承担（近似，非独立参数）。⚠️ threshold 假定输入峰值 ≈ -6 dBFS。"
+}

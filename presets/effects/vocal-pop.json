@@ -1,0 +1,14 @@
+{
+  "name": "vocal-pop",
+  "title": "流行人声·EQ→压缩→空间",
+  "description": "流行歌曲主唱：低切去浑浊、3:1 压缩稳住动态、短空间让它靠前不糊。",
+  "targets": ["vocal"],
+  "tags": ["pop", "lead-vocal", "delay", "plate"],
+  "chain": [
+    {"type": "highpass", "params": {"cutoff_frequency_hz": 90}},
+    {"type": "compressor", "params": {"threshold_db": -20.0, "ratio": 3.0, "attack_ms": 10.0, "release_ms": 60.0}},
+    {"type": "delay", "params": {"delay_seconds": 0.5, "feedback": 0.22, "mix": 0.15}},
+    {"type": "reverb", "params": {"room_size": 0.6, "damping": 0.5, "wet_level": 0.16, "dry_level": 0.5, "width": 0.9}}
+  ],
+  "notes": "链路按常规『滤波/EQ→动态→空间（时基）』。① highpass 90 Hz：人声低切是行业标准第一步（去隆隆声/近讲效应），100 Hz 左右是常见起点（mixingmonster/startcue 等混音指南一致）；本库只有 highpass/lowpass 两键可近似 EQ，故用 HP 代替人声 EQ 的低切。② compressor 3:1 / attack 10 ms / release 60 ms：3:1 配 3–6 dB 增益衰减是人声起点（audiospectra；SOS 论坛亦给 3:1），attack 10 ms 是保留咬字『颗粒』的甜点值（Music Guy Mixing：10 ms 或 1176 的 5），release 50 ms 左右避免过度压缩（同上，Music Guy Mixing 建议 ~50 ms；等效 1176 的 5）。③ delay 0.5 s / feedback 0.22 / mix 0.15：流行人声的常规『点八分（dotted 1/8）』延迟——0.50 s = 90 BPM 的附点八分（60/90×0.75，已用计算校验），feedback 20–30% 是常见区间（Ghostnote 说唱人声链：dotted 1/8、feedback 20–30%；MixingGPT：人声 1/8 dotted、feedback 25–35%），mix 取低值 0.15 只做『黏合』不做效果。若歌曲不是 90 BPM，请把 delay_seconds 改成 60/BPM×0.75（76 BPM→0.592 s，80 BPM→0.562 s，100 BPM→0.450 s）。④ reverb room_size 0.6 = 短空间（本库实测 T30≈1.15 s）；对主唱用短衰减可避免与其它元素打架（NI：混响越短越容易塞进拥挤的编曲）。⑤ wet_level 0.16 ≈ 14% 湿度（线性近似）：NI 明确『多数混音用 ≤50% wet，而且下压几 dB 更保险』；人声 10–20% 是常见区间。⑥ width 0.9。⑦ 本库无 de-esser / 动态 EQ，齿音与 3–5 kHz 尖锐感不在本预设能力内（见 sources 的遗留项）。⚠️ threshold 假定输入峰值 ≈ -6 dBFS、平均电平约 -20 dBFS；素材电平不同请整体平移。"
+}

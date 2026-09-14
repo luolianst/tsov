@@ -29,7 +29,7 @@ def test_repo_presets_load_clean():
     assert lib.errors == []
     assert "piano-pop-reverb" in lib.effects
     p = lib.get_effect("piano-pop-reverb")
-    assert p.chain and p.chain[0].type == "compressor"
+    assert [e.type for e in p.chain] == ["highpass", "compressor", "reverb"]
 
 
 def test_bad_presets_reported_not_silent():
@@ -58,15 +58,15 @@ def test_apply_effect_preset_by_index_and_name():
     lib = load_library()
     s1 = apply_effect_preset(score, 0, "piano-pop-reverb", library=lib)
     s2 = apply_effect_preset(score, "melody", "piano-pop-reverb", library=lib)
-    assert len(s1.tracks[0].instrument.effects) == 2
-    assert [e.type for e in s2.tracks[0].instrument.effects] == ["compressor", "reverb"]
+    assert len(s1.tracks[0].instrument.effects) == 3
+    assert [e.type for e in s2.tracks[0].instrument.effects] == ["highpass", "compressor", "reverb"]
     # 原 Score 不被改动（深拷贝）
     assert score.tracks[0].instrument.effects == []
     # 序列化往返
     d = s1.to_dict()
     s3 = Score.from_dict(d)
-    assert [e.type for e in s3.tracks[0].instrument.effects] == ["compressor", "reverb"]
-    assert s3.tracks[0].instrument.effects[1].params["room_size"] == pytest.approx(0.62)
+    assert [e.type for e in s3.tracks[0].instrument.effects] == ["highpass", "compressor", "reverb"]
+    assert s3.tracks[0].instrument.effects[2].params["room_size"] == pytest.approx(0.75)
 
 
 def test_apply_effect_preset_track_not_found():

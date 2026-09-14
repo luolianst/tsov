@@ -1,0 +1,46 @@
+{
+  "name": "piano-ballad-duet",
+  "title": "抒情钢琴 + 人声（独奏乐器替代）二重奏",
+  "description": "抒情叙事歌编制（4/4，慢速 58–80）：钢琴为伴奏主体（左手根音长音 + 右手分解织体），一支独奏乐器承担人声旋律线（默认小提琴，可换大提琴/长笛/合成人声），副歌可叠弦乐 pad 铺底。做纯粹二重奏时只用前两轨。约定：音高科学记法（C4 = 中央 C = MIDI 60）；pan -1.0 ~ +1.0；level_hint_db 以人声线（solo_lead）为 0 dB 锚点（经验值）。GM program 为 GM Level 1 官方表 0–127 计法（0 = Acoustic Grand Piano）。",
+  "tempo_hint": {"bpm_range": [58, 80], "meter": "4/4"},
+  "instruments": [
+    {
+      "role": "piano",
+      "title": "钢琴（伴奏主体）",
+      "gm_program": 0,
+      "register": ["C2", "C6"],
+      "velocity_range": [40, 95],
+      "level_hint_db": -3,
+      "pan": -0.15,
+      "pattern_notes": "左手：根音+五度/八度长音（C2–C4），每半小节至 1 小节换和弦。右手：8 分/16 分分解琶音（和弦音按 根-五-八-三 序）或与人声对答的单音句。intro/outro 无 solo 时钢琴走主旋律（右手单音，可加 20–40 ms 微延迟制造 rubato 感，经验值）。力度动态大：主歌 45–65，副歌 70–95；踏板（CC64）每和弦换一次。"
+    },
+    {
+      "role": "solo_lead",
+      "title": "独奏旋律（人声替代：小提琴/大提琴/长笛/合成人声）",
+      "gm_program": 40,
+      "register": ["G3", "E6"],
+      "velocity_range": [60, 105],
+      "level_hint_db": 0,
+      "pan": 0.0,
+      "pattern_notes": "40 = Violin（1–128 表 41 号）。人声替代旋律线：长音与级进连奏（legato）为主，避免生硬断奏；抒情歌常用音区 G4–E6（小提琴实际音域 G3–E7，见音域表）；乐句间留 2 个八分呼吸，副歌尾音可延长 1 小节。揉弦用慢速 pitch bend（±20–40 cent，2–3 Hz 周期，经验值）；滑音用 16 分内 portamento。备选 program（0-based）：42 = Cello（音色更暗，音区 C2–C6）、73 = Flute（清亮，C4–D7）、85 = Lead 6 voice（合成人声）。"
+    },
+    {
+      "role": "strings_pad",
+      "title": "弦乐 pad（副歌铺底，可选）",
+      "gm_program": 49,
+      "register": ["C3", "C6"],
+      "velocity_range": [40, 70],
+      "level_hint_db": -20,
+      "pan": 0.0,
+      "pattern_notes": "49 = String Ensemble 2（慢起音，更像真实弦乐呼吸）。只在副歌/桥段长音，和弦音 2–3 个长音；低切 150 Hz（iZotope：弦乐 100 Hz 以下可切）。立体声双轨 ∓0.5（预设单轨居中）。"
+    }
+  ],
+  "mix_notes": "【相对电平】锚点：人声线（solo_lead）0 dB；钢琴 -3；弦乐 pad -20（经验值；人声/主唱永远最前、伴奏钢琴退后 3 dB 是抒情歌通行平衡）。\n【声像】人声线居中（audiospectra：lead vocal center）；钢琴稍偏左 -0.15（单人钢琴伴奏可居中或 20–40% 偏侧）；弦乐 pad 立体声铺满。\n【频率分配】低 20–120 Hz：钢琴左手低音（A1 27.5 Hz 至 C4 区间取用）；solo 低切 100 Hz 以下（单声部旋律不需要超低频）；中低 120–400：钢琴伴奏 200–400 与 solo 的 150–250 重叠——钢琴伴奏在 200–400 收 2–3 dB（经验值）；中 400 Hz–2 k：钢琴主体与 solo 基频区，靠音区错开（钢琴分解织体避开 solo 旋律所在八度）；中高 2–6 k：钢琴 2–4 k 可能刺耳（iZotope）——钢琴 3 k 附近挖 2 dB，把 3–5 k presence 留给 solo（iZotope：人声 presence 一带）；高 8 k+：solo 尾音的 10 k+ 空气感保留，钢琴保留泛音即可。",
+  "sources": [
+    "https://en.wikipedia.org/wiki/General_MIDI （GM1：0 钢琴、40 Violin、42 Cello、46 Orchestral Harp、49 String Ensemble 2、73 Flute、85 Lead 6 voice）",
+    "https://www.izotope.com/community/blog/eq-cheat-sheet （钢琴 20–60/60–200/200–500/2–4k；人声 5–8k/10k+；弦乐 100 以下可切）",
+    "https://audiospectra.net/instrument-panning-cheat-sheet/ （lead vocal 居中；钢琴独奏可居中，伴奏钢琴 20–40% 偏侧）",
+    "https://compositionteaching.com/instrument-ranges/ （violin G3–E7、cello C2–C6、flute C4–D7 音域，concert pitch）",
+    "经验值声明：力度分层、踏板换位、揉弦参数、钢琴挖槽频点为抒情歌伴奏通用做法（经验值）。"
+  ]
+}

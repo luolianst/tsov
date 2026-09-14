@@ -1,0 +1,82 @@
+{
+  "name": "wotaiko-fast-6-8",
+  "title": "高速术力口 6/8（钢琴主旋律 + 合成器 lead/pad/bass + 电子鼓 + 电吉他）",
+  "description": "高速术力口/ボカロ系电子风（打 call/ヲタ芸 场景常见的高速曲）。6/8 拍：每小节 = 6 个八分格 = 12 个十六分格；本预设的 BPM 以附点四分音符计（≈190–210，每小节 2 个附点四分拍），八分脉冲 = 3×BPM ≈ 570–630 次/分。若音序器把 BPM 定义成八分脉冲，请按 ×3 换算（例：附点四分 200 → 八分脉冲 600）。编制：钢琴承担主旋律（人声替代）线；合成器分 lead（齐奏/副旋律）、pad（长音铺底）、bass（律动）；电子鼓走 6/8 高速鼓型（MIDI 通道 10，无 program 号）；电吉他负责切分扫弦/哑音 riff。约定：音高用科学记法（C4 = 中央 C = MIDI 60）；pan 取值 -1.0（全左）～ +1.0（全右），0.0 居中；level_hint_db 是以鼓组（kick+snare 合计）为 0 dB 锚点的相对电平建议（经验值），整条混音峰值建议留 -6 dBFS 余量。GM program 号为官方 General MIDI Level 1 表的 0–127 计法（0 = Acoustic Grand Piano，即 1–128 表的第 1 号）。",
+  "tempo_hint": {"bpm_range": [190, 210], "meter": "6/8"},
+  "instruments": [
+    {
+      "role": "piano",
+      "title": "钢琴（主旋律/人声线）",
+      "gm_program": 0,
+      "register": ["G3", "C6"],
+      "velocity_range": [64, 112],
+      "level_hint_db": -4,
+      "pan": 0.0,
+      "pattern_notes": "主旋律线（vocal 替代）：单音为主，副歌允许 1–2 个双音/八度。音区：主歌 F4–C5（口语化、信息密度高，八分与十六分混排），副歌冲 A4–E5、句尾高音挂到 C6；G3–E4 只用于间奏过门或低音对句。乐句每 1–2 小节留一个八分气口（换气点），句尾用十六分倚音/回转装饰音。重音对齐每小节 16 分格 1、7（两个附点四分拍头），弱起句从格 5 或格 11 进。力度分层：乐句起点 85–100，句中 70–90，弱起 64–75；钢琴 solo 段（无 lead 齐奏时）可到 112。"
+    },
+    {
+      "role": "synth_lead",
+      "title": "合成器 Lead（齐奏/副旋律）",
+      "gm_program": 81,
+      "register": ["C4", "C6"],
+      "velocity_range": [70, 108],
+      "level_hint_db": -8,
+      "pan": 0.0,
+      "pattern_notes": "81 = Lead 2 (sawtooth)，术力口常用主音色；备选 0-based 编号：80 = Lead 1 (square，更 chiptune)、85 = Lead 5 (charang，偏吉他)、86 = Lead 6 (voice，类人声)。主歌不出现或只做长音；副歌与钢琴同度或 +1 八度齐奏主旋律（音区可上探 C7），此时 level 抬到 -5；前奏/间奏/桥段改做副旋律（与钢琴成三度/六度对位）和 16 分跑句，专门填钢琴的气口。厚度：建两轨同 program、detune ±15–25 cent、pan ∓0.25（经验值）。重音与钢琴一致（格 1、7）。"
+    },
+    {
+      "role": "synth_pad",
+      "title": "合成器 Pad（长音铺底）",
+      "gm_program": 89,
+      "register": ["C4", "C6"],
+      "velocity_range": [36, 68],
+      "level_hint_db": -18,
+      "pan": 0.0,
+      "pattern_notes": "89 = Pad 2 (warm)；备选：88 = Pad 1 (new age)、90 = Pad 3 (polysynth)、50 = Synth Strings 1。长音铺底：每 1–2 小节换一次和弦（三和弦/七和弦展位），单选音区 C4–C6，**不写律动**。低切 120–180 Hz（避免与 bass/kick 抢低频）。副歌可叠 +1 八度或五度层增厚；段落切换处用 CC11 (expression) 做 1 拍渐强（GM 无滤波器时用 expression 近似“滤波打开”，经验值）。立体声：同一 program 建两轨 pan ∓0.6 铺满（预设为单轨实例化，双轨为建议）。"
+    },
+    {
+      "role": "synth_bass",
+      "title": "合成贝斯（Synth Bass 1）",
+      "gm_program": 38,
+      "register": ["E1", "E3"],
+      "velocity_range": [88, 118],
+      "level_hint_db": -2,
+      "pan": 0.0,
+      "pattern_notes": "38 = Synth Bass 1（minimoog 风格，适合本风格）；备选 39 = Synth Bass 2。律动三选一（都与 kick 咬合）：① 脚点型（主歌）：与 kick 同点起音——16 分格 1、5、7、11，每音持续到下一击（短长音），跟和弦根音；② 驱动型（副歌）：6 个八分格全弹（16 分格 1,3,5,7,9,11），重音 1、7，其余断奏；③ 长音型（bridge/过渡）：每小节两个附点四分长音（格 1–6、7–12），可做 +8 度跳进。经过音放 16 分格 2、6、10（弱起滑向下一拍）。音区 E1–E3（E1 = 41.2 Hz），上限别超过 G3 与钢琴低音区打架。力度 88–118，重音与 kick 严格对齐；30 Hz 以下低切避免与 kick 互踩（经验值）。"
+    },
+    {
+      "role": "e_drums",
+      "title": "电子鼓组（6/8 高速鼓型）",
+      "gm_program": null,
+      "midi_channel": 10,
+      "register": null,
+      "velocity_range": [70, 127],
+      "level_hint_db": 0,
+      "pan": 0.0,
+      "pattern_notes": "6/8 高速鼓型。网格：12 个十六分格/小节；八分格 n 对应十六分格 2n-1、2n（八分格 1 = 格 1、2 …… 八分格 6 = 格 11、12）。GM 打击乐音高（MIDI 通道 10，1 起数；0-based channel 9）：kick = 36（35 更低沉）、snare = 38、clap = 39、closed hat = 42、pedal hat = 44、open hat = 46、crash = 49（备用 57）、ride = 51、ride bell = 53、toms = 41/43/45/47/48/50。\n【主歌 base】kick(36)：16 分格 1、5、7、11（= 八分格 1、3、4、6；1/7 为拍头重击，5/11 为拍尾“抬”）；snare(38)：16 分格 7（附点四分第 2 拍头，backbeat），句尾可加格 12 ghost（v≈60）；closed hat(42)：6 个八分格全打（格 1,3,5,7,9,11），重音 v≈105 落格 1、7，其余 v≈75；open hat(46)：格 5、11（每拍第 3 个八分，抬尾）。\n【副歌 energy】kick 同 base，并在格 12 加一记 16 分双踩（11→12 连续）推进；snare 叠 clap(39)（v 比 snare 低 3–5）；hat 换 ride(51)：落附点四分（格 1、7）+ 格 7 打 bell(53)，或 ride 走全部 6 个八分做摇摆感；每 4/8 小节的段落头加 crash(49)。\n【fill】每 8 小节句尾：toms 43→45→47→50（或反向）在格 7–12 做 6 连 16 分下行；或用 snare 16 分滚奏（v 从 70 递增到 110）接回下一段格 1 的 crash。\n注：以上落点为通用 6/8 高速电子鼓型的做法（经验值，非单一文献）：骨架来自常规 6/8 rock 鼓型（kick 落八分格 1、4，snare 落八分格 4，hat 走全部 6 个八分；参考 sightreaddrums 6/8 基础鼓型教学视频），高速电子化后加密为上述 12 格方案。"
+    },
+    {
+      "role": "e_guitar",
+      "title": "电吉他（Clean 切分/副歌过载）",
+      "gm_program": 27,
+      "register": ["E2", "E5"],
+      "velocity_range": [78, 112],
+      "level_hint_db": -10,
+      "pan": -0.35,
+      "pattern_notes": "27 = Electric Guitar (clean)；副歌可切 29 = Overdriven、29 备选 28 = Electric Guitar (muted)。① 切分 skank（主歌）：闷音上拨落在“拍尾”位置——八分格 2、3、5、6（每拍内第 2、3 个八分）= 16 分格 3、5、9、11；与 kick 的 1、5、7、11 形成互补切分对答（经验值；6/8 ska/reggae 的 offbeat 手法）。② 16 分哑音 riff：palm mute 全 12 格，重音落 16 分格 1、4、7、10；和弦用 2 音（根音+五度 或 根音+三度）便于 GM 渲染清晰。③ 副歌：八分全下扫（格 1,3,5,7,9,11）与 kick 对齐，闷音/开放交替；旋律句尾留白，不与钢琴/lead 抢 2–4 kHz 中高区。"
+    }
+  ],
+  "mix_notes": "【相对电平平衡目标】锚点：鼓组（kick+snare 合计）= 0 dB；以下均为相对值（经验值，参考 EDM 混音相对层级样例：drums -8 / bass -10 / vocals -8 / pads-synths -10 dB 的比例关系）：kick 0 / snare -1 / clap（叠层）-3 / crash -8 / ride -10 / open hat -12 / closed hat -14；synth bass -2（与 kick 组成低频“双柱”）；钢琴（人声线）-4（最前的乐器，等同人声地位）；synth lead -8（副歌齐奏抬到 -5）；电吉他 -10；pad -18。\n【声像分配】kick、snare、bass、钢琴（人声线）、lead 居中 0.0（audiospectra 声像表：kick/bass 低频无方向性必须居中、lead vocal 与主奏居中；钢琴作人声替代同样居中）；closed/open hat 偏右 +0.20、ride 偏左 -0.15（成对高频元素左右分置）；电吉他单轨 -0.35（若做双轨则 ∓0.8 硬摆，audiospectra：双轨节奏吉他 80–100% 对立）；pad 双轨 ∓0.6 铺满。\n【频率占位（低/中低/中/中高/高）】\n• 低 20–120 Hz：kick 基频 50–100（iZotope：60–80 Hz 为冲击感区）、bass 基频 40–120（E1 = 41 Hz）。只准这两件占满：pad 低切 150 Hz、吉他低切 100 Hz、钢琴低切 60 Hz、hat 类全切 300 Hz 以下（经验值）。\n• 中低 120–400 Hz：bass 泛音/躯干 120–250、snare 躯干 150–250、钢琴低音区、吉他躯干 150–300（均出自 iZotope EQ 表）。本曲最容易“糊”的区：吉他 200–400 可挖 2–3 dB，pad 在此区几乎不发力（经验值）。\n• 中 400 Hz–2 kHz：钢琴主体、吉他“肉感”300 Hz–1.5 k、bass presence 800 Hz–1 k（iZotope）。主旋律要占据此区：副歌齐奏时吉他 800 Hz–1.5 k 挖 2 dB 给钢琴/lead 让位（经验值）。\n• 中高 2–6 kHz：钢琴/lead presence 约 3–5 k、snare attack 2–3.5 k、kick click 1–5 k（iZotope；人声 presence 5–8 k 属更高一段）。术力口“刺”感主要来自此区：hat 的 3–7 k 是刺耳区（iZotope），所以 hat 用 -14 dB + 偏右声像回避与 lead 冲突。\n• 高 6–16 kHz+：hats/ride 的 8–12 k air、snare 8 k+ air（iZotope）；钢琴保留 10 k+ 的空气感（iZotope：人声/弦乐 10 k+ 为 air 与 sparkle）。高频信息量主要交给鼓组，钢琴只需泛音通透。\n【低频管理】kick 与 bass 分工：kick 占 30–100 Hz 的短促冲击，bass 占 60–250 Hz 的持续音；两者重击点完全对齐（格 1、7），不做互相“填缝”，保证高速下低频不糊。\n【中频避让】钢琴、lead、吉他同在 1–4 kHz：靠“时段分工”（主歌吉他为主，副歌钢琴+lead 为主）而非全靠 EQ；同响时吉他挖 2–4 k，pad 全段让出 500 Hz–4 k，仅做空气层（经验值）。\n【高频空间】hat/ride/crash 用声像（±0.15~0.2）与 -12 dB 以下的电平腾出空间；段落头 crash 短暂占据高频不碍事。",
+  "sources": [
+    "https://en.wikipedia.org/wiki/General_MIDI （GM Level 1 program map 与 percussion key map；program 号为 0–127 计法，1–128 表第 1 号 = Acoustic Grand Piano = 0）",
+    "https://www.cs.cmu.edu/~music/cmp/archives/cmsip/readings/GMSpecs_PercMap.htm （GM Percussion Key Map：kick 35/36、snare 38、clap 39、closed hat 42、open hat 46、crash 49/57、ride 51、bell 53）",
+    "https://www.izotope.com/community/blog/eq-cheat-sheet （iZotope EQ 表：kick 60–80/100–200/1–5k；snare 150–250/2–3.5k/8k+；hat 3–7k；bass 40–120/120–250/800–1k；电吉他 100 以下可切/150–300/300–1.5k/2–5k/3–6k；钢琴 20–60/60–200/200–500/2–4k；人声 5–8k/10k+；弦乐 100 以下可切/200–500/10k+；铜管 150 以下可切/500–800/1–5k）",
+    "https://audiospectra.net/instrument-panning-cheat-sheet/ （声像默认值：kick/snare/bass/lead vocal 居中，hat 15–30% 偏侧，rhythm guitar 单轨 30% 偏侧/双轨 80–100% 硬摆，piano 伴奏 20–40% 偏侧，pad 立体声铺满）",
+    "https://www.reddit.com/r/edmproduction/comments/s8ovk8/what_are_the_standard_volume_levels_of_key/ （EDM 相对电平样例：drums -8 dB / bass -10 dB / vocals -8 dB / pads-synths -10 dB，论坛转述的行业常用起点）",
+    "https://www.youtube.com/watch?v=ELYU5_u7SzE （sightreaddrums：Basic 6/8 Drum Beats & Variations——6/8 基础鼓型教学）",
+    "https://www.basnaudio.com/blogs/basn-blog/the-audio-frequency-spectrum-explained （频段划分：sub-bass 20–60 / mid-bass 60–250 / low mids 250–500 / center mids 500–2000 / upper mids 2000–4000 / presence 4000–6000 Hz）",
+    "https://www.teachmeaudio.com/mixing/techniques/audio-spectrum （经典频段表：bass 60–250 Hz、low midrange 250–500 Hz 等）",
+    "https://compositionteaching.com/instrument-ranges/ （乐器音域对照，concert pitch、C4 = 中央 C；交叉核对 Adler《The Study of Orchestration》等）",
+    "经验值声明：6/8 高速鼓型的 12 格具体落点、synth bass 律动变型、吉他切分点、各角色相对电平 dB 数值与 pan 百分比微调，为通用编曲/混音经验，非出自单一文献。"
+  ]
+}

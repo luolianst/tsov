@@ -1,0 +1,16 @@
+{
+  "name": "guitar-electric-dist",
+  "title": "电吉他失真",
+  "description": "失真节奏/主音电吉他：tanh 饱和 + 喇叭式高切，配合短混响保持冲击力。",
+  "targets": ["guitar"],
+  "tags": ["electric", "distortion", "rock", "rhythm"],
+  "chain": [
+    {"type": "highpass", "params": {"cutoff_frequency_hz": 90}},
+    {"type": "distortion", "params": {"drive_db": 18.0}},
+    {"type": "gain", "params": {"gain_db": -4.0}},
+    {"type": "lowpass", "params": {"cutoff_frequency_hz": 5000}},
+    {"type": "delay", "params": {"delay_seconds": 0.42, "feedback": 0.18, "mix": 0.1}},
+    {"type": "reverb", "params": {"room_size": 0.5, "damping": 0.55, "wet_level": 0.1, "dry_level": 0.5, "width": 0.85}}
+  ],
+  "notes": "① highpass 90 Hz：失真前先低切，避免低频被 tanh 折叠成互调失真（失真是非线性，低频越多越容易『糊/嗡嗡』）。② distortion drive_db=18：pedalboard 的 Distortion 官方说明是把输入乘以 db_to_gain(drive_db) 后过 tanh（`tanh(x * db_to_gain(drive_db))`），即 drive_db 越大谐波越多；默认 25 dB，取 18 dB 属中重度（经验档位，非官方推荐值），继续加大只增加压缩感与噪声。③ gain -4 dB：失真后必然变响/变密，用 gain 节点做电平补偿（本库 Compressor 无 makeup，失真也无输出音量键；-4 dB 是经验值，请在渲染后按峰值校准）。④ lowpass 5000 Hz：近似吉他喇叭（speaker/cab）的高频滚降——社区共识是箱体在 5–8 kHz 附近明显下落，做法是在箱体模拟或混音里低通 5–8 kHz（Fractal 用户群讨论；Gearspace 也有 10–14 kHz 的更保守做法），高切同时给主唱/镲片让出高频。⑤ delay 0.42 s / feedback 0.18 / mix 0.10：0.42 s≈71 BPM 的八分；失真节奏吉他只需要极轻的尾巴（与④的低通配合避免高频垃圾累积）。⑥ reverb room_size 0.5（实测 T30≈0.94 s）、damping 0.55、wet_level 0.10（≈9% 湿度）：来源对失真节奏吉他给 0.5–1.5 s、预延时 10–30 ms、湿度 5–15%，理由是失真本身已经很密，混响多了会失去冲击（reverb-calculator 吉他表）。⑦ width 0.85：失真吉他常有双轨硬左/硬右的习惯，单轨时略收宽度更稳。⚠️ 本库无 amp sim / cab IR，drive_db 只是 tanh 饱和度，不等于某款音箱或踏板的具体档位。"
+}

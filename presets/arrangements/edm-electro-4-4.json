@@ -1,0 +1,68 @@
+{
+  "name": "edm-electro-4-4",
+  "title": "电子舞曲 4/4（Four-on-the-floor + offbeat bass）",
+  "description": "主流 EDM/Electro house 编制（4/4，122–132）：kick 每拍地板点，clap 在 2、4 拍，open hat 走每拍后半（offbeat，house 标志），合成贝斯与 kick 互补、合成 lead 是 drop 的主 hook，16 分琶音 pluck 与 pad 分居两侧铺空间。约定：音高科学记法（C4 = 中央 C = MIDI 60）；pan -1.0 ~ +1.0；level_hint_db 以 kick 为 0 dB 锚点（经验值）。GM program 为 GM Level 1 官方表 0–127 计法。打击乐走 MIDI 通道 10，无 program 号。",
+  "tempo_hint": {"bpm_range": [122, 132], "meter": "4/4"},
+  "instruments": [
+    {
+      "role": "synth_bass",
+      "title": "合成贝斯",
+      "gm_program": 38,
+      "register": ["E1", "G2"],
+      "velocity_range": [95, 120],
+      "level_hint_db": -2,
+      "pan": 0.0,
+      "pattern_notes": "38 = Synth Bass 1（也可 39）。offbeat bass：音符在每拍后半（16 分格 3、7、11、15）进出，与 kick 的 1、5、9、13 完全互补（house 通行做法）；electro 段可换全 16 分律动或 8 分长音。每 4 小节跟随和弦根音（i–VI–III–VII 之类）。侧链感：kick 落点处 bass 音符力度收 10–15，或 CC11 在 kick 点做 3–5 dB 挖槽（经验值）。音区 E1–G2（E1 = 41.2 Hz）。"
+    },
+    {
+      "role": "synth_lead",
+      "title": "合成器 Lead（drop 主 hook）",
+      "gm_program": 81,
+      "register": ["C4", "C6"],
+      "velocity_range": [80, 115],
+      "level_hint_db": -6,
+      "pan": 0.0,
+      "pattern_notes": "81 = Lead 2 (sawtooth)；备选 80 = Lead 1 (square)、87 = Lead 7 (fifths)。drop 主 hook：1–2 小节短动机，8 分/16 分重复 4 次后变尾（末音上行或加切分）；音区 C4–C6。厚度：两轨 detune ±15–25 cent、pan ∓0.25。build 段 16 分上行琶音渐密，drop 前 1 拍留白。"
+    },
+    {
+      "role": "synth_arp",
+      "title": "琶音/Pluck（16 分律动层）",
+      "gm_program": 82,
+      "register": ["C5", "C7"],
+      "velocity_range": [70, 100],
+      "level_hint_db": -12,
+      "pan": -0.3,
+      "pattern_notes": "82 = Lead 3 (calliope，颗粒感 pluck)；备选 99 = FX 3 (crystal)。16 分琶音（和弦音依次 根-五-八-三）循环，每 2 小节换和弦；drop 段与 lead 互补：lead 长音时 arp 密、lead 密时 arp 退为长音或休止。偏左 -0.3，与右侧 pad 元素成对。"
+    },
+    {
+      "role": "synth_pad",
+      "title": "合成器 Pad（breakdown/空间层）",
+      "gm_program": 89,
+      "register": ["C4", "C6"],
+      "velocity_range": [40, 70],
+      "level_hint_db": -20,
+      "pan": 0.0,
+      "pattern_notes": "89 = Pad 2 (warm)；备选 88 = Pad 1 (new age)、50 = Synth Strings 1。breakdown/verse 段长和弦（每 2–4 小节换一次）；drop 段低切 200 Hz 只留空灵高频层。立体声双轨 ∓0.6（预设单轨居中）。"
+    },
+    {
+      "role": "e_drums",
+      "title": "电子鼓组（house/electro）",
+      "gm_program": null,
+      "midi_channel": 10,
+      "register": null,
+      "velocity_range": [85, 127],
+      "level_hint_db": 0,
+      "pan": 0.0,
+      "pattern_notes": "4/4 电子（16 分格 1–16）。kick(36)：格 1、5、9、13——四个四分点全是地板点（four-on-the-floor，参考 BandLab house 范式“kick on every beat”）；clap(39)：格 5、13（2、4 拍），可叠 snare(38) 增重；closed hat(42)：16 分全打（全 16 格）；open hat(46)：格 3、7、11、15（每拍后半，offbeat open hat 是 house 标志，v 100–115）；ride(51) 可选 8 分；段落头 crash(49)；段落切换用反向 crash（program 119 = Reverse Cymbal，单音符触发，经验值）。build：snare 16 分渐密 + 渐强 8 小节、drop 前 1 拍全停（经验值）。"
+    }
+  ],
+  "mix_notes": "【相对电平】锚点：kick 0 dB；bass -2；clap/snare -1 ~ -2；lead -6；arp -12；open hat -12；closed hat -14；pad -20（经验值；比例参照 EDM 常用起点 drums -8 / bass -10 / vocals -8 / pads-synths -10 的相对关系）。\n【声像】kick、clap、bass、lead 居中（audiospectra：kick/bass 低频无方向性必须居中、lead 居中）；closed hat +0.2、open hat 同侧；arp -0.3（与 pad 元素左右成对）；pad/arp 可加宽立体声。\n【频率分配】低 20–120 Hz：kick（60–80 冲击，iZotope）与 bass（40–120）独占——lead 低切 120 Hz、arp 低切 400 Hz、pad 低切 200 Hz（经验值）；中低 120–400：bass 躯干 120–250 与 kick 的 100–200 knock（iZotope）——bass 的 300–500 mud 区收 2 dB（iZotope：300–500 为 mud）；中 400 Hz–2 k：bass presence 800–1 k 保留，lead 主体让出与 arp 重叠区（副歌时 arp 挖 1–2 k 附近 2 dB）；中高 2–6 k：clap/snare attack 2–3.5 k（iZotope）与 lead 攻击区——hat 3–7 k 刺耳区（iZotope）靠 -12/-14 dB 与声像平衡；高 8–12 k+：hats 的 air 与 lead 泛音，pad 在此区留自然空气感。",
+  "sources": [
+    "https://en.wikipedia.org/wiki/General_MIDI （GM1：38 Synth Bass 1、81 Lead 2 sawtooth、82 Lead 3 calliope、89 Pad 2 warm、119 Reverse Cymbal；打击乐通道 10）",
+    "https://blog.bandlab.com/easy-drum-patterns/ （house 范式：kick 每拍、snare 2/4、8 或 16 分 hat、偶尔 open hat；trap/hip hop 的对比范式）",
+    "https://www.izotope.com/community/blog/eq-cheat-sheet （kick 60–80/100–200；snare 2–3.5k；hat 3–7k；bass 40–120/120–250/300–500 mud/800–1k；10k+ air）",
+    "https://audiospectra.net/instrument-panning-cheat-sheet/ （kick/bass/lead 居中；单一打击乐 30–80% 偏侧；pad 立体声）",
+    "https://www.reddit.com/r/edmproduction/comments/s8ovk8/what_are_the_standard_volume_levels_of_key/ （EDM 相对电平样例：drums -8 / bass -10 / vocals -8 / pads-synths -10 dB）",
+    "经验值声明：offbeat bass 具体落点、侧链挖槽量、build 手法、各角色相对电平与低切频点为 EDM 通行做法（经验值）。"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "synth-bass",
+  "title": "合成器贝斯",
+  "description": "合成贝斯：切次声、轻饱和补谐波、喇叭式低通、紧压缩；不加混响。",
+  "targets": ["synth"],
+  "tags": ["synth", "bass", "mono", "dry"],
+  "chain": [
+    {"type": "highpass", "params": {"cutoff_frequency_hz": 30}},
+    {"type": "distortion", "params": {"drive_db": 6.0}},
+    {"type": "lowpass", "params": {"cutoff_frequency_hz": 3200}},
+    {"type": "compressor", "params": {"threshold_db": -22.0, "ratio": 4.0, "attack_ms": 10.0, "release_ms": 90.0}}
+  ],
+  "notes": "① 顺序说明：与通用『滤波→动态→空间』略有出入——这里把饱和放在压缩之前、低通放在饱和之后，因为失真是非线性，先加谐波再用低通塑形（等价于贝斯音箱/箱体的高频滚降），最后才做动态控制，这是贝斯链的常见处理思路（SOS《Mixing Bass》与 Waves 的合成贝斯分层文都强调低端『分层+塑形』优先于电平控制）。② highpass 30 Hz：次声段只有能量没有听感，切掉换 headroom；社区共识起点是 20 Hz（Pheek：用 24 dB/oct 从 20 Hz 起切；Music Guy Mixing 鼓总线 HP 20 Hz），合成贝斯取 30 Hz 是因为它的基频可能低到 30–40 Hz，不宜再往上切。③ distortion drive_db=6：本库 Distortion=tanh(x·db_to_gain(drive_db))，6 dB 只是轻饱和，为的是在小喇叭/手机上靠谐波让贝斯『可听』（贝斯饱和的经典理由）。④ lowpass 3200 Hz：合成贝斯不需要太多高频（那些频段属于 lead/镲片），低通同时把③产生的刺耳谐波修圆。⑤ 4:1 / attack 10 ms / release 90 ms：贝斯需要比人声更硬的电平控制（4:1 属紧档），attack 10 ms 保留拨弦/音的起音（masteringthemix 鼓组档位 10–30 ms 的同一逻辑），release 90 ms 高于 50 ms 下限避免泵动（peak-studios）。⑥ 刻意不加混响/延迟：低频元素加空间会制造低端浑浊（NI 明确『kick 与 sub bass 应保持干声——低频元素很少从混响中获益』，iZotope 也把『混响导致浑浊』列为低端头号问题）。⑦ 若素材是单声道贝斯，width 类参数不适用，故本预设不含 reverb。⚠️ threshold 假定输入峰值 ≈ -6 dBFS。"
+}

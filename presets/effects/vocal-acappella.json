@@ -1,0 +1,13 @@
+{
+  "name": "vocal-acappella",
+  "title": "清唱/阿卡贝拉",
+  "description": "无伴奏人声（独唱或小合唱）：轻微的动态控制 + 温和的厅堂底噪，保持咬字与和声清晰。",
+  "targets": ["vocal"],
+  "tags": ["acappella", "a-cappella", "choir", "natural"],
+  "chain": [
+    {"type": "highpass", "params": {"cutoff_frequency_hz": 75}},
+    {"type": "compressor", "params": {"threshold_db": -20.0, "ratio": 2.5, "attack_ms": 15.0, "release_ms": 120.0}},
+    {"type": "reverb", "params": {"room_size": 0.65, "damping": 0.5, "wet_level": 0.18, "dry_level": 0.5, "width": 1.0}}
+  ],
+  "notes": "① highpass 75 Hz：清唱没有贝斯/鼓掩蔽，低切可以更保守（比 vocal-pop 的 90 Hz 低一点），只去掉呼吸噪声与隆隆声。② 2.5:1 / attack 15 ms / release 120 ms：合唱/叠加人声要压的是『整体凹凸』而不是每个字，所以比主唱更轻更快收（attack 15 ms 让每个音头仍有咬字，release 120 ms 不产生泵动；peak-studios 提示 release 低于 50 ms 容易产生失真与泵动）。③ room_size 0.65（本库实测 T30≈1.27 s）：来源对『合唱/和声空间』给的是中等衰减的中厅/室内声（SOS 的 Choral Room 例子：2.5 s、20 ms 预延时、低通 3 kHz、HF damping 6 kHz——那是硬件参数，本库无 decay/LP/damping 频段键，故只取『中等偏短 + 高频有吸收』的意图）；对纯清唱，把空间限制在 ~1.3 s 可避免和声线条被尾巴糊掉。④ damping 0.5：中等高频吸收，尾巴暖和而不刺（对多人和声叠加尤其重要：高频吸收不够会让齿音在混响里累积）。⑤ wet_level 0.18 ≈ 15% 湿度（线性近似）：对 a cappella 属于『能听出空间但不住在教堂』的档位（来源给室内/自然混响 10–25%）。⑥ width 1.0：多人/多轨和声要靠宽度撑开，实测 width 1.0 时 L/R 相关 0.03（最宽）。⑦ 不建议额外加 chorus：清唱的价值在真实的音准/音色，调制型效果会糊掉合唱的拍频与和声纹理（若要更宽，优先调 width 而不是加调制）。"
+}

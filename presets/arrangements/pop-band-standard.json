@@ -1,0 +1,89 @@
+{
+  "name": "pop-band-standard",
+  "title": "流行乐队标准编制",
+  "description": "通用流行歌编制（4/4，中速 100–132）。核心为钢琴 + 木吉他 + 清音电吉他 + 五指贝斯 + 鼓组；副歌可加弦乐 pad 与 hook 合成器 lead。钢琴承担人声替代旋律与和声床，吉他与钢琴分居左右两侧互补。约定：音高科学记法（C4 = 中央 C = MIDI 60）；pan -1.0 全左 ~ +1.0 全右；level_hint_db 以鼓组（kick+snare）为 0 dB 锚点的相对电平建议（经验值）。GM program 号为 GM Level 1 官方表 0–127 计法（0 = Acoustic Grand Piano）。打击乐走 MIDI 通道 10，无 program 号。",
+  "tempo_hint": {"bpm_range": [100, 132], "meter": "4/4"},
+  "instruments": [
+    {
+      "role": "piano",
+      "title": "钢琴（人声替代/和声床）",
+      "gm_program": 0,
+      "register": ["C3", "C6"],
+      "velocity_range": [60, 105],
+      "level_hint_db": -5,
+      "pan": -0.2,
+      "pattern_notes": "主歌：右手单音主旋律（vocal 替代，核心音区 F4–D5）或和弦分解织体；左手根音+五度长音（C3–C4）。副歌：切八分柱式与分解交替，右手可加三度/六度双音。预副歌用 8 分上行推情绪。乐句留八分气口。力度：主歌 60–80，副歌 80–100。"
+    },
+    {
+      "role": "acoustic_guitar",
+      "title": "木吉他（扫弦）",
+      "gm_program": 25,
+      "register": ["E2", "E5"],
+      "velocity_range": [65, 100],
+      "level_hint_db": -10,
+      "pan": 0.35,
+      "pattern_notes": "25 = Acoustic Guitar (steel)。8 分扫弦为主：4/4 常用型「下-下上-上下上」（节拍点 1、2&、3&、4），重音落 2、4 与 snare 同阵；副歌改 16 分拆扫或全 8 分下扫。和弦 3–5 音，避免大横按 6 音（GM 采样易糊）。音区集中在 E2–C4 与 D5 以上，主动让出 C4–D5 的中频段给钢琴右手与人声线（经验值）。"
+    },
+    {
+      "role": "e_guitar",
+      "title": "清音电吉他（点缀/分解）",
+      "gm_program": 27,
+      "register": ["E2", "E5"],
+      "velocity_range": [60, 95],
+      "level_hint_db": -12,
+      "pan": -0.5,
+      "pattern_notes": "27 = Electric Guitar (clean)。主歌留白或用清音分解（arpeggio）与钢琴互补（钢琴长音处吉他走分解，反之亦然）；副歌加切分节奏（上拨落每拍后半 = 16 分格 3、7、11、15）或第二层副旋律（与主旋律三度对位）。solo 段可推到 -8 dB（经验值）。"
+    },
+    {
+      "role": "bass",
+      "title": "贝斯（手指拨弦）",
+      "gm_program": 33,
+      "register": ["E1", "G3"],
+      "velocity_range": [80, 110],
+      "level_hint_db": -4,
+      "pan": 0.0,
+      "pattern_notes": "33 = Electric Bass (finger)。根音主导：拍点 1、3 长音/八分律动，2、4 拍轻点跟 snare；副歌改 8 分驱动（1&2&3&4&）；每 2 小节末加 16 分经过音或五度跳进（E1 = 41.2 Hz，别写太高，上限 G3）。与 kick 对齐重音，60 Hz 以下与 kick 冲突时低切（经验值）。"
+    },
+    {
+      "role": "e_drums",
+      "title": "鼓组",
+      "gm_program": null,
+      "midi_channel": 10,
+      "register": null,
+      "velocity_range": [80, 120],
+      "level_hint_db": 0,
+      "pan": 0.0,
+      "pattern_notes": "4/4 标准（16 分格 1–16，每拍 4 格）。kick(36) 落格 1、9（1、3 拍），副歌在格 11（3 拍后半）加一记；snare(38) 落格 5、13（2、4 拍 backbeat）；closed hat(42) 走全部 8 分（格 1,3,5,7,9,11,13,15），重音落 1、9，副歌改 16 分（全 16 格）；段落头 crash(49)；每 8 小节 fill：格 13–16 用 toms 50→48→47→45 下行或 snare 16 分渐密。参考 BandLab 通用范式：rock/pop 以 kick+snare 骨架 + 2、4 拍 backbeat 为基底（经验值落点细化）。"
+    },
+    {
+      "role": "strings_pad",
+      "title": "弦乐/弦乐 pad（副歌铺底，可选）",
+      "gm_program": 48,
+      "register": ["C4", "C6"],
+      "velocity_range": [45, 75],
+      "level_hint_db": -18,
+      "pan": 0.0,
+      "pattern_notes": "48 = String Ensemble 1。只在副歌/桥段长音铺底，和弦音 2–3 个（根/三/五）长音，不做律动；低切 150 Hz（iZotope：弦乐 100 Hz 以下可切）。立体声双轨 ∓0.5 铺满（预设单轨居中）。"
+    },
+    {
+      "role": "lead_hook",
+      "title": "合成器 Lead（前奏/间奏 hook，可选）",
+      "gm_program": 81,
+      "register": ["C5", "E6"],
+      "velocity_range": [60, 95],
+      "level_hint_db": -10,
+      "pan": 0.0,
+      "pattern_notes": "81 = Lead 2 (sawtooth)。前奏 2 小节 hook 动机 + 间奏复现；副歌可与人声线（钢琴）同度齐奏增厚。动机控制在 1–2 小节、重复 + 尾音变化。"
+    }
+  ],
+  "mix_notes": "【相对电平】锚点：鼓组 0 dB；bass -4；钢琴（人声替代）-5；hook lead -10；木吉他 -10；电吉他 -12；弦乐 pad -18（经验值；层级比例参考 EDM 常用样例 drums -8 / bass -10 / vocals -8 / pads -10 的相对关系，仅作起点）。\n【声像】kick、snare、bass、钢琴（人声线与主奏）居中；系统声像默认值（audiospectra 表）：伴奏钢琴 20–40% 偏侧、木吉他 30–50% 偏侧、单轨节奏电吉他 30% 偏侧——本预设分配为 钢琴 -0.2（左）、木吉他 +0.35（右）、电吉他 -0.5（更左，与木吉他对立成对），pad 双轨 ∓0.5。\n【频率分配】低 20–120 Hz：kick 60–80 冲击 + bass 40–120（iZotope），其余全低切（吉他 100、pad 150、hat 300，经验值）；中低 120–400：snare 躯干 150–250、吉他躯干 150–300、钢琴左手（iZotope）——钢琴左手 200 Hz 以下收 2–3 dB；中 400 Hz–2 k：钢琴主体、吉他 300–1.5 k“肉感”、bass presence 800–1 k（iZotope）——主旋律（钢琴右手）让出 800 Hz–1.5 k 给 bass presence 和吉他；中高 2–6 k：snare attack 2–3.5 k、吉他 2–5 k（iZotope）——副歌时吉他 3–6 k 挖 2 dB 防刺；高 8 k+：hat air、人声/钢琴 10 k+ air（iZotope）。\n【平衡要点】主唱（钢琴替代）永远最前：任何段落钢琴旋律线不能被吉他扫弦盖住，宁可吉他 -12。副歌加 pad 时把钢琴 200–500 Hz 挖 2 dB 腾空间（经验值）。",
+  "sources": [
+    "https://en.wikipedia.org/wiki/General_MIDI （GM1 program map：0 钢琴、25 钢弦木吉他、27 清音电吉他、33 五指贝斯、48 String Ensemble 1、81 Lead 2 sawtooth；打击乐在通道 10）",
+    "https://www.izotope.com/community/blog/eq-cheat-sheet （各乐器频率区间与问题区）",
+    "https://audiospectra.net/instrument-panning-cheat-sheet/ （声像默认值与例外）",
+    "https://blog.bandlab.com/easy-drum-patterns/ （各流派基础鼓型：rock 以 2、4 拍 backbeat 为核心等）",
+    "https://www.reddit.com/r/edmproduction/comments/s8ovk8/what_are_the_standard_volume_levels_of_key/ （相对电平样例，作起点参考）",
+    "https://www.teachmeaudio.com/mixing/techniques/audio-spectrum （频段划分参考）",
+    "经验值声明：各角色的具体 level_hint_db 数值、pan 百分比、扫弦/贝斯具体律动型为该风格通用做法（经验值），非单一文献。"
+  ]
+}

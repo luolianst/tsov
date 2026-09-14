@@ -1,0 +1,98 @@
+{
+  "name": "orchestral-basic",
+  "title": "基础管弦乐编制（弦乐 + 木管 + 铜管 + 定音鼓 + 竖琴）",
+  "description": "标准双管制管弦乐的最小可用压缩编制（用 GM 合奏/独奏音色近似）：弦乐分工高/低声部，木管提供高音色彩与中音对位，铜管负责和声填充与高潮号角，定音鼓/竖琴做节奏与色彩。音域均为实际发声音高（concert pitch，C4 = 中央 C），取自管弦乐器音域对照表；GM 音源若对某音色做了移调，按听感 ±1 八度修正（经验值）。约定：pan -1.0 ~ +1.0；level_hint_db 以弦乐高声部为 0 dB 锚点（经验值）。GM program 为 GM Level 1 官方表 0–127 计法。定音鼓用常规 melodic 通道的 47 号 program（非打击乐通道）。",
+  "tempo_hint": {"bpm_range": [60, 120], "meter": "4/4"},
+  "instruments": [
+    {
+      "role": "strings_hi",
+      "title": "弦乐高声部（小提琴组，旋律/副旋律）",
+      "gm_program": 48,
+      "register": ["G3", "E6"],
+      "velocity_range": [50, 100],
+      "level_hint_db": 0,
+      "pan": -0.25,
+      "pattern_notes": "48 = String Ensemble 1。旋律/副旋律：以级进与长音为主，避免大跳；连奏感靠音符重叠 10–20% 时长实现（GM 合奏采样无真实连奏，经验值）。分弓段落用 8 分；音区 G3–E6（小提琴实际音域 G3–E7，抒写高音 E6 以上 GM 采样容易失真，慎用）。力度随乐句起伏 50–100，渐强段逐音 +8~+12（经验值）。"
+    },
+    {
+      "role": "strings_lo",
+      "title": "弦乐低声部（大提琴/低音提琴组，和声低音）",
+      "gm_program": 49,
+      "register": ["C2", "C4"],
+      "velocity_range": [50, 100],
+      "level_hint_db": -10,
+      "pan": 0.25,
+      "pattern_notes": "49 = String Ensemble 2（慢起音，呼吸感更像真实弦乐）。低声部：根音长音，每 1–2 小节换和弦；可用琶音上行接通向段落。音区 C2–C4（大提琴实际 C2–C6、低音提琴发声音域 E1–D4，见音域表；组齐奏常用 C2–C4）。与定音鼓共同占低频（20–120 Hz）。"
+    },
+    {
+      "role": "woodwind_flute",
+      "title": "长笛（高音木管色彩）",
+      "gm_program": 73,
+      "register": ["C5", "G6"],
+      "velocity_range": [55, 95],
+      "level_hint_db": -12,
+      "pan": -0.1,
+      "pattern_notes": "73 = Flute（1–128 表 74 号）。高音色彩线：与弦乐高声部隔 8 度齐奏，或独立副旋律（长气息连音句，少断奏）；音域实写 C4–D7（长笛音域表），常用 C5–G6。可有 1–2 处装饰性快速经过句。"
+    },
+    {
+      "role": "woodwind_clarinet",
+      "title": "单簧管（中音木管对位）",
+      "gm_program": 71,
+      "register": ["D3", "C6"],
+      "velocity_range": [55, 95],
+      "level_hint_db": -14,
+      "pan": 0.1,
+      "pattern_notes": "71 = Clarinet（1–128 表 72 号）。与弦乐中声部叠齐，或做对位第二线（与长笛成对话）；木管的“弱奏更弱、强奏也弱于铜管”动态特性用力度区间控制（55–95）。音域 D3–B♭6（音域表），常用 D3–C6。"
+    },
+    {
+      "role": "f_horn",
+      "title": "圆号（和声填充）",
+      "gm_program": 60,
+      "register": ["C3", "F4"],
+      "velocity_range": [65, 105],
+      "level_hint_db": -12,
+      "pan": -0.2,
+      "pattern_notes": "60 = French Horn（1–128 表 61 号）。经典角色是和声填充与段落间呼应句：中声部长音 + 3 度/6 度双音连接乐段；不要写快速跑句。实际音域 B1–F5（音域表），常用 C3–F4。与铜管组一起进场要有层次：先 horn 后 trumpet。"
+    },
+    {
+      "role": "trumpet",
+      "title": "小号（号角/高潮打击点）",
+      "gm_program": 56,
+      "register": ["G3", "C6"],
+      "velocity_range": [70, 115],
+      "level_hint_db": -10,
+      "pan": 0.15,
+      "pattern_notes": "56 = Trumpet（1–128 表 57 号）。只在 forte/fortissimo 段落：附点 + 16 分的节奏型重音、齐奏长音到段落顶点；音域 E3–C6（音域表），常用 G3–C6，避免长时间停留在 C6 以上。与 timpani 的重音对齐（共同强调转调/段落转折）。"
+    },
+    {
+      "role": "timpani",
+      "title": "定音鼓（低频节奏骨架）",
+      "gm_program": 47,
+      "register": ["D2", "A3"],
+      "velocity_range": [80, 120],
+      "level_hint_db": -8,
+      "pan": 0.0,
+      "pattern_notes": "47 = Timpani（1–128 表 48 号）。根音/五度：段落重音单击（与铜管对齐）、转折处 16 分交替滚奏（两音交替 = 定音鼓滚奏的 GM 近似，经验值）；只在 tutti 与转调处出现。音域 D2–A3（定音鼓音域表）。"
+    },
+    {
+      "role": "harp",
+      "title": "竖琴（色彩/琶音）",
+      "gm_program": 46,
+      "register": ["C3", "C7"],
+      "velocity_range": [50, 90],
+      "level_hint_db": -16,
+      "pan": -0.15,
+      "pattern_notes": "46 = Orchestral Harp（1–128 表 47 号）。琶音/滑奏（glissando）过门、段落过渡与结尾升华；音域 C♭1–G♯7（音域表），常用 C3–C7。低切 120 Hz 避免与低声部抢低频（经验值）。"
+    }
+  ],
+  "mix_notes": "【相对电平】锚点：弦乐高声部 0 dB；定音鼓 -8；弦乐低声部 -10；小号 -10；长笛 -12；圆号 -12；单簧管 -14；竖琴 -16（经验值；管弦乐混音以“弦乐为底、木管在内、铜管相对前突但可控、打击乐在重音点外不持续压场”为原则）。\n【声像】按管弦乐座位（audiospectra：弦乐 section-specific spread、brass 20–40% 展开）：弦乐高 -0.25（左）、弦乐低 +0.25（右）、长笛 -0.1、单簧管 +0.1、圆号 -0.2、小号 +0.15、定音鼓居中（也可 +0.3）、竖琴 -0.15。主旋律声部接近居中以便单声道兼容。\n【频率分配】低 20–120 Hz：弦乐低声部与定音鼓（D2 = 73.4 Hz 起）——不用额外低频乐器；中低 120–400：低音弦的 200–500 是浑浊高发区（iZotope：弦乐 200–500 可能 muddiness），与圆号（B1–F5 覆盖同区）冲突时把圆号此区收 2 dB（经验值）；中 400 Hz–2 k：弦乐主体与木管基频；中高 2–6 k：弦乐 1–4 k 的 presence/刺耳区（iZotope）与小号攻击区——铜管 500–800 的鼻音区（iZotope）在多声部齐奏时收 2 dB；高 6–16 k+：弦乐 10 k+ air（iZotope）、木管泛音——高频别满，给竖琴与三角铁类色彩留空间。\n【低频管理】弦乐低音与定音鼓交织：定音鼓只在重音出现，不持续；弦乐低音线低切 40 Hz 以下（经验值）。\n【中频避让】旋律（弦乐高/长笛）与对位（单簧管/圆号）必须错开音区：长笛 C5 以上、单簧管 D3–C6 的中段、圆号 C3–F4 的低中段，三层各占一段（附制作方法：给每个声部先定音区再写音）。\n【高频空间】铜管的 5 k+ 侵略感（iZotope）只在重音短暂出现；弦乐 10 k+ 保留空气感。",
+  "sources": [
+    "https://en.wikipedia.org/wiki/General_MIDI （GM1：46 Orchestral Harp、47 Timpani、48/49 String Ensemble 1/2、56 Trumpet、60 French Horn、71 Clarinet、73 Flute）",
+    "https://compositionteaching.com/instrument-ranges/ （管弦乐器音域对照表，concert pitch、middle C = C4；交叉核对 Adler《The Study of Orchestration》、Kennan & Grantham、VSL 等）",
+    "https://joolsscott.co.uk/orchestration/ （弦乐角色与音色性格参考：violin 明亮穿透、viola 温暖等）",
+    "https://www.orchestralibrary.com/reftables/rang.html （管弦乐器音域备用核对表）",
+    "https://www.izotope.com/community/blog/eq-cheat-sheet （弦乐 100 以下可切/200–500 muddiness/1–4k presence/10k+ air；铜管 150 以下可切/500–800 鼻音/1–5k）",
+    "https://audiospectra.net/instrument-panning-cheat-sheet/ （弦乐按座位分布、铜管 20–40% 展开、独奏居中）",
+    "经验值声明：音符重叠 10–20% 做连奏、定音鼓滚奏的 GM 近似写法、各声部相对电平与挖槽量为管弦乐制作通行做法（经验值）。"
+  ]
+}

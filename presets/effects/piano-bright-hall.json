@@ -1,0 +1,14 @@
+{
+  "name": "piano-bright-hall",
+  "title": "明亮大厅钢琴",
+  "description": "大空间、亮尾巴的钢琴声场：厅堂感明显、高频不闷，适合抒情段落的展开。",
+  "targets": ["piano"],
+  "tags": ["hall", "bright", "cinematic", "solo-piano"],
+  "chain": [
+    {"type": "highpass", "params": {"cutoff_frequency_hz": 40}},
+    {"type": "compressor", "params": {"threshold_db": -18.0, "ratio": 2.0, "attack_ms": 25.0, "release_ms": 150.0}},
+    {"type": "delay", "params": {"delay_seconds": 0.022, "feedback": 0.0, "mix": 0.15}},
+    {"type": "reverb", "params": {"room_size": 0.85, "damping": 0.25, "wet_level": 0.24, "dry_level": 0.5, "width": 1.0}}
+  ],
+  "notes": "① highpass 40 Hz + 2:1 轻压缩：与 piano-pop-reverb 同一策略（滤波清低端、慢 attack 保留槌击）。② delay(0.022 s, feedback 0, mix 0.15) = 预延时/早反射的近似：本库 Reverb 没有 pre-delay 键，来源给钢琴的预延时 20–50 ms（reverb-calculator、iZotope 对乐器/人声给 20–80 ms），这里用一个 22 ms、无反馈、低 mix 的单次延迟在混响之前制造『直达声先到、尾巴稍后展开』的分离感。注意这是近似：串行链里该 delay 只让 15% 的信号晚 22 ms 到达混响，等价于一次 -16 dB 的早反射，不是真正的 reverb pre-delay（真 pre-delay 需要单独的 reverb 总线）。③ room_size 0.85 = 大厅：本库实测 T30≈2.31 s，落在来源给独奏钢琴的 2–4 s 与古典 1.8–3.5 s 之间。④ damping 0.25 = 亮：实测 damping 0.2 时 >4 kHz 的 T30≈1.33 s（对比全频 1.57 s），高频尾巴保留得比 damping 0.5（≈1.0 s）更久；这正是 iZotope/NI 所说『damping 低→高频衰减慢→混响更亮』。⑤ wet_level 0.24 ≈ 19% 湿度（线性近似），独奏钢琴可接受 15–30%；这是本套里空间最大的一档，若用于有伴奏的混音请降到 0.18–0.20（钢琴在全编曲里 8–20%）。⑥ width 1.0：大厅取最宽（实测 width 1.0 时 L/R 相关 0.03，几乎完全去相关）。⚠️ threshold 假定输入峰值 ≈ -6 dBFS。"
+}

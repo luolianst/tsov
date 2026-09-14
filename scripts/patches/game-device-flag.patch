@@ -1,0 +1,134 @@
+diff --git a/infer.py b/infer.py
+index 2b246de..3c084a1 100644
+--- a/infer.py
++++ b/infer.py
+@@ -161,6 +161,14 @@ def shared_options(func=None, *, defaults: dict[str, Any] = None):
+             default="32-true",
+             help="Precision for inference."
+         ),
++        click.option(
++            "--device", type=click.Choice(["auto", "cpu", "cuda", "gpu"]), show_default=True,
++            default="auto",
++            help=(
++                "Device for inference. 'auto' (default) uses CUDA when available and "
++                "falls back to CPU; 'cpu' forces CPU; 'cuda'/'gpu' require a CUDA device."
++            )
++        ),
+         click.option(
+             "--seg-threshold", type=click.FloatRange(
+                 min=0, min_open=False, max=1, max_open=True
+@@ -297,6 +305,7 @@ def extract(
+         batch_size: int,
+         num_workers: int,
+         precision: str,
++        device: str,
+         seg_threshold: float,
+         seg_radius: float,
+         t0: float,
+@@ -378,6 +387,7 @@ def extract(
+         batch_size=batch_size,
+         num_workers=num_workers,
+         precision=precision,
++        accelerator=device,
+         cache_threshold=cache_threshold if cache_threshold > 0 else None,
+         cache_fn_blocks=cache_fn_blocks,
+     )
+@@ -464,6 +474,7 @@ def align(
+         batch_size: int,
+         num_workers: int,
+         precision: str,
++        device: str,
+         seg_threshold: float,
+         seg_radius: float,
+         t0: float,
+@@ -557,6 +568,7 @@ def align(
+         batch_size=batch_size,
+         num_workers=num_workers,
+         precision=precision,
++        accelerator=device,
+         cache_threshold=cache_threshold if cache_threshold > 0 else None,
+         cache_fn_blocks=cache_fn_blocks,
+     )
+diff --git a/inference/api.py b/inference/api.py
+index 9b7dc9a..1720ee0 100644
+--- a/inference/api.py
++++ b/inference/api.py
+@@ -71,6 +71,9 @@ def load_config_for_evaluation(
+ 
+ 
+ def load_state_dict_for_inference(path: pathlib.Path, ema=True) -> dict[str, Tensor]:
++    # map_location="cpu" keeps the checkpoint off the GPU during load; the
++    # LightningModule is moved to the chosen device right after load_state_dict,
++    # so this does NOT force CPU inference.
+     checkpoint = torch.load(path, map_location="cpu")
+     state_dict: dict = checkpoint.get("state_dict", {})
+     if ema and (ema_state_dict := checkpoint.get("ema_state_dict")) is not None:
+@@ -128,6 +131,8 @@ def infer_model(
+         cache_threshold: float | None = None,
+         cache_fn_blocks: int = 1,
+         cache_warmup_steps: int = 1,
++        accelerator: str = "auto",
++        devices: str | int | list[int] = "auto",
+ ):
+     cache_installed = False
+     if cache_threshold is not None and cache_threshold > 0:
+@@ -151,6 +156,7 @@ def infer_model(
+                 f"threshold={cache_threshold}, warmup_steps={cache_warmup_steps}",
+                 callback=rank_zero_info,
+             )
++    trainer = None
+     try:
+         module = InferenceModule(model=model, config=config)
+         trainer = lightning.pytorch.Trainer(
+@@ -158,6 +164,8 @@ def infer_model(
+             logger=False,
+             enable_checkpointing=False,
+             callbacks=callbacks,
++            accelerator=accelerator,
++            devices=devices,
+         )
+         dataloader = torch.utils.data.DataLoader(
+             dataset,
+@@ -168,6 +176,11 @@ def infer_model(
+             persistent_workers=num_workers > 0,
+             collate_fn=dataset.collate if hasattr(dataset, "collate") else None,
+         )
++        logging.info(
++            f"[GAME-DEVICE] accelerator={accelerator} devices={devices} "
++            f"precision={precision} num_workers={num_workers} batch_size={batch_size}",
++            callback=rank_zero_info,
++        )
+         if mode == "predict":
+             trainer.predict(module, dataloader)
+         elif mode == "evaluate":
+@@ -175,5 +188,30 @@ def infer_model(
+         else:
+             raise ValueError(f"Unknown mode: {mode}")
+     finally:
++        _log_device_report(trainer)
+         if cache_installed:
+             _report_and_uninstall_cache(model)
++
++
++def _log_device_report(trainer) -> None:
++    """Print the resolved Lightning device and, on CUDA, the peak VRAM used."""
++    try:
++        device = "unknown"
++        if trainer is not None:
++            # Lightning 2.x: Trainer has no .device; the strategy owns root_device.
++            device = str(getattr(getattr(trainer, "strategy", None), "root_device", "unknown"))
++        logging.info(
++            f"[GAME-DEVICE] resolved_root_device={device} "
++            f"cuda_available={torch.cuda.is_available()}",
++            callback=rank_zero_info,
++        )
++        if torch.cuda.is_available():
++            logging.info(
++                f"[GAME-DEVICE] cuda_max_memory_allocated="
++                f"{torch.cuda.max_memory_allocated() / 1024 ** 2:.1f}MiB "
++                f"cuda_max_memory_reserved="
++                f"{torch.cuda.max_memory_reserved() / 1024 ** 2:.1f}MiB",
++                callback=rank_zero_info,
++            )
++    except Exception as e:  # never fail the run because of diagnostics
++        logging.warning(f"[GAME-DEVICE] device report failed: {e}")

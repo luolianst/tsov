@@ -18,9 +18,22 @@ PIANO_PROGRAM = 0
 # Instrument.program（字符串）→ GM program 号；drums 特殊（打击乐轨）
 GM_PROGRAMS = {
     "piano": 0,
+    "e_piano": 4,       # Electric Piano 1（Rhodes 系）
+    "guitar": 27,       # Electric Guitar (clean)
+    "guitar_clean": 27,
+    "guitar_muted": 28, # Electric Guitar (muted) —— 哑音 riff
+    "guitar_overdrive": 29,
+    "guitar_distortion": 30,
     "bass": 33,      # Electric Bass (finger)
+    "synth_bass": 38,  # Synth Bass 1
     "strings": 48,   # String Ensemble 1
+    "organ": 16,       # Drawbar Organ
+    "brass": 61,       # Brass Section
+    "synth_lead": 81,  # Lead 2 (sawtooth)
+    "synth_lead_square": 80,   # Lead 1 (square)
+    "synth_lead_charang": 85,  # Lead 5 (charang)
     "pad": 89,       # Pad 2 (warm)
+    "pad_polysynth": 90,       # Pad 3 (polysynth)
     "drums": None,   # 打击乐：is_drum=True
 }
 

@@ -1,0 +1,13 @@
+{
+  "name": "guitar-acoustic",
+  "title": "木吉他",
+  "description": "指弹/扫弦木吉他：低切清共鸣箱轰声、轻压缩稳住扫弦、自然房间混响。",
+  "targets": ["guitar"],
+  "tags": ["acoustic", "fingerstyle", "room", "natural"],
+  "chain": [
+    {"type": "highpass", "params": {"cutoff_frequency_hz": 95}},
+    {"type": "compressor", "params": {"threshold_db": -20.0, "ratio": 2.0, "attack_ms": 15.0, "release_ms": 120.0}},
+    {"type": "reverb", "params": {"room_size": 0.62, "damping": 0.45, "wet_level": 0.16, "dry_level": 0.5, "width": 0.85}}
+  ],
+  "notes": "① highpass 95 Hz：木吉他低切是共识起点（startcue 混音指南：多数木吉他 high-pass 100 Hz，并在 200 Hz 附近做小幅削减去『箱声』；本库只有 HP/LP，故只做低切）。② 2:0 压缩（2:1、attack 15 ms、release 120 ms）：扫弦动态大，2:1 配中等 attack 让拨弦瞬态先过去（masteringthemix 的木吉他/原声乐器档位在 2:1–3:1、attack 10–30 ms、release 100–200 ms 区间），threshold -20 dB 假定素材峰值 ≈ -6 dBFS、平均 ≈ -20 dBFS 时只有峰值被轻微收住。③ room_size 0.62（本库实测 T30≈1.15 s）：来源给木吉他的衰减是 1–2.5 s、预延时 20–50 ms、湿度 10–25%（reverb-calculator 吉他表；iZotope 给吉他的预延时 40–100 ms 偏氛围一侧），我们取偏短一侧，因为吉他本身谐波丰富、混响多了会『远』。④ damping 0.45：略多一点高频吸收，木吉他的 3–6 kHz 拨弦噪声在混响里容易累积成『沙』（iZotope：damping 是高频吸收；SOS 也强调真实房间的高频反射比干声更暖）。⑤ wet_level 0.16 ≈ 14% 湿度（线性近似），落在 10–25% 下半段。⑥ width 0.85：木吉他常用单支/双麦录制，宽度略收让声像集中、不与人声抢空间。⑦ 本库无 pre-delay 键，20–50 ms 预延时的意图（保起音清晰）由『干声 unity（dry_level 0.5）+ 短 room_size』近似。"
+}

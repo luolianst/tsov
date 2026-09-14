@@ -1,0 +1,13 @@
+{
+  "name": "synth-pad",
+  "title": "合成器 Pad",
+  "description": "氛围 pad：低切防低端堆积、慢速合唱加宽、长衰减大厅混响铺底。",
+  "targets": ["synth"],
+  "tags": ["synth", "pad", "ambient", "wide"],
+  "chain": [
+    {"type": "highpass", "params": {"cutoff_frequency_hz": 100}},
+    {"type": "chorus", "params": {"rate_hz": 0.3, "depth": 0.5, "centre_delay_ms": 12.0, "feedback": 0.1, "mix": 0.4}},
+    {"type": "reverb", "params": {"room_size": 0.85, "damping": 0.35, "wet_level": 0.35, "dry_level": 0.5, "width": 1.0}}
+  ],
+  "notes": "① highpass 100 Hz：pad 是最容易堆积低端的元素，低切 100 Hz 把低频留给贝斯/kick（Music Guy Mixing 的鼓总线同样先高切 20 Hz 再处理；iZotope 低端指南：分层与频段分工）。② chorus 0.3 Hz / depth 0.5 / centre_delay 12 ms / feedback 0.1 / mix 0.4：pad 的『宽』主要来自调制去相关——Ableton 的 pad 文章指出 pad 的作用之一就是靠 unison/调制把立体声图像撑开（原文：a pad can open up a mix by widening the stereo image），本库 Chorus 默认 centre_delay 7 ms / depth 0.25，这里用更慢的 rate（0.3 Hz，几乎听不出摆动）和更深 depth、更长中心延迟来加宽而不产生『漂』的感觉。③ reverb room_size 0.85（本库实测 T30≈2.31 s）：iZotope 的混响技巧文明确说『用长衰减的混响可以把大多数音色变成 ambient pad』，NI 也说 hall 混响适合宽阔的编排，所以 pad 是这套预设里最湿的一档。④ damping 0.35：只做少量高频吸收，保留 pad 的空气感但避免 8 kHz 以上沙沙的尾巴累积（damping 越低高频拖尾越长，实测 damping 0.2 时 >4 kHz 的 T30≈1.33 s 长于 damping 0.5 的 ≈1.0 s）。⑤ wet_level 0.35 ≈ 26% 湿度（线性近似），明显高于人声/钢琴档，符合『pad 用大空间』的意图（NI 提示多数混音 ≤50% wet，且音效类可以更湿）。⑥ width 1.0：最宽（实测 L/R 相关 0.03）。⑦ 可选变体：在 reverb 前加 lowpass 11000 Hz 让 pad 更『柔』；本预设未加，保持算法干净。"
+}

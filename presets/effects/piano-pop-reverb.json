@@ -1,13 +1,13 @@
 {
   "name": "piano-pop-reverb",
-  "title": "流行抒情钢琴 · 中等厅堂混响",
-  "description": "钢琴独奏/伴奏的中等厅堂空间：听得见空间感但不糊，适合中文流行抒情曲。",
+  "title": "流行抒情钢琴·中厅堂混响",
+  "description": "清唱转录的钢琴独奏（4:42 中文流行抒情）：中等厅堂空间感，有深度但音符轮廓不糊。",
   "targets": ["piano"],
-  "tags": ["pop", "ballad", "piano"],
+  "tags": ["pop", "ballad", "solo-piano", "hall"],
   "chain": [
-    {"type": "compressor", "params": {"threshold_db": -18.0, "ratio": 2.5, "attack_ms": 20.0, "release_ms": 250.0}},
-    {"type": "reverb", "params": {"room_size": 0.62, "damping": 0.55, "wet_level": 0.22, "dry_level": 0.85, "width": 0.9}}
+    {"type": "highpass", "params": {"cutoff_frequency_hz": 35}},
+    {"type": "compressor", "params": {"threshold_db": -18.0, "ratio": 2.0, "attack_ms": 25.0, "release_ms": 150.0}},
+    {"type": "reverb", "params": {"room_size": 0.75, "damping": 0.5, "wet_level": 0.2, "dry_level": 0.5, "width": 0.9}}
   ],
-  "notes": "起始版本（self-seeded）：温和 2.5:1 压缩稳住动态（attack 20ms 保留琴槌起音），后接 room_size≈0.6 的厅堂混响（wet≈0.22≈口语湿度 20%）。待效果链调研子代理资料回来后复核参数。",
-  "source": "self-seeded v0；待并入 research/effect-presets-sources.md"
+  "notes": "链路=滤波→动态→空间（常规顺序）。① highpass 35 Hz：清掉钢琴最低端只堆积不听的隆隆声，为混响留 headroom（Music Guy Mixing 鼓总线用 20 Hz、贝斯用 20–30 Hz；钢琴取略高）。② 2:1 / attack 25 ms / release 150 ms：钢琴属瞬态乐器，慢 attack（20–40 ms）+ 中长 release（100–200 ms）让槌击声先过去再压主体（masteringthemix 攻击/释放速查），2:1 只做轻微胶合。③ reverb 是本次映射的核心：本库 Reverb 无 decay/pre-delay 键（Freeverb 血统，只有 room_size/damping/wet/dry/width），所以『中等厅堂、衰减约 1.5–2 s』映射为 room_size 0.75——实测本库 0.75 的冲激响应 T30 外推约 1.70 s（damping 0.5），与 reverb-calculator 流行抒情钢琴表（衰减 1.5–3 s、预延时 20–50 ms、湿度 10–20%）的下半段吻合；取偏短一侧是为了『不能糊』。④ damping 0.5：把高频拖尾收在实测约 1.0 s（damping 0.5、>4 kHz 频带 T30≈1.03 s），避免高频糊成一片。⑤ wet_level 0.20 / dry_level 0.5：pedalboard 实测 dry_level 是干声的 2 倍线性增益，dry_level=0.5 即干声 unity；此时 wet_level 0.20 对应线性能量比约 17% 湿度，落在来源建议的 10–20% 内（百分比为线性振幅比近似，不等于插件 UI 的 mix 刻度）。⑥ width 0.9：实测 width 控制左右去相关程度（width 0.75→L/R 相关 0.30；0.9 略窄一点，让独奏钢琴的声像更集中）。⚠️ 来源建议的 20–50 ms 预延时在本库 Reverb 上无对应键，用『干声保持 unity + 适中 room_size + damping』近似保留起音清晰度；如需更强的『厅堂前后景』可在 reverb 前插一个 delay(0.02 s, feedback 0, mix 0.15) 当作早反射（见 piano-bright-hall 的用法）。⚠️ threshold 假定渲染输入峰值约 -6 dBFS；若输入更响或更轻，请整体平移 -18 dB。"
 }

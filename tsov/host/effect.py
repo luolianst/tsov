@@ -45,6 +45,7 @@ _PARAM_RANGES: dict[str, dict[str, tuple[float, float] | None]] = {
     "highpass": {"cutoff_frequency_hz": (10.0, 20000.0)},
     "lowpass": {"cutoff_frequency_hz": (10.0, 20000.0)},
     "limiter": {"threshold_db": (-60.0, 0.0), "release_ms": (0.1, 5000.0)},
+    "brickwall": {"ceiling_db": (-60.0, 0.0), "release_ms": (0.1, 5000.0)},
     "phaser": {
         "rate_hz": (0.0, 10.0), "depth": (0.0, 1.0), "centre_frequency_hz": (20.0, 20000.0),
         "feedback": (0.0, 1.0), "mix": (0.0, 1.0),
@@ -54,7 +55,8 @@ _PARAM_RANGES: dict[str, dict[str, tuple[float, float] | None]] = {
 _PLUGIN_NAMES: dict[str, str] = {
     "reverb": "Reverb", "delay": "Delay", "compressor": "Compressor", "chorus": "Chorus",
     "distortion": "Distortion", "gain": "Gain", "highpass": "HighpassFilter",
-    "lowpass": "LowpassFilter", "limiter": "Limiter", "phaser": "Phaser",
+    "lowpass": "LowpassFilter", "limiter": "Limiter", "brickwall": "BrickwallLimiter",
+    "phaser": "Phaser",
 }
 
 

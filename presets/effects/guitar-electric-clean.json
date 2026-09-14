@@ -1,0 +1,15 @@
+{
+  "name": "guitar-electric-clean",
+  "title": "电吉他清音",
+  "description": "干净的电吉他（箱体/清音音色）：压缩→合唱→延迟→短混响，经典踏板顺序。",
+  "targets": ["guitar"],
+  "tags": ["electric", "clean", "pedalboard", "chorus", "delay"],
+  "chain": [
+    {"type": "highpass", "params": {"cutoff_frequency_hz": 70}},
+    {"type": "compressor", "params": {"threshold_db": -22.0, "ratio": 2.5, "attack_ms": 12.0, "release_ms": 110.0}},
+    {"type": "chorus", "params": {"rate_hz": 0.8, "depth": 0.3, "centre_delay_ms": 7.0, "feedback": 0.0, "mix": 0.22}},
+    {"type": "delay", "params": {"delay_seconds": 0.4, "feedback": 0.25, "mix": 0.16}},
+    {"type": "reverb", "params": {"room_size": 0.55, "damping": 0.45, "wet_level": 0.13, "dry_level": 0.5, "width": 1.0}}
+  ],
+  "notes": "① 链路顺序按吉他踏板惯例：动态（压缩）→ 调制（合唱）→ 时基（延迟→混响）。这是行业通用排序（Andertons 踏板入门、Chaos Audio 信号链指南：调制类通常在失真之后、时基类在最后；Wampler 也讨论 delay→reverb 的常见次序），本预设不做失真，故顺序为 滤波→压缩→调制→时基。② highpass 70 Hz：电吉他清音没有可用低频，低切可让位给贝斯。③ 2.5:1 / attack 12 ms / release 110 ms：清音电吉他常用轻压缩来『补扫弦的一致性』（Wampler 的压缩踏板指南：attack 决定压住多少瞬态，清音多用较慢 attack 保留拨弦冲击），2.5:1 是温和档。④ chorus 0.8 Hz / depth 0.3 / centre_delay 7 ms / mix 0.22：模拟经典清音合唱（本库 Chorus 默认 centre_delay_ms=7 ms、depth 0.25，0.8 Hz 属慢速、depth 0.3 略深，mix 0.22 仅做『加宽/加润』）。⑤ delay 0.4 s / feedback 0.25 / mix 0.16：0.4 s 正好是 75 BPM 的八分音符（60/75/2），换歌请用 60/BPM/2（80 BPM→0.375 s、90 BPM→0.333 s）；feedback 25% 大约是两三次可听见的回声，mix 低值只做空间感。⑥ reverb room_size 0.55（本库实测 T30≈1.05 s）：来源给清音电吉他是 1–3 s、预延时 20–60 ms、湿度 10–25%，并指出弹簧/板式/房间都可（reverb-calculator 吉他表）；本库 Reverb 是 Freeverb 血统的通用算法，没有 spring/plate 模型，只能近似『短房间』一侧。⑦ wet_level 0.13 ≈ 12% 湿度（线性近似），偏低端，避免与延迟叠加后过湿。⚠️ 本库没有箱体模拟（cab sim）与音调堆栈，吉他音色本身依赖输入素材。"
+}

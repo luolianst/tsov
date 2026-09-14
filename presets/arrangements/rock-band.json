@@ -1,0 +1,68 @@
+{
+  "name": "rock-band",
+  "title": "摇滚乐队（双吉他墙 + 主音 solo）",
+  "description": "标准摇滚编制（4/4，110–160）：双轨失真节奏吉他硬摆左右形成“吉他墙”，一支主音吉他居中负责 solo，贝斯拨片驱动，鼓组以 2、4 拍 backbeat 为骨架，可选摇滚风琴垫底。约定：音高科学记法（C4 = 中央 C = MIDI 60）；pan -1.0 ~ +1.0；level_hint_db 以鼓组为 0 dB 锚点（经验值）。GM program 为 GM Level 1 官方表 0–127 计法。打击乐走 MIDI 通道 10，无 program 号。",
+  "tempo_hint": {"bpm_range": [110, 160], "meter": "4/4"},
+  "instruments": [
+    {
+      "role": "e_guitar_rhythm",
+      "title": "节奏电吉他（失真，双轨硬摆）",
+      "gm_program": 30,
+      "register": ["E2", "E4"],
+      "velocity_range": [90, 120],
+      "level_hint_db": -6,
+      "pan": -0.8,
+      "pattern_notes": "30 = Distortion Guitar（1–128 表 31 号）；备选 29 = Overdriven（1–128 表 30 号，用于主歌轻段）。强力和弦（根音+五度 2 音）8 分下拨为主、重音落 1、3 拍（16 分格 1、9）；副歌切分：16 分格 1、4、7、10 重音 + 其余闷音；solo 段退为长音铺垫。实例化时复制为双轨、pan ∓0.8（hard L/R 吉他墙，audiospectra：双轨 80–100% 对立）。低切 100 Hz，100 以下让给贝斯（iZotope：电吉他 100 Hz 以下可切）。"
+    },
+    {
+      "role": "e_guitar_lead",
+      "title": "主音电吉他（solo/副旋律）",
+      "gm_program": 30,
+      "register": ["C3", "E5"],
+      "velocity_range": [85, 120],
+      "level_hint_db": -7,
+      "pan": 0.0,
+      "pattern_notes": "与节奏吉他用同一 program（30）或 29。主音 solo：五声音阶跑句 + 推弦长音（长音 v 100–120），solo 时 level 抬到 -4；非 solo 段做副旋律填人声气口（三度/六度对位）。音区 C3–E5（电吉他实际音域 E2–约 E6，solo 高音区常用 B4–E5，经验值）。与主唱（人声线）绝不同时抢主旋律。"
+    },
+    {
+      "role": "bass_pick",
+      "title": "贝斯（拨片）",
+      "gm_program": 34,
+      "register": ["E1", "E3"],
+      "velocity_range": [85, 115],
+      "level_hint_db": -4,
+      "pan": 0.0,
+      "pattern_notes": "34 = Electric Bass (picked)。8 分驱动（16 分格 1,3,5,7,9,11,13,15 全打），重音 1、3 拍与 kick 锁死；副歌可加 16 分过门（格 13–16）；桥段或半速段改全音符长音。音区 E1–E3（E1 = 41.2 Hz）；与 kick 同频段，只准这两件占 20–120 Hz。"
+    },
+    {
+      "role": "e_drums",
+      "title": "鼓组",
+      "gm_program": null,
+      "midi_channel": 10,
+      "register": null,
+      "velocity_range": [90, 127],
+      "level_hint_db": 0,
+      "pan": 0.0,
+      "pattern_notes": "4/4 摇滚（16 分格 1–16）。kick(36) 落格 1、9（1、3 拍），副歌加格 11（3 拍后半双踩）、半速段加 13；snare(38) 落格 5、13（2、4 拍 backbeat，v 110–127）；hat(42) 8 分全打（格 1,3,…,15），重音 1、9，副歌换 ride(51) 8 分 + bell(53) 于格 1、9；段落头 crash(49)；每 8 小节句尾 fill：格 13–16 用 toms 50→48→47→45 下行或 snare 16 分渐密。参考：摇滚以 accentuating beats 2 and 4 为基础骨架（BandLab），落点细化与副歌变型为经验值。"
+    },
+    {
+      "role": "organ",
+      "title": "摇滚风琴（长音垫底，可选）",
+      "gm_program": 18,
+      "register": ["C3", "C6"],
+      "velocity_range": [55, 90],
+      "level_hint_db": -14,
+      "pan": -0.3,
+      "pattern_notes": "18 = Rock Organ（1–128 表 19 号）。副歌长音或切分柱式和弦（根/三/五 3 音），垫在吉他墙的空隙里；solo 段可走小过门。低切 120 Hz（经验值）。"
+    }
+  ],
+  "mix_notes": "【相对电平】锚点：鼓组 0 dB；bass -4；节奏吉他（每轨）-6；主音吉他 -7（solo 时 -4）；风琴 -14（可选）。摇滚惯例“kick+bass 必须比吉他略响”，吉他永远垫在节奏组之后（经验值；SOS 混音误区文亦强调 kick/bass 应足够响）。\n【声像】节奏吉他双轨 ∓0.8（audiospectra：双轨节奏吉他 hard pan 80–100% 形成经典摇滚/金属“墙”）；主音吉他居中或 ±0.2（audiospectra：solo 吉他居中到 20% 偏侧）；bass、kick、snare 居中；风琴偏左 -0.3 与主音吉他错开。\n【频率分配】低 20–120 Hz：kick（60–80 冲击，iZotope）与拨片贝斯（40–120）独占；吉他全部低切 100 Hz（iZotope）；中低 120–400：吉他躯干 150–300（iZotope）——双吉他 200–400 各挖 2–3 dB 防堆积；中 400 Hz–2 k：吉他的“肉”300 Hz–1.5 k；主音与人声线让出 1–4 k 的中高段（iZotope 吉他 2–5 k 侵略感区、3–6 k 常需削减）；中高 2–6 k：snare attack 2–3.5 k 与吉他攻击区重叠——吉他 3–6 k 左右各挖 2 dB 槽，hat 3–7 k 刺耳区（iZotope）用 -14 dB 与声像让位；高 8 k+：hat/cymbal air；主音吉他保留 8–12 k 的锐度。",
+  "sources": [
+    "https://en.wikipedia.org/wiki/General_MIDI （GM1：30 Distortion、29 Overdriven、34 Pick Bass、18 Rock Organ、打击乐通道 10）",
+    "https://www.izotope.com/community/blog/eq-cheat-sheet （电吉他 100 以下可切、150–300 躯干、300–1.5k 主体、2–5k 侵略、3–6k 常需削；kick/snare/hat 频率区）",
+    "https://audiospectra.net/instrument-panning-cheat-sheet/ （双轨节奏吉他 80–100% 硬摆；主音居中/微偏；kick、bass、snare 居中）",
+    "https://blog.bandlab.com/easy-drum-patterns/ （rock 鼓型：以 2、4 拍重音与 kick+snare 骨架为核心）",
+    "https://www.soundonsound.com/techniques/5-biggest-mixing-mistakes-and-how-avoid-them （kick/bass 电平是混音最常见问题——低频优先原则）",
+    "经验值声明：吉他双轨的具体电平、挖槽频点、solo 段电平抬升量、风琴用法为该风格通行做法（经验值）。"
+  ]
+}
