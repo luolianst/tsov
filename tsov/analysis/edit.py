@@ -21,7 +21,7 @@ import numpy as np
 import requests
 
 from ..core.notes import Note
-from ..core.score import KeyCandidate, Score
+from ..core.score import Instrument, KeyCandidate, Score, Track
 from ..dsp.pitch import midi_to_hz
 from .dataset import midi_to_note_name
 
@@ -63,7 +63,8 @@ def apply_annotations(notes: list[Note], annotations: list[dict]) -> tuple[list[
     非法（越界/缺字段/格式错）→ 返回 error，不动原谱。
     """
     if not annotations:
-        return notes, ""
+        # 防别名（审计修 M-V2.3）：返回独立副本，调用方可能就地改返回对象（transpose 路径实测会污染入参）
+        return [copy.deepcopy(n) for n in notes], ""
     out = [copy.deepcopy(n) for n in notes]
     for ann in annotations:
         if not isinstance(ann, dict) or "index" not in ann:
@@ -520,9 +521,11 @@ def edit_score(
     """
     score = copy.deepcopy(score)
     if not score.tracks:
-        return EditResult(score, [], "Score 无音轨（拒绝编辑）", False)
+        # 从零创作（审计修 M-V2.3）：web 新建工程落盘 tracks=[]，原先硬拒会挡住空谱创作 —— 自动补一条空旋律轨
+        score.tracks = [Track(name="melody", instrument=Instrument(), notes=[])]
     track = score.tracks[0]
     orig_notes = list(track.notes)
+    snapshot = copy.deepcopy(orig_notes)  # 真值快照（动作路径会就地改对象，不能拿 orig_notes 做前后对比）
 
     # 1. 人工标注
     ann_notes, ann_err = apply_annotations(orig_notes, annotations or [])
@@ -551,6 +554,6 @@ def edit_score(
         diff = build_intent_summary(actions, ann_notes)
     else:
         diff = build_diff_summary(orig_notes, result_notes)
-    if result_notes != orig_notes:
-        score.key_candidates = _detect_key(result_notes)  # M8：改谱后调性同步
+    if result_notes != snapshot:
+        score.key_candidates = _detect_key(result_notes)  # M8：改谱后调性同步（与快照比，防别名恒等）
     return EditResult(score, diff, error, llm_used, actions)

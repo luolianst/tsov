@@ -28,7 +28,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .core.score import Score
+from .core.score import Instrument, Score, Track
 from .host import EditBatch, Project
 
 WEB_VERSION = "0.1.0"
@@ -537,7 +537,9 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
         if (root / "score.json").is_file():
             raise HTTPException(400, f"工程已存在：{body.name!r}")
         if body.score is None:
-            score = Score(title=body.name, tempo=120.0, key_candidates=[], tracks=[], meta={})
+            # 空谱也带一条空旋律轨（审计修 M-V2.3：edit_score 按轨编辑，零轨工程会被硬拒 → 空谱创作不可用）
+            score = Score(title=body.name, tempo=120.0, key_candidates=[],
+                          tracks=[Track(name="melody", instrument=Instrument(), notes=[])], meta={})
         else:
             score = _score_from_dict(body.score)
         proj = Project.create(body.name, score, parent=state.output_dir)

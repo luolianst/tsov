@@ -473,3 +473,12 @@ def test_chat_accepts_base_rev(env, monkeypatch):
     r = env["client"].post("/api/chat", json={"project": name, "message": "改一下", "base_rev": "HEAD"})
     assert r.status_code == 200
     assert _wait_agent_done(env, name)
+
+
+def test_create_project_default_track(env):
+    """审计回归 M-V2.3：新建空工程必须带一条空旋律轨（零轨工程会让空谱创作链路断掉）。"""
+    r = env["client"].post("/api/projects", json={"name": "empty1"})
+    assert r.status_code == 200
+    s = env["client"].get("/api/projects/empty1/state").json()
+    assert len(s["score"]["tracks"]) == 1
+    assert s["score"]["tracks"][0]["notes"] == []

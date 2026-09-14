@@ -8,7 +8,7 @@ import json
 import pytest
 
 from tsov.analysis.edit import (EditResult, _execute_actions, apply_annotations,
-                                  build_diff_summary, edit_score, _validate_llm_notes)
+                                  build_diff_summary, edit_score, _validate_llm_notes, _detect_key)
 from tsov.core.notes import Note
 from tsov.core.score import Instrument, Score, Track
 
@@ -180,3 +180,43 @@ def test_edit_result_roundtrip_json():
     d = json.loads(json.dumps(result.new_score.to_dict(), ensure_ascii=False))
     restored = Score.from_dict(d)
     assert restored.tracks[0].notes[0].pitch_midi == 64
+
+
+# ---- M-V2.3 审计回归（2026-09-14）----
+
+def test_edit_score_from_scratch_no_tracks(monkeypatch):
+    """web 新建工程落盘 tracks=[] → edit_score 自动补空轨、从零创作（原先硬拒=空谱创作不可用）。"""
+    def fake_llm(notes, feedback, suspicious, allow_empty=False, **params):
+        acts = [{"action": "add", "index": 0, "value": {"pitch_midi": 60, "start": 0.0, "end": 0.5}}]
+        new, err = _execute_actions(notes, acts)
+        assert err == ""
+        return new, acts, ""
+
+    monkeypatch.setattr("tsov.analysis.edit._call_edit_llm", fake_llm)
+    empty = Score(title="scratch", tempo=120.0, tracks=[])   # 与 web POST /api/projects 一致
+    result = edit_score(empty, feedback="写一小段 C 大调旋律，4 个音", llm=True)
+    assert result.error == ""
+    assert len(result.new_score.tracks) == 1
+    assert [n.pitch_midi for n in result.new_score.tracks[0].notes] == [60]
+
+
+def test_edit_score_transpose_syncs_key(monkeypatch):
+    """审计回归：动作路径 transpose 后 key_candidates 必须重算（别名比较曾让此判断恒等跳过）。"""
+    from tsov.dsp.pitch import midi_to_hz
+
+    def fake_llm(notes, feedback, suspicious, allow_empty=False, **params):
+        acts = [{"action": "transpose", "value": 2}]
+        new, err = _execute_actions(notes, acts)
+        assert err == ""
+        return new, acts, ""
+
+    monkeypatch.setattr("tsov.analysis.edit._call_edit_llm", fake_llm)
+    base = Score(title="k", tempo=100.0, tracks=[Track(name="m", instrument=Instrument(), notes=[
+        Note(start=i * 0.5, end=i * 0.5 + 0.4, pitch_midi=p, pitch_hz=midi_to_hz(p))
+        for i, p in enumerate([60, 62, 64, 65, 67, 69])])])
+    result = edit_score(base, feedback="整体 +2 半音", llm=True)
+    assert result.error == ""
+    notes = result.new_score.tracks[0].notes
+    assert [n.pitch_midi for n in notes] == [62, 64, 66, 67, 69, 71]
+    assert result.new_score.key_candidates, "key_candidates 为空 = 重算未执行（别名恒等回归）"
+    assert [k.key for k in result.new_score.key_candidates] == [k.key for k in _detect_key(notes)]

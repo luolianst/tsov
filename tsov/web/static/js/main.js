@@ -2,7 +2,7 @@
 
 import { api } from './api.js';
 import { bus, connectEvents } from './events.js';
-import { store, setState, setError, toast, fitView, setView } from './state.js';
+import { store, setState, setError, toast, fitView, setView, clearDiff } from './state.js';
 import * as roll from './roll.js';
 import * as timeline from './timeline.js';
 import { initDiffBadge } from './diff.js';
@@ -64,6 +64,7 @@ async function openProject(name) {
   try {
     const s = await api.getState(name);
     setState(s, { preserveSelection: false });
+    clearDiff();   // 审计修 M-V2.3：清掉上一个工程的 diff 徽章（切工程残留实测）
     store.project = name;
     connectEvents(name);
     chat.switchProject(name);
@@ -149,7 +150,7 @@ function boot() {
     const rev = $('cmp-base').value;
     if (!rev) { setError('先选一个版本（列表或 HEAD）'); return; }
     const a = new Audio();
-    a.src = api.wavUrlRev(store.project, rev) + '?v=' + Date.now();
+    a.src = api.wavUrlRev(store.project, rev) + '&v=' + Date.now();   // 审计修 M-V2.3：wavUrlRev 已带 ?rev=，缓存击穿参数用 &
     a.play().then(() => {
       showToast('▶ 试听旧版 ' + rev.slice(0, 8) + '（缓存渲染，不动 HEAD）');
     }).catch((err) => setError('听旧版失败：' + err.message));

@@ -60,7 +60,7 @@ export function setState(s, opts) {
 }
 
 export function setDiff(d) { store.diff = d; bus.dispatch('diff'); }
-export function clearDiff() { if (store.diff) { store.diff = null; bus.dispatch('diff'); } }
+export function clearDiff() { store.diff = null; bus.dispatch('diff'); }   // 审计修 M-V2.3：徽章由 diff_applied 直写 DOM，不能靠 store.diff 判空
 
 export function setSelection(track, indices) {
   store.selection = { track, indices: indices.slice() };
