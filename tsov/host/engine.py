@@ -1,11 +1,13 @@
 """HostEngine：宿主引擎（ADR-0013）。
 
-入口三件事：
+入口四件事：
 - `load(score)` / `load_score(score_path)` → HostSession（音轨图）
 - `render(session, out_wav)` → 离线渲染（同一 graph）
 - `play(session)` / `play_wav(wav)` → 实时回放（预渲染缓冲 + sounddevice）
+- `stream(session)` / `play_stream(session)` → **实时流式**（回调线程逐块合成；
+  SF2 → SynthStreamer 实时调度，其他音源 → MixStreamer 缓冲切片；transport 深化在 host/transport.py）
 
-毛胚不实现 seek/loop 等完整 transport（接口字段先在 HostSession 层留，transport 深化随里程碑二）。
+transport 控制（play/pause/stop/seek/loop）在 `host/transport.py` 的 Transport 上；
 对外控制协议（daw-cli 9 动词 + 标准错误码）后续接 agentloop 工具时再包一层。
 """
 
@@ -83,3 +85,29 @@ class HostEngine:
 
         audio, sr = sf.read(str(wav_path), dtype="float32")
         play_buffer(audio, samplerate=sr, blocking=blocking)
+
+    # ------------------------------------------------------------------
+    # 实时流式回放（transport 深化，里程碑二）
+    # ------------------------------------------------------------------
+
+    def stream(self, session: HostSession, blocksize: int = 1024):
+        """构造实时音频流（含 Transport）：SF2 → SynthStreamer；其他音源 → MixStreamer 切片。"""
+        from .transport import AudioStreamer, MixStreamer, SynthStreamer, Transport
+
+        try:
+            renderer = SynthStreamer(session, self.samplerate)
+        except RuntimeError:
+            renderer = MixStreamer(mix_graph(session, samplerate=self.samplerate), self.samplerate)
+        transport = Transport(renderer, self.samplerate)
+        return AudioStreamer(transport, self.samplerate, blocksize=blocksize)
+
+    def play_stream(self, session: HostSession, blocking: bool = True) -> None:
+        """实时流式播放（音频回调线程逐块合成——预渲染缓冲 → 实时调度）。"""
+        streamer = self.stream(session)
+        streamer.transport.play()
+        streamer.start()
+        try:
+            if blocking:
+                streamer.wait()
+        finally:
+            streamer.stop()

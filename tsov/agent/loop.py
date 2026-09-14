@@ -9,9 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .llm import chat
-from .prompt import SYSTEM_PROMPT
+from .prompt import build_system_prompt
 from .registry import ToolRegistry
 from .session import AgentSession
+from .skills import SkillLibrary
 
 
 @dataclass
@@ -30,12 +31,14 @@ class AgentLoop:
         max_turns: int = 12,
         session_dir: str = "output/agent-sessions",
         model: str | None = None,
+        skills: SkillLibrary | None = None,
         **llm_params,
     ):
+        self.skills = skills or SkillLibrary()
         if registry is None:
             from .tools import build_default_registry
 
-            registry = build_default_registry()
+            registry = build_default_registry(skills=self.skills)
         self.registry = registry
         self.max_turns = int(max_turns)
         self.session_dir = session_dir
@@ -46,7 +49,7 @@ class AgentLoop:
     def run(self, task: str, session_id: str | None = None) -> AgentResult:
         """执行一次 agent 任务（单会话闭环）。"""
         session = AgentSession(task=task, session_dir=self.session_dir, session_id=session_id)
-        session.add("system", SYSTEM_PROMPT)
+        session.add("system", build_system_prompt(self.skills))
         session.add("user", task)
 
         tool_count = 0

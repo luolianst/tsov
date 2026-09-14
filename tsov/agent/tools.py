@@ -1,6 +1,6 @@
 """tsov 领域工具集（ADR-0012）：agentloop 的工具链 = 现有 CLI 能力的函数化。
 
-工具清单：load_score / edit_score / render_wav / play_score / transcribe / understand / list_dir。
+工具清单：load_score / edit_score / render_wav / play_score / transcribe / understand / list_dir / use_skill。
 每个工具：JSON schema 参数 + 返回文本观测；错误直接抛，由 loop 捕获成观测回喂。
 """
 
@@ -12,6 +12,7 @@ from pathlib import Path
 
 from ..analysis.dataset import midi_to_note_name
 from .registry import ToolRegistry, ToolSpec
+from .skills import SkillLibrary, tool_use_skill
 
 _SUMMARY_NOTE_CAP = 80  # load_score 每个轨最多列出的音符数（防超长观测）
 
@@ -141,8 +142,8 @@ def tool_list_dir(args: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_default_registry() -> ToolRegistry:
-    """agent 默认工具链（tsov CLI 能力的函数化）。"""
+def build_default_registry(skills: SkillLibrary | None = None) -> ToolRegistry:
+    """agent 默认工具链（tsov CLI 能力的函数化）+ skill 机制（use_skill）。"""
     registry = ToolRegistry()
     registry.register(
         ToolSpec(
@@ -239,6 +240,19 @@ def build_default_registry() -> ToolRegistry:
                 "required": [],
             },
             handler=tool_list_dir,
+        )
+    )
+    skills = skills or SkillLibrary()
+    registry.register(
+        ToolSpec(
+            name="use_skill",
+            description="加载技能全文（渐进披露：系统提示的「可用技能」目录里选一个，调用后按其中步骤执行）",
+            parameters={
+                "type": "object",
+                "properties": {"name": {"type": "string", "description": "技能名（见系统提示技能目录）"}},
+                "required": ["name"],
+            },
+            handler=tool_use_skill(skills),
         )
     )
     return registry

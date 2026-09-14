@@ -18,6 +18,7 @@ dependencies = [
     "uvicorn>=0.30",
     "pytest>=8.0",
     "httpx>=0.28",
+    "pedalboard>=0.9",
 ]
 
 [project.scripts]

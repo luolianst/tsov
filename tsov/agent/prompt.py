@@ -11,3 +11,16 @@ SYSTEM_PROMPT = (
     "- 任务完成后用中文自然语言总结，附关键产物路径（如 WAV/JSON）。\n"
     "- 改谱类操作后应渲染 WAV 验证效果；路径用绝对路径或项目内相对路径均可。"
 )
+
+_SKILLS_HINT = (
+    "\n\n可用技能（渐进披露）：下面是技能目录；需要某个技能的完整步骤时，"
+    "调用 use_skill 工具加载全文并照做（不要凭目录描述猜细节）：\n"
+)
+
+
+def build_system_prompt(skills=None) -> str:
+    """系统提示 = 基础提示 + 技能目录（skills 传 SkillLibrary；空库则不加）。"""
+    catalog = skills.catalog() if skills is not None else ""
+    if not catalog:
+        return SYSTEM_PROMPT
+    return SYSTEM_PROMPT + _SKILLS_HINT + catalog

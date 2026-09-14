@@ -87,9 +87,9 @@ def test_mix_graph_applies_instrument_volume():
     assert abs(float(mix.min()) - 0.5) < 1e-5
 
 
-def test_instrument_stubs_raise_not_implemented():
-    # 接口预留桩：明确报 NotImplementedError（ADR-0013），不让上层静默失败
-    with pytest.raises(NotImplementedError):
+def test_instrument_sources_missing_paths_raise():
+    """里程碑二后 VST3/SFZ 不再桩（见 test_host_sources.py）；但路径非法仍须明确报错，不静默。"""
+    with pytest.raises(ImportError):        # pedalboard 加载失败
         VST3Source("some-vst3.dll")
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(RuntimeError):       # 文件不存在
         SFZSource("some.sfz")

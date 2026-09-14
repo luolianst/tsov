@@ -371,7 +371,8 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
     失败则拒绝整条消息（谱不变）；selection = 当前选区（注入 brief 供指代）。
     """
     from .agent import AgentSession, build_default_registry
-    from .agent.prompt import SYSTEM_PROMPT
+    from .agent.prompt import build_system_prompt
+    from .agent.skills import SkillLibrary
 
     bus = state.bus
     proj = state.get_project(project_name)
@@ -431,12 +432,13 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
         f"- 完成后用中文一句话汇报改动要点（含调式与音阶名）"
     )
 
+    skills_lib = SkillLibrary()   # skill 机制（M-V4）：目录进系统提示，正文按需 use_skill 加载
     jsonl_path = Path(AGENT_SESSION_DIR) / f"{session_id}.jsonl"
     session = AgentSession(task=task, session_dir=AGENT_SESSION_DIR, session_id=session_id)
     if jsonl_path.is_file():
         session.messages = _load_session_messages(jsonl_path)  # 续接：同一 JSONL 多轮上下文
     else:
-        session.add("system", SYSTEM_PROMPT)
+        session.add("system", build_system_prompt(skills_lib))
 
     # 首轮带工程上下文；后续轮只发用户消息（上下文已在会话历史里）
     if any(m.get("role") == "user" for m in session.messages):
@@ -449,7 +451,7 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
     turns = 0
     stopped = False
     try:
-        registry = build_default_registry()
+        registry = build_default_registry(skills=skills_lib)
 
         answer = ""
         for turn in range(1, AGENT_MAX_TURNS + 1):
