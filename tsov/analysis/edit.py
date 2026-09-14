@@ -17,13 +17,13 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-import numpy as np
 import requests
 
 from ..core.notes import Note
-from ..core.score import Instrument, KeyCandidate, Score, Track
+from ..core.score import Instrument, Score, Track
 from ..dsp.pitch import midi_to_hz
 from .dataset import midi_to_note_name
+from .key import detect_key  # M-V2.4：调性检测上移独立模块（编辑层/命令层共用）
 
 from .llm import LLM_ENDPOINT, LLM_MODEL, resolve_api_key  # noqa: E402  与 analysis/llm.py 共用端点/模型（去重）
 
@@ -452,53 +452,7 @@ def _count_changes(orig: list[Note], new: list[Note]) -> int:
     return n
 
 
-# ---------------------------------------------------------------------------
-# 3.5 调性重算（M8：edit 后 key_candidates 同步）
-# ---------------------------------------------------------------------------
-
-# 调式音阶（相对根音 pitch class）——scale-fit 调性检测用
-_KEY_SCALES = {
-    "major": {0, 2, 4, 5, 7, 9, 11},
-    "minor": {0, 2, 3, 5, 7, 8, 10},
-    "dorian": {0, 2, 3, 5, 7, 9, 10},
-}
-_NOTE_NAMES12 = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-
-
-def _detect_key(notes: list[Note], top: int = 2) -> list[KeyCandidate]:
-    """按新音符 pitch class 直方图重算调性（scale-fit：音阶内音占比 + 主音权重）。
-
-    对短旋律/调式（如 D dorian）比 Krumhansl 相关更稳——D dorian 全音阶内 → 高占比。
-    """
-    if len(notes) < 4:
-        return []
-    hist = np.zeros(12)
-    for n in notes:
-        hist[int(n.pitch_midi) % 12] += 1.0
-    total = float(hist.sum()) or 1.0
-    h = hist / total
-
-    scored: list[tuple[float, int, str]] = []
-    for root in range(12):
-        for mode, scale in _KEY_SCALES.items():
-            scale_abs = {(s + root) % 12 for s in scale}
-            ratio = float(sum(h[pc] for pc in scale_abs))
-            tonic_w = float(h[root])
-            score = ratio + 0.4 * tonic_w  # 音阶内占比为主，主音出现加分
-            scored.append((score, root, f"{_NOTE_NAMES12[root]} {mode}"))
-
-    scored.sort(reverse=True)
-    seen_roots: set[int] = set()
-    cands: list[KeyCandidate] = []
-    for score, root, name in scored:
-        if root in seen_roots:
-            continue
-        seen_roots.add(root)
-        conf = round(float(np.clip(score / 1.4, 0.1, 1.0)), 2)  # 归一置信度
-        cands.append(KeyCandidate(key=name, confidence=conf))
-        if len(cands) >= top:
-            break
-    return cands
+# （调性重算 detect_key 已上移 tsov/analysis/key.py —— 编辑层与命令层共用，M-V2.4）
 
 
 # ---------------------------------------------------------------------------
@@ -548,6 +502,10 @@ def edit_score(
             llm_used = True
 
     # 3. 落定
+    # 防误清空守卫（M-V2.4，B2#2 实测漏洞）：非空输入 → 空结果（动作路径 delete-all / 整谱空数组）一律拒绝
+    if orig_notes and not result_notes:
+        return EditResult(score, [], "编辑结果为空（拒绝）——非空输入不允许清空，防误删已有谱", llm_used)
+
     track.notes = result_notes
     # M-V2.2：动作路径用意图级摘要（动作即 diff），legacy 整谱路径仍位置对齐
     if actions is not None:
@@ -555,5 +513,5 @@ def edit_score(
     else:
         diff = build_diff_summary(orig_notes, result_notes)
     if result_notes != snapshot:
-        score.key_candidates = _detect_key(result_notes)  # M8：改谱后调性同步（与快照比，防别名恒等）
+        score.key_candidates = detect_key(result_notes)  # M8：改谱后调性同步（与快照比，防别名恒等）；M-V2.4 起与命令层共用 .key 实现
     return EditResult(score, diff, error, llm_used, actions)

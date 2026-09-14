@@ -1,6 +1,6 @@
 """M8 单轨旋律修复单元测试：重叠裁剪 / 碎段合并 / 调性重算 / 力度真实化。"""
 
-from tsov.analysis.edit import _detect_key
+from tsov.analysis.key import detect_key  # M-V2.4：由 analysis.edit 上移
 from tsov.core.notes import Note
 from tsov.dsp.segment import split_into_segments
 from tsov.dsp.transcribe import _fix_overlaps
@@ -46,7 +46,7 @@ def test_detect_key_contains_d_for_dorian():
     # D dorian 旋律（M8：edit 后 key 同步，dorian05 场景）
     notes = [Note(start=i * 0.3, end=i * 0.3 + 0.25, pitch_midi=p, pitch_hz=0.0) for i, p in
              enumerate([41, 45, 47, 47, 47, 48, 50, 50, 50, 52, 48, 48, 45, 45, 47])]
-    keys = _detect_key(notes)
+    keys = detect_key(notes)
     roots = [k.key.split()[0] for k in keys]
     assert "D" in roots, f"key_candidates 应含 D 主音：{keys}"
 

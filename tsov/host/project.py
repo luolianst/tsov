@@ -14,6 +14,7 @@ import subprocess
 from pathlib import Path
 
 from ..analysis.dataset import midi_to_note_name
+from ..analysis.key import detect_key  # M-V2.4：命令层编辑后调性同步（与 edit_score 共用实现）
 from ..core.score import Score
 from .command import EditBatch
 from .diff import diff_notes
@@ -86,6 +87,8 @@ class Project:
         self._undo.append(self.score)
         self._redo.clear()
         self.score = new_score
+        # M-V2.4（审计修复）：命令层编辑后重算调性标签——原 bug：/batch transpose 后 key_candidates 陈旧
+        self.score.key_candidates = detect_key(self.score.tracks[0].notes if self.score.tracks else [])
         self.save()
 
         message = commit_message or batch.label or "编辑"

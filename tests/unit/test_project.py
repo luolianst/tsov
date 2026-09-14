@@ -7,8 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from tsov.analysis.key import detect_key
 from tsov.core.notes import Note
-from tsov.core.score import Instrument, Score, Track
+from tsov.core.score import Instrument, KeyCandidate, Score, Track
 from tsov.host import EditBatch, Project, diff_notes
 
 _HAS_GIT = shutil.which("git") is not None
@@ -153,6 +154,23 @@ def test_project_apply_score(ws):
     assert any("agent：" in ln for ln in p.log())
     assert p.can_undo
     assert p.undo() and [n.pitch_midi for n in p.score.tracks[0].notes] == [60, 62]
+
+
+def test_project_apply_batch_syncs_key_candidates(ws):
+    """命令层编辑后 key_candidates 同步重算（M-V2.4 审计修复）。
+
+    原 bug：/batch transpose 后调性标签不更新——apply_batch 只做 diff+save，
+    重算逻辑只存在于 edit_score 路径。修后：与 detect_key(新音符) 结果一致。
+    """
+    notes = [_note(0.0, 0.5, 60), _note(0.6, 1.1, 62), _note(1.2, 1.7, 64), _note(1.8, 2.3, 67)]  # C D E G
+    p = Project.create("pk", _score(notes), parent=ws)
+    p.score.key_candidates = [KeyCandidate(key="陈旧标签", confidence=0.9)]
+    p.save()
+    out = p.apply_batch(EditBatch(label="+2").add("transpose", value=2))
+    assert out["ok"] and out["applied"] == 1
+    expected = [k.key for k in detect_key(p.score.tracks[0].notes)]
+    got = [k.key for k in p.score.key_candidates]
+    assert got and got == expected, f"key_candidates 应随新谱重算：{got} vs {expected}"
 
 
 def test_project_summary_caps_notes(ws):
