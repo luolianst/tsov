@@ -18,6 +18,14 @@ export function midiOf(y) { return Math.round(store.view.midiTop - y / store.vie
 
 function noteName(m) { return NAMES[((m % 12) + 12) % 12] + (Math.floor(m / 12) - 1); }
 
+/* M-V3：写谱吸附——把时间对齐到网格（store.snapFrac = 拍比例；0 = 关） */
+function snapT(t) {
+  const f = store.snapFrac;
+  if (!f) return t;
+  const grid = (60 / tempo()) * f;
+  return Math.round(t / grid) * grid;
+}
+
 function resize() {
   dpr = window.devicePixelRatio || 1;
   const r = canvas.getBoundingClientRect();
@@ -211,6 +219,24 @@ function hitNote(mx, my) {
 /* ---- 幽灵预览绘制（拖拽/新建时） ---- */
 function drawGhost() {
   if (!drag) return;
+  if (drag.mode === 'move-multi') {
+    /* M-V3：多选整体移动——逐音画蓝色幽灵 + 原位残影 */
+    const v = store.view;
+    for (const o of drag.origs) {
+      const gx = xOf(o.n.start + drag.ghost.dt), gy = yOf(o.n.pitch_midi + drag.ghost.dp);
+      const gw = Math.max(2, (o.n.end - o.n.start) * v.pxPerSec), gh = v.pxPerSemi - 1;
+      ctx.fillStyle = 'rgba(79, 195, 247, 0.30)';
+      ctx.fillRect(gx, gy + 0.5, gw, gh);
+      ctx.strokeStyle = '#4fc3f7';
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(gx + 0.5, gy + 0.5, gw, gh);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+      ctx.setLineDash([2, 2]);
+      ctx.strokeRect(xOf(o.n.start) + 0.5, yOf(o.n.pitch_midi) + 0.5, gw, gh);
+      ctx.setLineDash([]);
+    }
+    return;
+  }
   const g = drag.ghost;
   const v = store.view;
   const x = xOf(g.start), y = yOf(g.pitch);
@@ -247,6 +273,23 @@ async function submitDrag() {
       else showStatus('被拒：' + (r.errors || []).join('；'), true);
       return;
     }
+    if (d.mode === 'move-multi') {
+      const { dt, dp } = d.ghost;
+      if (Math.abs(dt) < 1e-6 && dp === 0) return;
+      for (const o of d.origs) {
+        cmd.push({ op: 'set_time', track: d.track, index: o.i,
+                   value: { start: round3(o.n.start + dt), end: round3(o.n.end + dt) } });
+        if (dp !== 0) {
+          cmd.push({ op: 'set_pitch', track: d.track, index: o.i,
+                     value: Math.max(0, Math.min(127, o.n.pitch_midi + dp)) });
+        }
+      }
+      const r = await api.postBatch(store.project, '移动 ' + d.origs.length + ' 音', cmd,
+                                    '手绘：移动 ' + d.origs.length + ' 音');
+      if (r.applied) showStatus('已移动 ' + d.origs.length + ' 音 @' + (r.commit || '').slice(0, 7));
+      else showStatus('被拒：' + (r.errors || []).join('；'), true);
+      return;
+    }
     const orig = d.orig;
     const g = d.ghost;
     const ns = round3(g.start), ne = round3(g.end), np = Math.max(0, Math.min(127, Math.round(g.pitch)));
@@ -271,6 +314,39 @@ function midiName(m) { return NAMES[((m % 12) + 12) % 12] + (Math.floor(m / 12) 
 function showStatus(msg, isErr) {
   bus.dispatch('toast', msg);
   console[isErr ? 'warn' : 'log']('[tsov hand]', msg);
+}
+
+/* ---- M-V3：音符右键菜单 ---- */
+let noteMenu = null;
+function closeNoteMenu() { if (noteMenu) { noteMenu.remove(); noteMenu = null; } }
+async function postNoteOp(hit, commands, label) {
+  try {
+    const r = await api.postBatch(store.project, label, commands, label);
+    if (r.applied) showStatus('已执行 ' + label + ' @' + (r.commit || '').slice(0, 7));
+    else showStatus('被拒：' + (r.errors || []).join('；'), true);
+  } catch (err) { showStatus(err.message, true); }
+}
+function openNoteMenu(hit, cx, cy) {
+  closeNoteMenu();
+  const n = store.score.tracks[hit.track].notes[hit.index];
+  noteMenu = document.createElement('div');
+  noteMenu.className = 'note-menu';
+  const mk = (txt, fn) => {
+    const b = document.createElement('button');
+    b.textContent = txt;
+    b.addEventListener('click', async () => { closeNoteMenu(); await fn(); });
+    noteMenu.appendChild(b);
+  };
+  const setP = (delta, tag) => () => postNoteOp(hit,
+    [{ op: 'set_pitch', track: hit.track, index: hit.index, value: Math.max(0, Math.min(127, n.pitch_midi + delta)) }], tag);
+  mk('🗑 删除 ' + midiName(n.pitch_midi), () => postNoteOp(hit, [{ op: 'remove', track: hit.track, index: hit.index }], '右键删除'));
+  mk('♯ +1 半音', setP(1, '右键 +1'));
+  mk('♭ −1 半音', setP(-1, '右键 −1'));
+  mk('+8 八度', setP(8, '右键 +8'));
+  mk('−8 八度', setP(-8, '右键 −8'));
+  noteMenu.style.left = Math.min(cx, window.innerWidth - 150) + 'px';
+  noteMenu.style.top = Math.min(cy, window.innerHeight - 200) + 'px';
+  document.body.appendChild(noteMenu);
 }
 
 export function init(rollCanvas) {
@@ -313,6 +389,19 @@ export function init(rollCanvas) {
     }
 
     if (hit) {
+      const curSel = store.selection;
+      /* M-V3：多选整体拖动——点住已选中的音（选区≥2）→ 整个选区一起平移 */
+      if (hit.edge === 'body' && curSel.track === hit.track && curSel.indices.length > 1 && curSel.indices.includes(hit.index)) {
+        const notes = store.score.tracks[hit.track].notes;
+        drag = { mode: 'move-multi', track: hit.track, anchor: hit.index,
+                 indices: curSel.indices.slice(),
+                 origs: curSel.indices.map((i) => ({ i, n: { ...notes[i] } })),
+                 ghost: { dt: 0, dp: 0 },
+                 grabT: notes[hit.index].start - tOf(e.offsetX),
+                 grabP: notes[hit.index].pitch_midi - midiOf(e.offsetY) };
+        bus.dispatch('note-selected', hit);
+        return;
+      }
       setSelection(hit.track, [hit.index]);
       bus.dispatch('note-selected', hit);
       const n = store.score.tracks[hit.track].notes[hit.index];
@@ -331,7 +420,7 @@ export function init(rollCanvas) {
     } else {
       /* 铅笔：创建新音符（默认时长 = 半拍，可拖动拉长） */
       setSelection(0, []);
-      const t0 = Math.max(0, tOf(e.offsetX));
+      const t0 = Math.max(0, snapT(tOf(e.offsetX)));
       const beat = 60 / tempo();
       const dur = Math.max(MIN_DUR, beat / 2);
       drag = { mode: 'create', track: 0, index: null, orig: null,
@@ -344,19 +433,31 @@ export function init(rollCanvas) {
     if (drag) {
       const v = store.view;
       if (drag.mode === 'move') {
-        const t = Math.max(0, tOf(e.offsetX) + drag.grabT);
+        const t = Math.max(0, snapT(tOf(e.offsetX) + drag.grabT));
         const p = Math.max(0, Math.min(127, midiOf(e.offsetY) + drag.grabP));
         const dur = drag.orig.end - drag.orig.start;
         drag.ghost = { start: t, end: t + dur, pitch: p };
+      } else if (drag.mode === 'move-multi') {
+        /* M-V3：选区整体平移（锚点音吸附网格；其余同位移；边界收敛） */
+        const anchor = drag.origs.find((o) => o.i === drag.anchor) || drag.origs[0];
+        const tT = snapT(tOf(e.offsetX) + drag.grabT);
+        let dt = tT - anchor.n.start;
+        let dp = (midiOf(e.offsetY) + drag.grabP) - anchor.n.pitch_midi;
+        for (const o of drag.origs) {
+          dt = Math.max(dt, -o.n.start);
+          dp = Math.max(dp, -o.n.pitch_midi);
+          dp = Math.min(dp, 127 - o.n.pitch_midi);
+        }
+        drag.ghost = { dt, dp };
       } else if (drag.mode === 'create') {
-        const t1 = Math.max(tOf(e.offsetX), drag.ghost.start + MIN_DUR);
+        const t1 = Math.max(snapT(tOf(e.offsetX)), drag.ghost.start + MIN_DUR);
         drag.ghost.end = t1;
         drag.ghost.pitch = midiOf(e.offsetY);
       } else if (drag.mode === 'resize-left') {
-        const s = Math.min(Math.max(0, tOf(e.offsetX)), drag.ghost.end - MIN_DUR);
+        const s = Math.min(Math.max(0, snapT(tOf(e.offsetX))), drag.ghost.end - MIN_DUR);
         drag.ghost.start = s;
       } else if (drag.mode === 'resize-right') {
-        drag.ghost.end = Math.max(drag.ghost.start + MIN_DUR, tOf(e.offsetX));
+        drag.ghost.end = Math.max(drag.ghost.start + MIN_DUR, snapT(tOf(e.offsetX)));
       }
       draw();
       return;
@@ -372,6 +473,25 @@ export function init(rollCanvas) {
   canvas.addEventListener('mouseleave', () => { mouseInCanvas = false; });
   document.addEventListener('mouseup', (e) => {
     if (drag) submitDrag();
+  });
+
+  /* M-V3：双击删除音符（命令层即时，一个 commit） */
+  canvas.addEventListener('dblclick', async (e) => {
+    const hit = hitNote(e.offsetX, e.offsetY);
+    if (!hit || !store.project) return;
+    const n = store.score.tracks[hit.track].notes[hit.index];
+    await postNoteOp(hit, [{ op: 'remove', track: hit.track, index: hit.index }], '双击删除 ' + midiName(n.pitch_midi));
+  });
+
+  /* M-V3：右键菜单（删除 / ±半音 / ±八度） */
+  canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const hit = hitNote(e.offsetX, e.offsetY);
+    if (!hit || !store.project) { closeNoteMenu(); return; }
+    openNoteMenu(hit, e.clientX, e.clientY);
+  });
+  document.addEventListener('mousedown', (e) => {
+    if (noteMenu && !noteMenu.contains(e.target)) closeNoteMenu();
   });
 
   for (const topic of ['state', 'view', 'selection', 'diff', 'playhead', 'playing']) {

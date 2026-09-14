@@ -34,6 +34,11 @@
     <button id="btn-zoom-out" title="缩小时间轴">−</button>
     <button id="btn-zoom-in" title="放大时间轴">＋</button>
     <button id="btn-fit" title="适配整谱">适配</button>
+    <select id="snap-sel" title="写谱吸附（M-V3）：新建/移动/缩放的时值对齐网格（1/8 = 半拍，1/16 = 四分之一拍）">
+      <option value="0">吸附关</option>
+      <option value="0.5">吸附 1/8</option>
+      <option value="0.25">吸附 1/16</option>
+    </select>
   </div>
 
   <div class="group" title="A/B 对比试听（议题 ④）：左槽选任意历史版本，右槽=HEAD；试听走 git show 缓存渲染，不动 HEAD">
@@ -80,6 +85,11 @@
       </select>
       <button id="btn-quick-run" title="执行当前选中的快捷命令">执行</button>
     </div>
+    <div id="ann-queue" hidden>
+      <span class="muted small">待发送标注：</span>
+      <span id="ann-queue-list"></span>
+      <button id="btn-ann-clear" title="清空待发送标注">✕</button>
+    </div>
     <div id="chat-input-row">
       <input id="chat-input" placeholder="对乐谱说点什么…（如：改成 D 多利亚调式）">
       <button id="btn-send">发送</button>
@@ -102,6 +112,9 @@
   <button data-op="vel-" title="力度 -0.1">力度 −</button>
   <button data-op="vel+" title="力度 +0.1">力度 +</button>
   <button data-op="delete" title="删除选中音（按索引降序执行）">🗑 删除</button>
+  <label id="ann-mode-wrap" title="标注模式（M-V3）：选区操作先挂起为「人工标注」，随下条对话发送——确定性应用、最高优先级、不走 LLM">
+    <input type="checkbox" id="ann-mode"> 标注模式
+  </label>
   <button data-op="close" title="关闭工具条（保留选区）">✕</button>
 </div>
 

@@ -5,7 +5,7 @@
 
 import { api } from './api.js';
 import { bus } from './events.js';
-import { store, setAgentBusy, clearDiff, toast, setError } from './state.js';
+import { store, setAgentBusy, clearDiff, toast, setError, clearAnnotations } from './state.js';
 
 const LF = String.fromCharCode(10);
 const MAX_LOGS = 400;
@@ -193,13 +193,17 @@ async function send(message) {
   if (!message.trim() || store.agentBusy) return;
 
   const baseRev = (cmpSel && cmpSel.value) || 'HEAD';   // 议题 ④：编辑目标版本标识（默认 HEAD）
+  const anns = store.pendingAnnotations.map((q) => q.ann);   // M-V3：人工标注（确定性优先，随消息发送）
+  const sel = (store.selection && store.selection.indices.length) ? store.selection : null;
   appendCard(text('msg user', message), { kind: 'user', text: message, ts: Date.now() });
   inputEl.value = '';
   setAgentBusy(true);
-  sysMsg('已发送（SSE 事件流，多轮会话续接同一 JSONL；目标版本 ' + baseRev + '）…');
+  sysMsg('已发送（' + (anns.length ? '含 ' + anns.length + ' 条人工标注：确定性先行、不走 LLM；' : '')
+    + 'SSE 事件流；目标版本 ' + baseRev + '）…');
   try {
-    const res = await api.chat(store.project, message, baseRev);
+    const res = await api.chat(store.project, message, baseRev, anns.length ? anns : null, sel);
     sysMsg('session：' + res.session_id);
+    if (anns.length) clearAnnotations();   // 已随消息送达（后端确定性应用；失败会出 agent_error）
   } catch (e) {
     setAgentBusy(false);
     appendCard(text('msg error', '启动失败：' + e.message), { kind: 'error', text: '启动失败：' + e.message, ts: Date.now() });

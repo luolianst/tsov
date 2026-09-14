@@ -60,6 +60,7 @@ def apply_annotations(notes: list[Note], annotations: list[dict]) -> tuple[list[
     - merge:    把 index 与 index+1 合并（时长取并集，音高取前音）
     - set_time: value={start?, end?} 改位置/时长（未给字段保持原值）
     - move:      value={start_delta?, end_delta?, pitch_delta?} 相对位移（M-V2.2 动作数组 / 手势同构）
+    - velocity:  value=float(0..1) 绝对力度（M-V3：标注队列「力度 ±」）
     非法（越界/缺字段/格式错）→ 返回 error，不动原谱。
     """
     if not annotations:
@@ -143,8 +144,18 @@ def apply_annotations(notes: list[Note], annotations: list[dict]) -> tuple[list[
             n.pitch_midi = pm
             n.pitch_hz = midi_to_hz(pm)
             n.deviation_cents = 0.0
+        elif action == "velocity":
+            if not (0 <= idx < len(out)):
+                return notes, f"velocity 标注越界：index {idx}"
+            try:
+                v = float(ann.get("value"))
+            except (TypeError, ValueError):
+                return notes, f"velocity 标注 value 非法：{ann.get('value')!r}"
+            if not (0.0 <= v <= 1.0):
+                return notes, f"velocity 标注越界（应在 0..1）：{v}"
+            out[idx].velocity = round(v, 4)
         else:
-            return notes, f"标注 action 未知：{action!r}（可选 pitch/delete/add/merge/set_time/move）"
+            return notes, f"标注 action 未知：{action!r}（可选 pitch/delete/add/merge/set_time/move/velocity）"
     return out, ""
 
 
@@ -209,7 +220,7 @@ def _extract_json_array(text: str) -> list:
     return data
 
 
-_ACTION_KINDS = {"pitch", "delete", "add", "merge", "set_time", "move", "transpose"}
+_ACTION_KINDS = {"pitch", "delete", "add", "merge", "set_time", "move", "velocity", "transpose"}
 
 
 def _validate_llm_actions(raw: list) -> list[dict]:
@@ -297,6 +308,8 @@ def build_intent_summary(actions: list[dict], notes: list[Note] | None = None) -
         elif act == "move":
             v = a.get("value") or {}
             lines.append(f"~ idx{idx} move {v}")
+        elif act == "velocity":
+            lines.append(f"~ idx{idx} vel→{a.get('value')}")
     return lines[:DIFF_CAP]
 
 

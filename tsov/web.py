@@ -70,6 +70,9 @@ class ChatIn(BaseModel):
     project: str
     message: str
     base_rev: str = "HEAD"   # 议题 ④：当前编辑目标版本（注入 agent prompt，A 路不允许旧版分叉）
+    # M-V3（交互闭环）：人工标注确定性先行（最高优先级、不走 LLM）+ 选区上下文（「这里/这段」指代）
+    annotations: list[dict] | None = None
+    selection: dict | None = None
 
 
 class ChatResetIn(BaseModel):
@@ -357,11 +360,15 @@ def _stream_chat(bus: EventBus, project: str, session_id: str, messages: list[di
     return {"content": content, "tool_calls": tool_calls, "message": message}
 
 
-def _run_agent_session(state: WebState, project_name: str, task: str, session_id: str, base_rev: str = "HEAD") -> None:
+def _run_agent_session(state: WebState, project_name: str, task: str, session_id: str, base_rev: str = "HEAD",
+                       annotations: list[dict] | None = None, selection: dict | None = None) -> None:
     """一次对话框 agent 会话（后台线程跑；agent_lock 由调用方获取，本函数 finally 释放）。
 
     base_rev（议题 ④）：编辑目标版本标识，注入 brief；A 路下始终 = 用户当前工作版本（HEAD），
     仅用于让 LLM 明确「我改的是哪个版本」，不改变工程采纳逻辑。
+
+    M-V3（交互闭环）：annotations = 用户人工标注（确定性先行应用，ADR-0009 最高优先级、不走 LLM），
+    失败则拒绝整条消息（谱不变）；selection = 当前选区（注入 brief 供指代）。
     """
     from .agent import AgentSession, build_default_registry
     from .agent.prompt import SYSTEM_PROMPT
@@ -376,13 +383,46 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
     except FileNotFoundError:
         pass
 
+    # ---- M-V3：人工标注确定性先行（最高优先级；ADR-0009「不走 LLM」）----
+    # 失败（非法标注 / 空结果守卫）→ 拒绝整条消息、谱不变；成功 → 一个独立 commit
+    ann_note = ""
+    if annotations:
+        try:
+            from .analysis.edit import edit_score as _edit_annotations
+
+            ann_result = _edit_annotations(proj.score, annotations=annotations, llm=False)
+            if ann_result.error:
+                bus.publish(project_name, "agent_error",
+                            {"session_id": session_id, "error": f"人工标注非法（拒绝）：{ann_result.error}"})
+                state.agent_lock.release()
+                return
+            adopted = proj.apply_score(ann_result.new_score, f"人工标注（{len(annotations)} 条）")
+            if adopted["ok"]:
+                bus.publish(project_name, "diff_applied", {**adopted["diff"], "commit": adopted["commit"]})
+                bus.publish(project_name, "state_updated", project_state(proj))
+                ann_note = (
+                    f"- 用户人工标注已确定性应用（{adopted['diff']['summary']}，commit {adopted['commit']}）："
+                    + "；".join(ann_result.diff_summary[:6])
+                    + "\n  这些是用户精确指定的修改：请在结果中保留、不得回退\n"
+                )
+        except Exception as e:  # noqa: BLE001 标注应用异常 → 拒绝消息（不泄漏锁）
+            bus.publish(project_name, "agent_error",
+                        {"session_id": session_id, "error": f"人工标注应用失败：{type(e).__name__}: {e}"})
+            state.agent_lock.release()
+            return
+
     score_path = root / "score.json"
     render_path = root / RENDER_WAV_NAME
+    sel_note = ""
+    if selection and selection.get("indices"):
+        idxs = "、".join(str(i) for i in list(selection["indices"])[:24])
+        sel_note = f"- 用户当前选区：track {selection.get('track', 0)} 音符 [{idxs}]（用户说「这里/这段」时指的就是它）\n"
     brief = (
         f"{task}\n\n"
         f"【工程上下文】\n"
         f"- 当前工程名：{proj.name}；工程 score 路径：{score_path}\n"
         f"- 编辑目标版本：{base_rev}（工程 git 版本标识；请勿自行 git 回滚/切分支，版本切换由宿主负责）\n"
+        f"{ann_note}{sel_note}"
         f"- 改谱：用 edit_score 工具（score_path 用上面的工程 score 路径，feedback 写用户的修改要求），"
         f"工具会把新谱自动落盘为同目录的 {EDITED_SCORE_NAME}\n"
         f"- 改完谱自查：用 load_score 读 {EDITED_SCORE_NAME}，检查全部音高是否属于目标调式音阶"
@@ -750,7 +790,8 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
         try:
             threading.Thread(
                 target=_run_agent_session,
-                args=(state, body.project, body.message, session_id, body.base_rev),
+                args=(state, body.project, body.message, session_id, body.base_rev,
+                      body.annotations, body.selection),
                 daemon=True,
                 name=f"tsov-agent-{session_id[-8:]}",
             ).start()

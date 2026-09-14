@@ -2,7 +2,7 @@
 
 import { api } from './api.js';
 import { bus, connectEvents } from './events.js';
-import { store, setState, setError, toast, fitView, setView, clearDiff } from './state.js';
+import { store, setState, setError, toast, fitView, setView, clearDiff, setAnnotations, clearAnnotations, setSnap } from './state.js';
 import * as roll from './roll.js';
 import * as timeline from './timeline.js';
 import { initDiffBadge } from './diff.js';
@@ -210,12 +210,58 @@ function boot() {
     return indices.map((idx) => fn(sel.track, idx));
   }
 
+  /* M-V3：标注模式——选区操作挂起为 annotation（随下条对话发送，不发即时请求）
+     同（音+动作）重复点击 = 在已挂起值上继续累加（♯+1 点两次 = +2）；删除去重 */
+  const ANN_LABELS = { 'pitch-1': '♭−1', 'pitch+1': '♯+1', 'oct-1': '−8', 'oct+1': '+8', 'vel-': '力度−', 'vel+': '力度+', 'delete': '删除' };
+  function pendingBase(index, action) {
+    let v = null;
+    for (const it of store.pendingAnnotations) {
+      if (it.ann.index === index && it.ann.action === action) v = it.ann.value;
+    }
+    return v;
+  }
+  function makeAnnotations(op, sel) {
+    const tr = store.score ? store.score.tracks[sel.track] : null;
+    if (!tr) return null;
+    const out = [];
+    for (const i of sel.indices) {
+      const n = tr.notes[i];
+      if (!n) continue;
+      if (op === 'pitch-1' || op === 'pitch+1' || op === 'oct-1' || op === 'oct+1') {
+        const d = op === 'pitch-1' ? -1 : op === 'pitch+1' ? 1 : op === 'oct-1' ? -8 : 8;
+        const base = pendingBase(i, 'pitch');
+        const cur = (base === null) ? n.pitch_midi : base;
+        out.push({ index: i, action: 'pitch', value: Math.max(0, Math.min(127, cur + d)) });
+      } else if (op === 'vel-' || op === 'vel+') {
+        const d = op === 'vel-' ? -0.1 : 0.1;
+        const base = pendingBase(i, 'velocity');
+        const cur = (base === null) ? n.velocity : base;
+        out.push({ index: i, action: 'velocity', value: Math.round(Math.max(0, Math.min(1, cur + d)) * 100) / 100 });
+      } else if (op === 'delete') {
+        const dup = store.pendingAnnotations.some((it) => it.ann.index === i && it.ann.action === 'delete');
+        if (!dup) out.push({ index: i, action: 'delete' });
+      }
+    }
+    if (op === 'delete') out.sort((a, b) => b.index - a.index);   // 删除从后往前（index 不漂移）
+    return out;
+  }
+
   selBar.addEventListener('click', async (e) => {
     const btn = e.target.closest('button[data-op]');
     if (!btn) return;
     const op = btn.dataset.op;
     if (op === 'close') { refreshSelBar(); selBar.hidden = true; return; }
     if (!store.project) return;
+    if ($('ann-mode').checked) {
+      const anns = makeAnnotations(op, store.selection);
+      if (!anns) { setError('先点选音符'); return; }
+      if (!anns.length) { toast('已存在相同标注（未重复挂起）'); return; }
+      const keys = new Set(anns.map((a) => a.index + '|' + a.action));
+      const kept = store.pendingAnnotations.filter((it) => !keys.has(it.ann.index + '|' + it.ann.action));
+      setAnnotations(kept.concat(anns.map((a) => ({ ann: a, label: ANN_LABELS[op] || op }))));
+      toast('已挂起 ' + anns.length + ' 条标注（' + (ANN_LABELS[op] || op) + '），随下条对话发送');
+      return;
+    }
     let commands = null, label = '';
     if (op === 'delete') {
       commands = selCommands((t, i) => ({ op: 'remove', track: t, index: i }));
@@ -247,6 +293,33 @@ function boot() {
       if (r.applied) toast('已执行 ' + label + ' @' + String(r.commit || '').slice(0, 7));
       else setError('被拒：' + (r.errors || []).join('；'));
     } catch (err) { setError(err.message); }
+  });
+
+  /* M-V3：待发送标注队列（输入框上方） */
+  function refreshAnnQueue() {
+    const wrap = $('ann-queue');
+    const list = $('ann-queue-list');
+    const q = store.pendingAnnotations;
+    if (!q.length) { wrap.hidden = true; list.innerHTML = ''; return; }
+    wrap.hidden = false;
+    const counts = {};
+    for (const it of q) counts[it.label] = (counts[it.label] || 0) + 1;
+    list.innerHTML = '';
+    for (const [label, n] of Object.entries(counts)) {
+      const chip = document.createElement('span');
+      chip.className = 'ann-chip';
+      chip.textContent = label + ' ×' + n;
+      list.appendChild(chip);
+    }
+  }
+  bus.on('annotations', refreshAnnQueue);
+  bus.on('state', refreshAnnQueue);
+  $('btn-ann-clear').addEventListener('click', () => { clearAnnotations(); toast('已清空待发送标注'); });
+
+  /* M-V3：写谱吸附 */
+  $('snap-sel').addEventListener('change', (e) => {
+    setSnap(e.target.value);
+    toast('吸附：' + e.target.selectedOptions[0].textContent);
   });
 
   bus.on('state', () => { refreshStatusBar(); refreshToolbar(); });

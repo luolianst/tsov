@@ -66,6 +66,41 @@ select, input {
 #topbar button { white-space: nowrap; }
 #project-select { max-width: 220px; }
 #cmp-base { max-width: 260px; }
+#snap-sel { max-width: 96px; }
+
+/* ---------------- M-V3：标注队列 / 标注模式 ---------------- */
+#ann-queue {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-top: 1px dashed var(--border);
+  font-size: 12px;
+}
+#ann-queue-list { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+#ann-queue-list .ann-chip {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+#ann-mode-wrap { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; font-size: 12px; }
+
+/* ---------------- M-V3：右键菜单 ---------------- */
+.note-menu {
+  position: fixed;
+  z-index: 60;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+.note-menu button { text-align: left; min-width: 110px; }
 
 /* ---------------- 主布局 ---------------- */
 #layout {

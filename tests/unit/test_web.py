@@ -482,3 +482,86 @@ def test_create_project_default_track(env):
     s = env["client"].get("/api/projects/empty1/state").json()
     assert len(s["score"]["tracks"]) == 1
     assert s["score"]["tracks"][0]["notes"] == []
+
+
+# ---------------------------------------------------------------------------
+# M-V3 交互闭环：chat 带 annotations（确定性先行）/ selection 上下文
+# ---------------------------------------------------------------------------
+
+
+def _install_final_only_stream(monkeypatch, seen: dict):
+    """假 stream：直接返回最终回答（不调工具）；记录首轮 messages 供 brief 断言。"""
+    import tsov.web as web_mod
+
+    def fake_stream(bus, project, session_id, messages, tools, stop_event):
+        if "messages" not in seen:
+            seen["messages"] = messages
+        return {"content": "好的，已收到。", "tool_calls": [], "message": {"role": "assistant", "content": "done"}}
+
+    monkeypatch.setattr(web_mod, "_stream_chat", fake_stream)
+
+
+def test_chat_annotations_applied_before_agent(env, monkeypatch):
+    """M-V3：chat 带 annotations → 确定性先行应用（独立 commit）+ brief 注入（不得回退）+ 选区上下文。"""
+    name = _make_project(env)
+    seen: dict = {}
+    _install_final_only_stream(monkeypatch, seen)
+
+    r = env["client"].post("/api/chat", json={
+        "project": name, "message": "第一音改成 D5，其余保持",
+        "annotations": [{"index": 0, "action": "pitch", "value": 74}],
+        "selection": {"track": 0, "indices": [0, 1]},
+    })
+    assert r.status_code == 200
+    assert _wait_agent_done(env, name)
+
+    # 标注已确定性应用：score 更新 + 独立 commit
+    state = env["client"].get(f"/api/projects/{name}/state").json()
+    assert state["score"]["tracks"][0]["notes"][0]["pitch_midi"] == 74
+    log = env["client"].get(f"/api/projects/{name}/log").json()["log"]
+    assert any("人工标注" in ln for ln in log), log
+    # brief 注入：标注已应用（不得回退）+ 选区上下文
+    assert "messages" in seen, "agent 会话应已启动"
+    brief = "\n".join(str(m.get("content", "")) for m in seen["messages"] if m.get("role") == "user")
+    assert "人工标注已确定性应用" in brief and "不得回退" in brief
+    assert "用户当前选区" in brief and "[0、1]" in brief
+
+
+def test_chat_annotations_invalid_rejected(env, monkeypatch):
+    """M-V3：非法标注（越界）→ 拒绝整条消息：谱不变、无 commit、无会话 JSONL、锁释放。"""
+    name = _make_project(env)
+    seen: dict = {}
+    _install_final_only_stream(monkeypatch, seen)
+
+    r = env["client"].post("/api/chat", json={
+        "project": name, "message": "改个不存在的音",
+        "annotations": [{"index": 9, "action": "pitch", "value": 70}],
+    }).json()
+    sid = r["session_id"]
+    assert _wait_agent_done(env, name)
+
+    # 拒绝发生在会话创建前：无 JSONL、无 commit、谱不变、未进 LLM
+    state = env["client"].get(f"/api/projects/{name}/state").json()
+    assert state["score"]["tracks"][0]["notes"][0]["pitch_midi"] == 60
+    log = env["client"].get(f"/api/projects/{name}/log").json()["log"]
+    assert not any("人工标注" in ln for ln in log)
+    assert not (Path("output") / "agent-sessions" / f"{sid}.jsonl").exists()
+    assert "messages" not in seen, "拒绝路径不应进入 LLM"
+
+
+def test_chat_annotations_clear_all_guard(env, monkeypatch):
+    """M-V3 × B2#2 守卫：标注 delete-all → 拒绝整条消息（谱不变、无 commit、无 JSONL）。"""
+    name = _make_project(env)
+    seen: dict = {}
+    _install_final_only_stream(monkeypatch, seen)
+
+    r = env["client"].post("/api/chat", json={
+        "project": name, "message": "清空",
+        "annotations": [{"index": 2, "action": "delete"}, {"index": 1, "action": "delete"}, {"index": 0, "action": "delete"}],
+    }).json()
+    assert _wait_agent_done(env, name)
+    state = env["client"].get(f"/api/projects/{name}/state").json()
+    assert len(state["score"]["tracks"][0]["notes"]) == 3
+    log = env["client"].get(f"/api/projects/{name}/log").json()["log"]
+    assert not any("人工标注" in ln for ln in log)
+    assert not (Path("output") / "agent-sessions" / f"{r['session_id']}.jsonl").exists()

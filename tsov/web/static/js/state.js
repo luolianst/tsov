@@ -27,6 +27,10 @@ export const store = {
 
   /* 轨道可见性（Set<trackIndex>；空 = 全可见） */
   hiddenTracks: new Set(),
+
+  /* M-V3：标注队列（[{ann:{index,action,value}, label}]，随下条对话发送）+ 写谱吸附比例（0=关/0.5=1/8/0.25=1/16） */
+  pendingAnnotations: [],
+  snapFrac: 0,
 };
 
 export function setError(msg) {
@@ -42,6 +46,7 @@ export function toast(msg) {
 /* 用 GET state / state_updated 事件的数据装载 store（保持选区不闪断） */
 export function setState(s, opts) {
   const keep = (opts && opts.preserveSelection) ? store.selection : null;
+  if (store.project && s.project !== store.project) { store.pendingAnnotations = []; bus.dispatch('annotations'); }
   store.project = s.project;
   store.score = s.score;
   store.summary = s.summary || '';
@@ -75,6 +80,23 @@ export function setView(partial) {
   Object.assign(store.view, partial);
   bus.dispatch('view');
 }
+
+/* M-V3：标注队列（选区操作挂起；随下条对话发送，后端确定性先行应用） */
+export function pushAnnotations(items) {
+  store.pendingAnnotations = store.pendingAnnotations.concat(items);
+  bus.dispatch('annotations');
+}
+export function setAnnotations(items) {
+  store.pendingAnnotations = items.slice();
+  bus.dispatch('annotations');
+}
+export function clearAnnotations() {
+  if (!store.pendingAnnotations.length) return;
+  store.pendingAnnotations = [];
+  bus.dispatch('annotations');
+}
+/* M-V3：写谱吸附（比例=拍；0 关 / 0.5 →1/8 / 0.25 →1/16） */
+export function setSnap(frac) { store.snapFrac = Number(frac) || 0; bus.dispatch('view'); }
 
 /* 音符域（全轨）：[minMidi, maxMidi] 与总时长 */
 export function scoreBounds() {
