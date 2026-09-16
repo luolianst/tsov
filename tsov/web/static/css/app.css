@@ -64,9 +64,23 @@ select, input {
 .brand-sub { margin-left: 8px; font-weight: 400; font-size: 12px; color: var(--muted); }
 .group { display: flex; align-items: center; gap: 6px; flex: none; }
 #topbar button { white-space: nowrap; }
-#project-select { max-width: 220px; }
+#project-select { max-width: 320px; }
 #cmp-base { max-width: 260px; }
 #snap-sel { max-width: 96px; }
+
+/* ---------------- M-V6 批1：工程导入行（脚本直出产物回流） ---------------- */
+#import-project-row {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 2px;
+}
+#import-project-row[hidden] { display: none; }
+#import-project-select { flex: 0 1 460px; min-width: 0; font-size: 12px; }
+#import-project-path { flex: 1 1 220px; min-width: 0; font-size: 12px; }
+#import-project-name { flex: 0 0 150px; font-size: 12px; }
+#import-project-row button { font-size: 12px; padding: 2px 8px; }
 
 /* ---------------- M-V3：标注队列 / 标注模式 ---------------- */
 #ann-queue {

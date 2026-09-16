@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 import shutil
 import threading
 import time
@@ -82,7 +84,7 @@ def test_health_and_static(env):
 def test_project_create_list_state(env):
     _make_project(env)
     r = env["client"].get("/api/projects")
-    assert r.json() == {"projects": ["p1"]}
+    assert [p["name"] for p in r.json()["projects"]] == ["p1"]
 
     r = env["client"].get("/api/projects/p1/state")
     assert r.status_code == 200
@@ -565,3 +567,100 @@ def test_chat_annotations_clear_all_guard(env, monkeypatch):
     log = env["client"].get(f"/api/projects/{name}/log").json()["log"]
     assert not any("人工标注" in ln for ln in log)
     assert not (Path("output") / "agent-sessions" / f"{r['session_id']}.jsonl").exists()
+
+
+# ---------------------------------------------------------------------------
+# M-V6 批1：工程列表带信息 + 导入 score json 通道
+# ---------------------------------------------------------------------------
+
+
+def test_projects_list_info_shape(env):
+    """列表带信息：name/title/tracks/notes/mtime（前端「标题 · N 轨 · M 音」用）。"""
+    _make_project(env, name="p1")
+    body = env["client"].get("/api/projects").json()
+    assert len(body["projects"]) == 1
+    p = body["projects"][0]
+    assert p["name"] == "p1"
+    assert p["title"] == "webtest"      # _score_payload 的 title
+    assert p["tracks"] == 1 and p["notes"] == 3
+    assert p["mtime"] > 0
+
+
+def test_projects_list_order_by_mtime(env):
+    """最近修改的工程在前（前端启动打开列表第一个 = 最近工程，不再无脑第一个）。"""
+    _make_project(env, name="aaa")
+    _make_project(env, name="bbb")
+    old = time.time() - 3600
+    os.utime(env["dir"] / "aaa" / "score.json", (old, old))   # aaa 改成一小时前
+    names = [p["name"] for p in env["client"].get("/api/projects").json()["projects"]]
+    assert names == ["bbb", "aaa"]
+
+
+def test_import_project_from_script_output(env):
+    """脚本直出产物（score_task2.json 形态）→ 导入成工程 + 基线 commit；原文件保留。"""
+    c = env["client"]
+    src_dir = env["dir"] / "task2"
+    src_dir.mkdir(parents=True, exist_ok=True)
+    (src_dir / "score_task2.json").write_text(json.dumps(_score_payload()), encoding="utf-8")
+
+    # 候选列表：只列能解析成 Score 的 json，带建议名与统计
+    cands = c.get("/api/import-candidates").json()["candidates"]
+    assert [x["path"] for x in cands] == ["task2/score_task2.json"]
+    assert cands[0]["name_hint"] == "task2" and cands[0]["notes"] == 3
+
+    # 导入（缺省名 = 文件名推导 task2）
+    r = c.post("/api/projects/import", json={"source": "task2/score_task2.json"})
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "name": "task2", "source": "task2/score_task2.json"}
+
+    # 工程出现且可打开；基线 commit 存在；原文件未动（复制而非移动）
+    names = [p["name"] for p in c.get("/api/projects").json()["projects"]]
+    assert "task2" in names
+    st = c.get("/api/projects/task2/state").json()
+    assert len(st["score"]["tracks"][0]["notes"]) == 3
+    assert any("init" in ln for ln in st["git_log"])
+    assert (src_dir / "score_task2.json").is_file()
+
+
+def test_import_explicit_name_and_duplicate(env):
+    c = env["client"]
+    d = env["dir"] / "proj"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "song.json").write_text(json.dumps(_score_payload()), encoding="utf-8")
+    r = c.post("/api/projects/import", json={"source": "proj/song.json", "name": "我的曲子"})
+    assert r.status_code == 200 and r.json()["name"] == "我的曲子"
+    # 重名 → 400（提示换名）
+    r = c.post("/api/projects/import", json={"source": "proj/song.json", "name": "我的曲子"})
+    assert r.status_code == 400 and "已存在" in r.json()["error"]
+
+
+def test_import_rejects_bad_sources(env):
+    c = env["client"]
+    # 路径穿越 → 400
+    r = c.post("/api/projects/import", json={"source": "../evil.json"})
+    assert r.status_code == 400
+    # 不存在 → 404
+    r = c.post("/api/projects/import", json={"source": "nope/none.json"})
+    assert r.status_code == 404
+    # 非 json 后缀 → 400
+    (env["dir"] / "x.txt").write_text("hi", encoding="utf-8")
+    assert c.post("/api/projects/import", json={"source": "x.txt"}).status_code == 400
+    # 坏 JSON → 400
+    (env["dir"] / "bad.json").write_text("{not json", encoding="utf-8")
+    assert c.post("/api/projects/import", json={"source": "bad.json"}).status_code == 400
+    # 非 Score 结构 → 400
+    (env["dir"] / "other.json").write_text(json.dumps({"hello": 1}), encoding="utf-8")
+    assert c.post("/api/projects/import", json={"source": "other.json"}).status_code == 400
+    # 全部被拒后：无新工程
+    assert c.get("/api/projects").json()["projects"] == []
+
+
+def test_import_candidates_skips_projects_and_junk(env):
+    """候选扫描：跳过工程自带 score.json、非 Score json、隐藏目录。"""
+    c = env["client"]
+    _make_project(env, name="p1")                                   # 工程自带 score.json → 不出现在候选
+    (env["dir"] / "stage-01.json").write_text(json.dumps({"notes": []}), encoding="utf-8")   # 非 Score → 跳过
+    (env["dir"] / "raw.json").write_text(json.dumps(_score_payload()), encoding="utf-8")     # 顶层 json → 候选
+    (env["dir"] / "p1" / "agent-edited.json").write_text(json.dumps(_score_payload()), encoding="utf-8")  # 工程内部文件 → 跳过
+    cands = c.get("/api/import-candidates").json()["candidates"]
+    assert [x["path"] for x in cands] == ["raw.json"]

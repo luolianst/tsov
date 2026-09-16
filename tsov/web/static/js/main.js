@@ -23,11 +23,21 @@ function refreshToolbar() {
   $('btn-redo').disabled = !store.history.can_redo;
   const sel = $('project-select');
   sel.innerHTML = '';
+  if (!store.projects.length) {
+    /* M-V6 批1：空列表引导（不再是无信息的空下拉） */
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '（无工程——「＋ 新建」或「📥 导入」）';
+    sel.appendChild(opt);
+    return;
+  }
   for (const p of store.projects) {
     const opt = document.createElement('option');
-    opt.value = p;
-    opt.textContent = p;
-    if (p === store.project) opt.selected = true;
+    opt.value = p.name;
+    const title = (p.title && p.title !== p.name) ? ' — ' + p.title : '';
+    opt.textContent = p.name + title + ' · ' + p.tracks + '轨 · ' + p.notes + '音';
+    opt.title = '最近修改：' + new Date((p.mtime || 0) * 1000).toLocaleString();
+    if (p.name === store.project) opt.selected = true;
     sel.appendChild(opt);
   }
 }
@@ -51,8 +61,10 @@ async function loadProjects(keep) {
   try {
     const r = await api.listProjects();
     store.projects = r.projects || [];
-    if (!keep && store.projects.length && !store.projects.includes(store.project)) {
-      await openProject(store.projects[0]);
+    const names = store.projects.map((p) => p.name);
+    if (!keep && store.projects.length && !names.includes(store.project)) {
+      /* M-V6 批1：后端按 mtime 倒序 → [0] = 最近修改工程（不再无脑开列表第一个） */
+      await openProject(store.projects[0].name);
     } else {
       refreshToolbar();
     }
@@ -84,6 +96,54 @@ async function newProject() {
     await api.createProject(name.trim());
     await loadProjects(false);
     await openProject(name.trim());
+  } catch (e) { setError(e.message); }
+}
+
+/* ---------------- M-V6 批1：导入 score json → 工程 ---------------- */
+
+function applyImportCandidate(c) {
+  if (!c) return;
+  $('import-project-path').value = c.path;
+  $('import-project-name').value = c.name_hint || '';
+}
+
+async function showImportRow() {
+  const row = $('import-project-row');
+  const sel = $('import-project-select');
+  row.hidden = false;
+  sel.innerHTML = '<option value="">（扫描中…）</option>';
+  try {
+    const r = await api.importCandidates();
+    const cands = r.candidates || [];
+    sel.innerHTML = '';
+    if (!cands.length) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '（output/ 下没有可导入的 score json——可手动填路径）';
+      sel.appendChild(opt);
+      return;
+    }
+    for (const c of cands) {
+      const opt = document.createElement('option');
+      opt.value = c.path;
+      opt.dataset.nameHint = c.name_hint || '';
+      opt.textContent = c.path + '（' + c.title + ' · ' + c.tracks + '轨 · ' + c.notes + '音）';
+      sel.appendChild(opt);
+    }
+    applyImportCandidate(cands[0]);
+  } catch (e) { setError(e.message); }
+}
+
+async function doImportProject() {
+  const source = $('import-project-path').value.trim() || $('import-project-select').value;
+  const name = $('import-project-name').value.trim();
+  if (!source) { setError('先选候选，或填 output/ 内的 json 路径'); return; }
+  try {
+    const r = await api.importProject(source, name || null);
+    $('import-project-row').hidden = true;
+    toast('已导入「' + r.source + '」→ 工程 ' + r.name);
+    await loadProjects(true);
+    await openProject(r.name);
   } catch (e) { setError(e.message); }
 }
 
@@ -160,6 +220,19 @@ function boot() {
   $('project-select').addEventListener('change', (e) => openProject(e.target.value));
   $('btn-refresh-projects').addEventListener('click', () => loadProjects(true));
   $('btn-new-project').addEventListener('click', newProject);
+
+  /* M-V6 批1：导入 score json → 工程 */
+  $('btn-import-project').addEventListener('click', () => {
+    const row = $('import-project-row');
+    if (row.hidden) showImportRow(); else row.hidden = true;
+  });
+  $('import-project-select').addEventListener('change', (e) => {
+    const opt = e.target.selectedOptions[0];
+    if (!opt || !e.target.value) return;
+    applyImportCandidate({ path: e.target.value, name_hint: opt.dataset.nameHint || '' });
+  });
+  $('btn-import-project-confirm').addEventListener('click', doImportProject);
+  $('btn-import-project-cancel').addEventListener('click', () => { $('import-project-row').hidden = true; });
   $('btn-undo').addEventListener('click', async () => {
     if (!store.project) return;
     try { await api.undo(store.project); } catch (e) { setError(e.message); }

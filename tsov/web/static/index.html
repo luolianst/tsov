@@ -14,6 +14,7 @@
     <select id="project-select" title="选择工程"></select>
     <button id="btn-refresh-projects" title="刷新工程列表">⟳</button>
     <button id="btn-new-project" title="新建工程">＋ 新建</button>
+    <button id="btn-import-project" title="导入 score json → 新工程（脚本直出产物回流，M-V6 批1）">📥 导入</button>
     <button id="btn-rename" title="改工程显示名（score 标题，一个 commit，可撤销）">✏️ 改名</button>
   </div>
 
@@ -46,6 +47,14 @@
     <select id="cmp-base" title="对比基准（旧版本，只读参考）"></select>
     <span id="cmp-head" class="muted small">↔ HEAD</span>
     <button id="btn-cmp-listen" title="试听左槽版本（缓存渲染）">▶ 听旧版</button>
+  </div>
+
+  <div id="import-project-row" hidden>
+    <select id="import-project-select" title="候选：output/ 下可导入的 score json（脚本直出产物）"></select>
+    <input id="import-project-path" placeholder="或粘贴 output/ 内 json 路径（如 task2/score_task2.json）">
+    <input id="import-project-name" placeholder="工程名（可改）" size="16">
+    <button id="btn-import-project-confirm" title="导入并打开">导入</button>
+    <button id="btn-import-project-cancel" title="收起">✕</button>
   </div>
 </header>
 

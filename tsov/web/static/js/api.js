@@ -24,6 +24,8 @@ export const api = {
   health: () => req('/api/health'),
   listProjects: () => req('/api/projects'),
   createProject: (name, score) => post('/api/projects', { name, score: score || null }),
+  importCandidates: () => req('/api/import-candidates'),
+  importProject: (source, name) => post('/api/projects/import', { source, name: name || null }),
 
   getState: (name) => req('/api/projects/' + encodeURIComponent(name) + '/state'),
   postBatch: (name, label, commands, commitMessage) =>
