@@ -249,11 +249,14 @@ def tool_set_track_mix(args: dict) -> str:
 
 
 def tool_apply_effect(args: dict) -> str:
-    """给轨应用效果预设（混响等；同一轨整体替换为该预设链）。"""
+    """给轨应用效果预设（混响等；同一轨整体替换为该预设链）。track 必填（防误落到 track[0]）。"""
     from ..presets import apply_effect_preset, load_library
 
     score = _load(args["score_path"])
-    ti = _resolve_track(score, args.get("track", 0))
+    if args.get("track") is None:
+        raise ValueError("track 必填（轨索引或轨名）——效果钉在哪条轨上必须明确；"
+                         "总线（master）效果暂不支持")
+    ti = _resolve_track(score, args.get("track"))
     preset = str(args["preset"])
     lib = load_library()
     try:
@@ -412,6 +415,28 @@ def tool_export_midi(args: dict) -> str:
             f"sig={score.time_signature}）")
 
 
+def tool_read_text(args: dict) -> str:
+    """读取仓库内的文本文件原文（预设/技能/文档/配置；限仓库内、≤400KB）。"""
+    root = Path(__file__).resolve().parents[2]  # 仓库根
+    p = Path(str(args["path"]))
+    if not p.is_absolute():
+        p = root / p
+    try:
+        p = p.resolve()
+        rel = p.relative_to(root)
+    except ValueError:
+        raise ValueError(f"只允许读仓库内文件（{root}）；路径越界：{args['path']!r}") from None
+    if not p.is_file():
+        raise FileNotFoundError(str(p))
+    size = p.stat().st_size
+    if size > 400_000:
+        raise ValueError(f"文件过大（{size} bytes > 400KB）：{rel}（换用更小的文件或只看片段）")
+    text = p.read_text(encoding="utf-8", errors="replace")
+    cap = 60_000
+    cut = f"\n…（截断：全文 {size} bytes，此处显示前 {cap} 字符）" if len(text) > cap else ""
+    return f"文件 {rel}（{size} bytes）：\n{text[:cap]}{cut}"
+
+
 # ---------------------------------------------------------------------------
 # 注册
 # ---------------------------------------------------------------------------
@@ -535,3 +560,11 @@ def register_compose_tools(registry: ToolRegistry) -> None:
             "out": {"type": "string", "description": "输出路径（缺省与 score 同目录同名 .mid）"},
         }, "required": ["score_path"]},
         handler=tool_export_midi))
+
+    registry.register(ToolSpec(
+        name="read_text",
+        description="读取仓库内文本文件原文（预设 json / 技能 md / 文档；≤400KB，超长截断）",
+        parameters={"type": "object", "properties": {
+            "path": {"type": "string", "description": "仓库内相对路径或绝对路径（如 presets/arrangements/wotaiko-fast-6-8.json）"},
+        }, "required": ["path"]},
+        handler=tool_read_text))

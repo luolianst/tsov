@@ -21,6 +21,7 @@ SF2 = ROOT / "vendor" / "soundfonts" / "FluidR3_GM.sf2"
 NEW_TOOLS = {
     "voice_to_score", "detect_key", "create_track", "write_notes", "duplicate_bars",
     "set_track_mix", "apply_effect", "apply_pattern", "analyze_levels", "export_audio", "export_midi",
+    "read_text",
 }
 
 
@@ -228,6 +229,28 @@ def test_resolve_track_numeric_string(tmp_path):
     assert "track[0]" in msg
     with pytest.raises(ValueError):
         tc.tool_set_track_mix({"score_path": str(sp), "output": str(sp), "track": "9", "volume": 0.6})
+
+
+def test_apply_effect_requires_track(tmp_path):
+    """任务2 实测坑：apply_effect 缺 track 会静默落到 track[0]（master-limiter 覆盖旋律链）→ 现要求必填。"""
+    sp = _save_score(tmp_path / "score.json", _base([_melody()]))
+    with pytest.raises(ValueError, match="track 必填"):
+        tc.tool_apply_effect({"score_path": str(sp), "output": str(sp), "preset": "piano-pop-reverb"})
+
+
+def test_read_text_tool():
+    msg = tc.tool_read_text({"path": "presets/arrangements/wotaiko-fast-6-8.json"})
+    assert "wotaiko-fast-6-8" in msg and "instruments" in msg
+    with pytest.raises(ValueError):
+        tc.tool_read_text({"path": "C:/Windows/win.ini"})  # 仓库外拒读
+
+
+def test_load_score_rejects_non_score():
+    """任务1/2 实测坑：load_score 读预设 json → KeyError: 'tempo' 天书报错 → 现给指引。"""
+    from tsov.agent.tools import tool_load_score
+
+    with pytest.raises(ValueError, match="read_text"):
+        tool_load_score({"path": "presets/arrangements/wotaiko-fast-6-8.json"})
 
 
 def test_registry_has_compose_tools():

@@ -37,7 +37,15 @@ def tool_load_score(args: dict) -> str:
     path = args["path"]
     if not os.path.isfile(path):
         raise FileNotFoundError(path)
-    score = _score_from_path(path)
+    try:
+        score = _score_from_path(path)
+    except KeyError as e:
+        raise ValueError(
+            f"不是合法的 Score JSON：缺字段 {e}。Score 需含 title/tempo/key_candidates/tracks/meta；"
+            f"如果这是预设/技能/配置文件，请用 read_text 读取原文."
+        ) from None
+    except json.JSONDecodeError as e:
+        raise ValueError(f"不是 JSON 文件（{e}）；文本文件请用 read_text 读取") from None
     lines = [f"score: {score.title or '(无标题)'} tempo={score.tempo} sig={score.time_signature} "
              f"keys={[k.key for k in score.key_candidates]} tracks={len(score.tracks)}"]
     for ti, track in enumerate(score.tracks):

@@ -28,9 +28,10 @@ description: 空谱从零创作：先出结构段表、逐段写、段落复制�
 3. 鼓不用逐音写：`apply_pattern`（wotaiko_drums_base 主歌 / wotaiko_drums_energy 副歌，crash=true 加段头镲）；
 4. 段落复制：`duplicate_bars`（省略 track = 全轨复制；复制后改和声/加花做「重复中的变化」）；
 5. 音量平衡：`analyze_levels` 测各轨 RMS → `set_track_mix` 调 volume/pan（目标=同时发声窗口相对电平接近）；
-6. 混响等：`apply_effect`（预设如 piano-pop-reverb / synth-lead / master-limiter）；
-7. 交付：`export_audio`（mp3 需 ffmpeg；渲染含效果链，立体声）；
-8. 拿不准调性：`detect_key`。
+6. 混响等：`apply_effect`（预设如 piano-pop-reverb / synth-lead / synth-bass / drum-bus-glue / guitar-electric-clean）；
+7. 交付：`export_audio`（mp3 需 ffmpeg；渲染含效果链，立体声）+ `export_midi`（.mid）；
+8. 拿不准调性：`detect_key`；要读预设/文档原文：`read_text`（仓库内文本文件）；
+9. **`apply_effect` 的 track 必填**（缺省会误落到 track[0]）；总线（master）效果暂不支持，峰值靠各轨音量控制。
 
 ## 4. 段落复制填充（省力且保证结构感）
 后段与前段同构时，**复制前段再改**（换和声 / 加花 / 换配置），不要逐音重写——
