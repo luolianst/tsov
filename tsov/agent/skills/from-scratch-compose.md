@@ -19,8 +19,18 @@ description: 空谱从零创作：先出结构段表、逐段写、段落复制�
 ## 3. 逐段写作（一次一段）
 - 每段铺写顺序：和弦/低音 → 旋律 → 鼓/律动；
 - 音高落音阶内；级进为主、大跳 ≤ 五度；句末落主音/属音；
-- 时值写满小节（按拍号对齐格数；6/8 每小节 6 个八分格）；
+- 时值写满小节（按拍号对齐格数；6/8 每小节 12 个十六分格 = 6 个八分格）；
 - 一段写完 → 渲染/自查 → 再进下一段（不要一口气铺满全曲）。
+
+## 3.5 工具速查（按这个链路干）
+1. `create_track`（program 用 GM 名：piano / synth_lead / synth_bass / pad / guitar_clean / guitar_muted / drums）建编制；
+2. `write_notes` 写音：note = `{bar, grid, len, note|pitch_midi, velocity}`——bar 从 1 数，grid 是 16 分格序号（6/8 每小节 12 格，八分格 n = 16 分格 2n-1），**不要自己算秒数**；mode=replace 可整轨重写；
+3. 鼓不用逐音写：`apply_pattern`（wotaiko_drums_base 主歌 / wotaiko_drums_energy 副歌，crash=true 加段头镲）；
+4. 段落复制：`duplicate_bars`（省略 track = 全轨复制；复制后改和声/加花做「重复中的变化」）；
+5. 音量平衡：`analyze_levels` 测各轨 RMS → `set_track_mix` 调 volume/pan（目标=同时发声窗口相对电平接近）；
+6. 混响等：`apply_effect`（预设如 piano-pop-reverb / synth-lead / master-limiter）；
+7. 交付：`export_audio`（mp3 需 ffmpeg；渲染含效果链，立体声）；
+8. 拿不准调性：`detect_key`。
 
 ## 4. 段落复制填充（省力且保证结构感）
 后段与前段同构时，**复制前段再改**（换和声 / 加花 / 换配置），不要逐音重写——

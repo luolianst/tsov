@@ -1,6 +1,8 @@
 """tsov 领域工具集（ADR-0012）：agentloop 的工具链 = 现有 CLI 能力的函数化。
 
-工具清单：load_score / edit_score / set_tempo / render_wav / play_score / transcribe / understand / list_dir / use_skill。
+工具清单：load_score / edit_score / set_tempo / render_wav / play_score / transcribe / understand / list_dir / use_skill，
+外加作曲/工程工具链（tools_compose.py）：voice_to_score / detect_key / create_track / write_notes / duplicate_bars /
+set_track_mix / apply_effect / apply_pattern / analyze_levels / export_audio。
 每个工具：JSON schema 参数 + 返回文本观测；错误直接抛，由 loop 捕获成观测回喂。
 """
 
@@ -311,4 +313,8 @@ def build_default_registry(skills: SkillLibrary | None = None) -> ToolRegistry:
             handler=tool_use_skill(skills),
         )
     )
+    # M-V6 双任务工具链：作曲/工程工具（voice_to_score / create_track / write_notes / …）
+    from .tools_compose import register_compose_tools
+
+    register_compose_tools(registry)
     return registry

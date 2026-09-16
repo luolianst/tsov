@@ -21,5 +21,14 @@ description: 转录疑点诊断（deviation_cents 解读/八度问题/弱起音/
 - 弱起音漏检（头尾 1s 内）：标注 `add` 补上
 - 修正后自查：音高集合 ⊆ 目标音阶、总音数合理、渲染试听
 
+## 转谱链路（音频 → 可交付工程）
+1. `transcribe`（成品歌=game / 纯哼唱=rmvpe）→ Voice JSON；
+2. `voice_to_score`（Voice → Score 单轨钢琴，tempo 取 Voice.bpm；默认写 agent-edited-score.json）；
+3. 自查修复：`load_score` 看 deviation/confidence → `detect_key` 定调 → `edit_score` 用 annotations 确定性修正；
+   常用两条批：① 噪声短音（<55ms 且 velocity≤0.45）删除；② 调外且 |deviation_cents|≥42 → 吸到最近调内音；
+4. 加效果：`apply_effect`（纯钢琴曲常用 piano-pop-reverb / piano-bright-hall）；
+5. 交付：`export_audio`（mp3）。
+
 ## 纪律
 - 规则补丁的输出要用光谱/独立模型验证声学事实，**不能因为「听起来接近原曲」就信**
+- 「速度是否对齐」验证用 **onset 匹配相对原音频**（现场观众素材别用全带互相关，会失效）

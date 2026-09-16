@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import os
 import threading
 import uuid
 from datetime import datetime
@@ -33,7 +34,9 @@ from .host import EditBatch, Project
 
 WEB_VERSION = "0.1.0"
 AGENT_SESSION_DIR = "output/agent-sessions"
-AGENT_MAX_TURNS = 12
+# agent 单条消息内最大工具循环轮数；长链任务（M-V6 批3 双任务测试）可提高：
+#   环境变量 TSOV_AGENT_MAX_TURNS=60（Web server 启动前设置）
+AGENT_MAX_TURNS = int(os.environ.get("TSOV_AGENT_MAX_TURNS", "12"))
 RENDER_WAV_NAME = "render.wav"  # 工程目录内试听 wav（WAV 不入库，工程 .gitignore 已挡）
 EDITED_SCORE_NAME = "agent-edited-score.json"  # agent 高层编辑工具的落盘约定（tsov/agent/tools.py）
 SSE_HEARTBEAT_SEC = 15.0
