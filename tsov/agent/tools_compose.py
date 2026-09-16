@@ -60,12 +60,14 @@ def _bar_grid_sec(score: Score) -> tuple[float, int, float]:
 def _resolve_track(score: Score, track) -> int:
     if track is None:
         return 0
-    if isinstance(track, int):
-        if 0 <= track < len(score.tracks):
-            return track
-        raise ValueError(f"track 越界：{track}（共 {len(score.tracks)} 条）")
+    s = str(track).strip()
+    if isinstance(track, int) or s.lstrip("+-").isdigit():
+        idx = int(s)
+        if 0 <= idx < len(score.tracks):
+            return idx
+        raise ValueError(f"track 越界：{track!r}（共 {len(score.tracks)} 条）")
     for i, tr in enumerate(score.tracks):
-        if tr.name == str(track):
+        if tr.name == s:
             return i
     raise ValueError(f"找不到轨道：{track!r}（现有：{[t.name for t in score.tracks]}）")
 
@@ -396,6 +398,20 @@ def tool_export_audio(args: dict) -> str:
         session.close()
 
 
+def tool_export_midi(args: dict) -> str:
+    """Score → MIDI 文件（含 tempo/拍号/音色；鼓轨走 MIDI ch10）。"""
+    from ..midi.export import score_to_midi
+
+    score_path = args["score_path"]
+    out = args.get("out") or str(Path(score_path).with_suffix(".mid"))
+    score = _load(score_path)
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    score_to_midi(score, out)
+    n = sum(len(t.notes) for t in score.tracks)
+    return (f"已导出 MIDI：{out}（{len(score.tracks)} 轨 / {n} 音；tempo={score.tempo:.1f} "
+            f"sig={score.time_signature}）")
+
+
 # ---------------------------------------------------------------------------
 # 注册
 # ---------------------------------------------------------------------------
@@ -510,3 +526,12 @@ def register_compose_tools(registry: ToolRegistry) -> None:
             "format": {"type": "string", "enum": ["mp3", "wav"]},
         }, "required": ["score_path", "out"]},
         handler=tool_export_audio))
+
+    registry.register(ToolSpec(
+        name="export_midi",
+        description="Score → MIDI 文件（含 tempo/拍号/音色；鼓轨走 ch10）",
+        parameters={"type": "object", "properties": {
+            "score_path": {"type": "string"},
+            "out": {"type": "string", "description": "输出路径（缺省与 score 同目录同名 .mid）"},
+        }, "required": ["score_path"]},
+        handler=tool_export_midi))

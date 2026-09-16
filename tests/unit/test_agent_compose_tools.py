@@ -20,7 +20,7 @@ SF2 = ROOT / "vendor" / "soundfonts" / "FluidR3_GM.sf2"
 
 NEW_TOOLS = {
     "voice_to_score", "detect_key", "create_track", "write_notes", "duplicate_bars",
-    "set_track_mix", "apply_effect", "apply_pattern", "analyze_levels", "export_audio",
+    "set_track_mix", "apply_effect", "apply_pattern", "analyze_levels", "export_audio", "export_midi",
 }
 
 
@@ -207,6 +207,27 @@ def test_export_audio_mp3(tmp_path):
     msg = tc.tool_export_audio({"score_path": str(sp), "out": str(out), "format": "mp3"})
     assert out.is_file() and out.stat().st_size > 1000 and "MP3" in msg
     assert out.with_suffix(".wav").is_file()
+
+
+def test_export_midi(tmp_path):
+    sp = _save_score(tmp_path / "score.json", _base([_melody(), _drums()]))
+    tc.tool_write_notes({"score_path": str(sp), "output": str(sp), "track": 0, "notes": [
+        {"bar": 1, "grid": 1, "len": 6, "note": "E4"}, {"bar": 1, "grid": 7, "len": 6, "note": "G4"},
+    ]})
+    tc.tool_apply_pattern({"score_path": str(sp), "output": str(sp), "track": 1,
+                           "pattern": "wotaiko_drums_base", "start_bar": 1, "bars": 1})
+    out = tmp_path / "out.mid"
+    msg = tc.tool_export_midi({"score_path": str(sp), "out": str(out)})
+    assert out.is_file() and out.stat().st_size > 50 and "MIDI" in msg
+
+
+def test_resolve_track_numeric_string(tmp_path):
+    """LLM 常把 track 传成字符串 "0"——必须按索引解析（任务1 实测坑）。"""
+    sp = _save_score(tmp_path / "score.json", _base([_melody()]))
+    msg = tc.tool_set_track_mix({"score_path": str(sp), "output": str(sp), "track": "0", "volume": 0.6})
+    assert "track[0]" in msg
+    with pytest.raises(ValueError):
+        tc.tool_set_track_mix({"score_path": str(sp), "output": str(sp), "track": "9", "volume": 0.6})
 
 
 def test_registry_has_compose_tools():
