@@ -162,7 +162,7 @@ select, input {
 #roll-wrap {
   position: relative;
   display: grid;
-  grid-template-rows: 26px 1fr;
+  grid-template-rows: 40px 1fr;   /* M-V6 批1 修：26px 太矮 → 「秒」标签与「小节号」两层文字重叠；40px 双 band */
   min-width: 0;
   min-height: 0;
   background: var(--bg);

@@ -7,6 +7,7 @@ VST3 用例依赖 vendor/vst3/Dexed.vst3（不入库；缺失自动 skip）。
 from __future__ import annotations
 
 import shutil
+import time
 import uuid
 from pathlib import Path
 
@@ -15,6 +16,8 @@ import pytest
 
 from tsov.core.notes import Note
 from tsov.host.instrument import SFZSource, VST3Source, _parse_sfz, make_source
+
+from unit._cleanup import rmtree_force
 
 _DEXED = Path("vendor/vst3/Dexed.vst3/Contents/x86_64-win/Dexed.vst3")
 try:
@@ -65,7 +68,7 @@ def test_sfz_source_renders_and_pitches():
         assert abs(f1 - 440.0) / 440.0 < 0.03, f"段1 主频 {f1}"
         assert abs(f2 - 493.88) / 493.88 < 0.03, f"段2 主频 {f2}"
     finally:
-        shutil.rmtree(d, ignore_errors=True)
+        rmtree_force(d)   # 清理：.git/objects 只读属性 → chmod 强删（见 _cleanup.py）
 
 
 def test_sfz_parse_subset_and_key_alias():
@@ -88,7 +91,7 @@ def test_sfz_parse_subset_and_key_alias():
         assert regions[0]["hivel"] == 127          # 继承 group
         assert regions[1]["lokey"] == 100 and regions[1]["sample"] == "b.wav"
     finally:
-        shutil.rmtree(d, ignore_errors=True)
+        rmtree_force(d)   # 清理：.git/objects 只读属性 → chmod 强删（见 _cleanup.py）
 
 
 # ---------------------------------------------------------------------------

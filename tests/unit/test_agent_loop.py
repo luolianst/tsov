@@ -6,6 +6,7 @@ LLM 调用被脚本化（fake chat）+ edit 的 LLM 被确定性替换（无 key
 
 import json
 import shutil
+import time
 import uuid
 from dataclasses import replace
 from pathlib import Path
@@ -19,6 +20,8 @@ from tsov.core.score import Instrument, Score, Track
 from tsov.dsp.pitch import midi_to_hz
 from tsov.render.fluidsynth_backend import default_soundfont
 
+from unit._cleanup import rmtree_force
+
 _SOUNDFONT = default_soundfont()
 
 
@@ -28,7 +31,7 @@ def ws():
     d = Path("output") / f"wstest-{uuid.uuid4().hex[:10]}"
     d.mkdir(parents=True, exist_ok=True)
     yield d
-    shutil.rmtree(d, ignore_errors=True)
+    rmtree_force(d)   # 清理：.git/objects 只读属性 → chmod 强删（见 _cleanup.py）
 
 
 def _tool_resp(name, args, call_id="t1"):

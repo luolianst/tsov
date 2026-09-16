@@ -10,6 +10,18 @@ from dataclasses import asdict, dataclass, field
 from .notes import Note
 
 
+def parse_time_signature(sig: str | None) -> tuple[int, int]:
+    """'6/8' → (6, 8)；非法/缺省 → (4, 4)（M-V6：Score.time_signature 的统一解析口径，MIDI 导出/工具共用）。"""
+    try:
+        num_s, den_s = str(sig or "").split("/", 1)
+        num, den = int(num_s), int(den_s)
+    except (ValueError, AttributeError):
+        return 4, 4
+    if not (1 <= num <= 16) or den not in (1, 2, 4, 8, 16):
+        return 4, 4
+    return num, den
+
+
 @dataclass
 class Effect:
     type: str  # "reverb" / "compressor" / ...
@@ -111,6 +123,7 @@ class KeyCandidate:
 class Score:
     title: str = ""
     tempo: float = 120.0  # BPM
+    time_signature: str = "4/4"  # 拍号（M-V6 增补，缺省 4/4；形如 "6/8"/"3/4"，向后兼容）
     key_candidates: list[KeyCandidate] = field(default_factory=list)  # 调性候选分布 {key, confidence}
     tracks: list[Track] = field(default_factory=list)
     meta: dict = field(default_factory=dict)  # 生成元信息（run-id / 时间 / 来源）
@@ -126,6 +139,7 @@ class Score:
         return cls(
             title=data["title"],
             tempo=data["tempo"],
+            time_signature=data.get("time_signature") or "4/4",
             key_candidates=[KeyCandidate.from_dict(k) for k in data["key_candidates"]],
             tracks=[Track.from_dict(t) for t in data["tracks"]],
             meta=data["meta"],

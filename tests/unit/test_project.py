@@ -2,6 +2,7 @@
 
 import json
 import shutil
+import time
 import uuid
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from tsov.core.notes import Note
 from tsov.core.score import Instrument, KeyCandidate, Score, Track
 from tsov.host import EditBatch, Project, diff_notes
 
+from unit._cleanup import rmtree_force
+
 _HAS_GIT = shutil.which("git") is not None
 
 
@@ -20,7 +23,7 @@ def ws():
     d = Path("output") / f"wstest-{uuid.uuid4().hex[:10]}"
     d.mkdir(parents=True, exist_ok=True)
     yield d
-    shutil.rmtree(d, ignore_errors=True)
+    rmtree_force(d)   # 清理：.git/objects 只读属性 → chmod 强删（防残物堆积，见 _cleanup.py）
 
 
 def _note(start, end, pitch, vel=0.8):

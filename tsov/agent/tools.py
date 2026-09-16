@@ -1,12 +1,13 @@
 """tsov 领域工具集（ADR-0012）：agentloop 的工具链 = 现有 CLI 能力的函数化。
 
-工具清单：load_score / edit_score / render_wav / play_score / transcribe / understand / list_dir / use_skill。
+工具清单：load_score / edit_score / set_tempo / render_wav / play_score / transcribe / understand / list_dir / use_skill。
 每个工具：JSON schema 参数 + 返回文本观测；错误直接抛，由 loop 捕获成观测回喂。
 """
 
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 
@@ -35,7 +36,7 @@ def tool_load_score(args: dict) -> str:
     if not os.path.isfile(path):
         raise FileNotFoundError(path)
     score = _score_from_path(path)
-    lines = [f"score: {score.title or '(无标题)'} tempo={score.tempo} "
+    lines = [f"score: {score.title or '(无标题)'} tempo={score.tempo} sig={score.time_signature} "
              f"keys={[k.key for k in score.key_candidates]} tracks={len(score.tracks)}"]
     for ti, track in enumerate(score.tracks):
         lines.append(f"track[{ti}] name={track.name!r} program={track.instrument.program!r} "
@@ -73,6 +74,44 @@ def tool_edit_score(args: dict) -> str:
     if result.error:
         lines.append(f"error: {result.error}")
     return "\n".join(lines)
+
+
+def tool_set_tempo(args: dict) -> str:
+    """设置速度/拍号（M-V6 时间参数）：写回新 score JSON（同 edit_score 约定，Web 端采纳 = 一个 commit）。"""
+    score_path = args["score_path"]
+    out_path = args.get("output") or str(Path(score_path).parent / "agent-edited-score.json")
+    score = _score_from_path(score_path)
+    tempo = args.get("tempo")
+    sig = args.get("time_signature")
+    if tempo is None and sig is None:
+        raise ValueError("set_tempo 至少需要 tempo 或 time_signature 之一")
+
+    from ..core.score import parse_time_signature
+
+    changes: list[str] = []
+    if tempo is not None:
+        t = float(tempo)
+        if not (20.0 <= t <= 400.0):
+            raise ValueError(f"tempo 越界（20-400 BPM）：{t}")
+        score.tempo = round(t, 3)
+        changes.append(f"tempo={score.tempo}")
+    if sig is not None:
+        num, den = parse_time_signature(str(sig))
+        if f"{num}/{den}" != str(sig).strip():
+            raise ValueError(f"time_signature 非法（形如 6/8）：{sig!r}")
+        score.time_signature = f"{num}/{den}"
+        changes.append(f"time_signature={score.time_signature}")
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(score.to_dict(), f, ensure_ascii=False, indent=2)
+
+    ts_num, ts_den = parse_time_signature(score.time_signature)
+    bar_sec = (60.0 / float(score.tempo or 120.0)) * (4.0 * ts_num / ts_den)
+    ends = [n.end for tr in score.tracks for n in tr.notes]
+    t_end = max(ends) if ends else 0.0
+    bars = math.ceil(t_end / bar_sec) if bar_sec > 0 else 0
+    return (f"已写回：{out_path}（{', '.join(changes)}；"
+            f"每小节≈{bar_sec:.3f}s，现有内容≈{bars} 小节，末尾 {t_end:.2f}s）")
 
 
 def tool_render_wav(args: dict) -> str:
@@ -173,6 +212,23 @@ def build_default_registry(skills: SkillLibrary | None = None) -> ToolRegistry:
                 "required": ["score_path"],
             },
             handler=tool_edit_score,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="set_tempo",
+            description="设置工程时间参数：速度（BPM）与拍号（如 6/8）。写回 score JSON（同 edit_score 落盘约定）",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "score_path": {"type": "string"},
+                    "tempo": {"type": "number", "description": "BPM（20-400）"},
+                    "time_signature": {"type": "string", "description": "拍号，形如 6/8 / 3/4（可选）"},
+                    "output": {"type": "string", "description": "输出路径，缺省同目录 agent-edited-score.json"},
+                },
+                "required": ["score_path"],
+            },
+            handler=tool_set_tempo,
         )
     )
     registry.register(

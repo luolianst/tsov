@@ -1,7 +1,7 @@
 /* timeline.js —— 时间标尺（小节/拍/秒）+ 轨道头面板 + 乐句 segments 区条 */
 
 import { bus } from './events.js';
-import { KEYS_W, store, tempo, segments, scoreBounds } from './state.js';
+import { KEYS_W, store, tempo, beatsPerBar, segments, scoreBounds } from './state.js';
 import { TRACK_COLORS } from './roll.js';
 
 let canvas, ctx, W = 0, H = 0, dpr = 1;
@@ -38,9 +38,9 @@ export function draw() {
     ctx.fillRect(x0, H - 6, x1 - x0, 6);
   }
 
-  /* 小节刻度 + 编号；细拍刻度 */
+  /* 小节刻度 + 编号；细拍刻度（M-V6：小节长度按拍号算，不再写死 4/4） */
   ctx.font = '10px sans-serif';
-  const barS = beat * 4;
+  const barS = beat * beatsPerBar();
   let bar = Math.floor(t0 / barS);
   for (; bar * barS <= tMax; bar++) {
     const t = bar * barS;
@@ -53,21 +53,22 @@ export function draw() {
     ctx.fillText(String(bar + 1), x + 3, H - 14);
   }
   if (store.view.pxPerSec * beat > 10) {
+    const bq = beatsPerBar();
     ctx.strokeStyle = '#242a34';
     for (let k = Math.floor(t0 / beat); k * beat <= tMax; k++) {
-      if (k % 4 === 0) continue;
+      if (Math.abs(k / bq - Math.round(k / bq)) < 1e-6) continue;   // 小节线单独画
       const x = Math.round(xOf(k * beat)) + 0.5;
       if (x < KEYS_W || x > W) continue;
       ctx.beginPath(); ctx.moveTo(x, H - 6); ctx.lineTo(x, H); ctx.stroke();
     }
   }
-  /* 秒刻度（细网格足够密时显示） */
+  /* 秒刻度（细网格足够密时显示；H 加高后 y=9 → 12 与小节号分层不重叠） */
   if (store.view.pxPerSec > 26) {
     ctx.fillStyle = '#5f6774';
     for (let s = Math.ceil(t0); s <= tMax; s++) {
       const x = Math.round(xOf(s)) + 0.5;
       if (x < KEYS_W || x > W) continue;
-      ctx.fillText(s + 's', x + 2, 9);
+      ctx.fillText(s + 's', x + 2, 12);
     }
   }
   /* 键盘列槽位 */
@@ -130,7 +131,7 @@ export function init(rulerCanvas, trackListEl, segmentsInfoEl, metaInfoEl) {
       : '（无）';
     const sc = store.score;
     metaInfoEl.textContent = sc
-      ? 'tempo ' + Math.round(sc.tempo) + ' · ' +
+      ? 'tempo ' + Math.round(sc.tempo) + ' · ' + (sc.time_signature || '4/4') + ' · ' +
         (sc.key_candidates.length ? sc.key_candidates.map((k) => k.key).join('/') : '调性未知') +
         ' · ' + sc.tracks.reduce((a, t) => a + t.notes.length, 0) + ' 音'
       : '（未打开）';

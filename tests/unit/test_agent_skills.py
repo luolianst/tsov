@@ -6,12 +6,15 @@
 from __future__ import annotations
 
 import shutil
+import time
 import uuid
 from pathlib import Path
 
 from tsov.agent.prompt import SYSTEM_PROMPT, build_system_prompt
 from tsov.agent.skills import SkillLibrary, tool_use_skill
 from tsov.agent.tools import build_default_registry
+
+from unit._cleanup import rmtree_force
 
 
 def test_builtin_skills_exist():
@@ -41,7 +44,7 @@ def test_library_scans_custom_dir_and_loads():
         # 无 frontmatter：name=文件名、description=正文首行
         assert lib.get("b").description == "没有 frontmatter 的技能"
     finally:
-        shutil.rmtree(d, ignore_errors=True)
+        rmtree_force(d)   # 清理：.git/objects 只读属性 → chmod 强删（见 _cleanup.py）
 
 
 def test_use_skill_handler():

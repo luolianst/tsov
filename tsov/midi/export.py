@@ -2,7 +2,7 @@
 
 - 遍历 score.tracks 全部（每轨一个 pretty_midi.Instrument，GM program 映射）
 - 打击乐轨：is_drum=True（channel 9，kick=36/snare=38/hihat=42/crash=49）
-- tempo 用 score.tempo（Voice.bpm）；key signature 用第一个调性候选
+- tempo 用 score.tempo（Voice.bpm）；key signature 用第一个调性候选；拍号用 score.time_signature（缺省 4/4）
 - 单轨场景行为不变。midi_to_score 反向留 M4。
 """
 
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pretty_midi
 
-from ..core.score import Score
+from ..core.score import Score, parse_time_signature
 
 # 钢琴 program 号（GM：0 = Acoustic Grand Piano；ADR-0004 回放音色中性钢琴）
 PIANO_PROGRAM = 0
@@ -79,7 +79,7 @@ def score_to_midi(score: Score, output_path: str) -> str:
     """Score → MIDI 文件，返回产物路径。
 
     - 遍历全部 tracks：每轨一个 Instrument（GM program 映射；drums → is_drum=True）
-    - tempo 用 score.tempo；key signature 用第一个调性候选
+    - tempo 用 score.tempo；key signature 用第一个调性候选；拍号用 score.time_signature
     """
     midi = pretty_midi.PrettyMIDI(initial_tempo=float(score.tempo or 120.0))
 
@@ -103,6 +103,11 @@ def score_to_midi(score: Score, output_path: str) -> str:
         midi.key_signature_changes.append(
             pretty_midi.KeySignature(parse_key_signature(score.key_candidates[0].key), 0)
         )
+
+    ts_num, ts_den = parse_time_signature(getattr(score, "time_signature", None))
+    midi.time_signature_changes.append(
+        pretty_midi.TimeSignature(numerator=ts_num, denominator=ts_den, time=0)
+    )
 
     midi.write(output_path)
     return output_path

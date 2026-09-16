@@ -125,6 +125,21 @@ export function fitView(w, h) {
 
 export function tempo() { return (store.score && store.score.tempo) || 120; }
 
+/* 拍号（M-V6）：Score.time_signature（"6/8"）→ [本数, 分母]；缺省 4/4 */
+export function timeSig() {
+  const m = /^\s*(\d{1,2})\s*\/\s*(\d{1,2})\s*$/.exec((store.score && store.score.time_signature) || '4/4');
+  if (!m) return [4, 4];
+  const n = parseInt(m[1], 10), d = parseInt(m[2], 10);
+  if (!n || !d) return [4, 4];
+  return [n, d];
+}
+
+/* 每小节拍数（以四分音符为单位：4/4→4，6/8→3，3/4→3）——卷帘/标尺画小节线用（原来写死 4/4） */
+export function beatsPerBar() {
+  const [n, d] = timeSig();
+  return (4 * n) / d;
+}
+
 /* 乐句 segments（meta.segments 可选，ADR-0005 meta 自由字段） */
 export function segments() {
   const m = store.score && store.score.meta;

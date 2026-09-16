@@ -2,7 +2,7 @@
 
 import { bus } from './events.js';
 import { api } from './api.js';
-import { KEYS_W, store, scoreBounds, tempo, setSelection, setView } from './state.js';
+import { KEYS_W, store, scoreBounds, tempo, beatsPerBar, setSelection, setView } from './state.js';
 import { diffLayers } from './diff.js';
 
 export const TRACK_COLORS = ['#4fc3f7', '#aed581', '#ffb74d', '#f06292', '#ba68c8', '#4db6ac', '#fff176', '#90a4ae'];
@@ -61,13 +61,14 @@ export function draw() {
   const tEnd = scoreBounds().tEnd;
   const tMax = Math.max(t1, tEnd + 2);
   ctx.lineWidth = 1;
+  const bq = beatsPerBar();   // M-V6：小节 = bq 个四分拍（原来写死 4）
   let k = Math.floor(t0 / beat);
   for (; k * beat <= tMax; k++) {
     const t = k * beat;
     const x = Math.round(xOf(t)) + 0.5;
     if (x < KEYS_W) continue;
     if (x > W) break;
-    if (k % 4 === 0) {
+    if (Math.abs(k / bq - Math.round(k / bq)) < 1e-6) {
       ctx.strokeStyle = '#39414f';
       ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
     } else if (v.pxPerSec * beat > 7) {

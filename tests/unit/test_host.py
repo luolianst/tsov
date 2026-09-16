@@ -2,6 +2,7 @@
 
 import json
 import shutil
+import time
 import uuid
 from pathlib import Path
 
@@ -15,6 +16,8 @@ from tsov.host.device import mix_graph
 from tsov.host.instrument import SFZSource, VST3Source
 from tsov.render.fluidsynth_backend import default_soundfont
 
+from unit._cleanup import rmtree_force
+
 _SOUNDFONT = default_soundfont()
 
 pytestmark = pytest.mark.skipif(not _SOUNDFONT, reason="vendor 无 SoundFont（FluidR3_GM.sf2 未下载，宿主渲染跳过）")
@@ -26,7 +29,7 @@ def ws():
     d = Path("output") / f"wstest-{uuid.uuid4().hex[:10]}"
     d.mkdir(parents=True, exist_ok=True)
     yield d
-    shutil.rmtree(d, ignore_errors=True)
+    rmtree_force(d)   # 清理：.git/objects 只读属性 → chmod 强删（见 _cleanup.py）
 
 
 def _tiny_score() -> Score:

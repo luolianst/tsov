@@ -22,6 +22,8 @@ from fastapi.testclient import TestClient
 import tsov.agent
 from tsov.web import create_app
 
+from unit._cleanup import rmtree_force
+
 _HAS_SF = Path("vendor/soundfonts/FluidR3_GM.sf2").is_file()
 
 
@@ -35,7 +37,7 @@ def env():
     try:
         yield {"dir": d, "app": app, "client": client}
     finally:
-        shutil.rmtree(d, ignore_errors=True)
+        rmtree_force(d)   # 清理：.git/objects 只读属性 → chmod 强删（见 _cleanup.py）
 
 
 def _score_payload(n_pitches=(60, 62, 64)):
