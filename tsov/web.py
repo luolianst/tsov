@@ -92,6 +92,8 @@ class ChatIn(BaseModel):
     # M-V3（交互闭环）：人工标注确定性先行（最高优先级、不走 LLM）+ 选区上下文（「这里/这段」指代）
     annotations: list[dict] | None = None
     selection: dict | None = None
+    # 批B B1-4：用户手动操作摘要（自上次对话以来；回流进 agent 上下文）
+    user_actions: list[str] | None = None
 
 
 class ChatResetIn(BaseModel):
@@ -474,7 +476,8 @@ def _stream_chat(bus: EventBus, project: str, session_id: str, messages: list[di
 
 
 def _run_agent_session(state: WebState, project_name: str, task: str, session_id: str, base_rev: str = "HEAD",
-                       annotations: list[dict] | None = None, selection: dict | None = None) -> None:
+                       annotations: list[dict] | None = None, selection: dict | None = None,
+                       user_actions: list[str] | None = None) -> None:
     """一次对话框 agent 会话（后台线程跑；agent_lock 由调用方获取，本函数 finally 释放）。
 
     base_rev（议题 ④）：编辑目标版本标识，注入 brief；A 路下始终 = 用户当前工作版本（HEAD），
@@ -532,12 +535,16 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
     if selection and selection.get("indices"):
         idxs = "、".join(str(i) for i in list(selection["indices"])[:24])
         sel_note = f"- 用户当前选区：track {selection.get('track', 0)} 音符 [{idxs}]（用户说「这里/这段」时指的就是它）\n"
+    ua_note = ""
+    if user_actions:
+        ua_note = ("- 用户手动操作（自上次对话以来，命令层已落盘；用户说\"我刚改了什么\"时以这些为准）："
+                   + "；".join(str(x) for x in list(user_actions)[:10]) + "\n")
     brief = (
         f"{task}\n\n"
         f"【工程上下文】\n"
         f"- 当前工程名：{proj.name}；工程 score 路径：{score_path}\n"
         f"- 编辑目标版本：{base_rev}（工程 git 版本标识；请勿自行 git 回滚/切分支，版本切换由宿主负责）\n"
-        f"{ann_note}{sel_note}"
+        f"{ann_note}{sel_note}{ua_note}"
         f"- 改谱：用 edit_score 工具（score_path 用上面的工程 score 路径，feedback 写用户的修改要求），"
         f"工具会把新谱自动落盘为同目录的 {EDITED_SCORE_NAME}\n"
         f"- 改完谱自查：用 load_score 读 {EDITED_SCORE_NAME}，检查全部音高是否属于目标调式音阶"
@@ -1031,7 +1038,7 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
             threading.Thread(
                 target=_run_agent_session,
                 args=(state, body.project, body.message, session_id, body.base_rev,
-                      body.annotations, body.selection),
+                      body.annotations, body.selection, body.user_actions),
                 daemon=True,
                 name=f"tsov-agent-{session_id[-8:]}",
             ).start()
