@@ -78,6 +78,8 @@ body {
   display: grid;
   /* 顶栏 / 段轨 / 主区 / 下方面板 / 选区条 / 底栏 */
   grid-template-rows: auto auto 1fr auto auto 26px;
+  /* 显式列 + minmax(0,1fr)：阻止子内容 min-content（如效果器链）把整页顶宽 */
+  grid-template-columns: minmax(0, 1fr);
   overflow: hidden;
 }
 
@@ -148,9 +150,6 @@ select:hover, input:hover { border-color: var(--border-strong); }
 }
 .metro input#sig-input { width: 46px; text-align: center; }
 
-/* 抽屉开关（仅紧凑档显示） */
-.drawer-btn { display: none; }
-
 /* ---------------- 全局段轨（段落 / 和弦，只读） ---------------- */
 #segbar {
   display: grid;
@@ -196,7 +195,8 @@ select:hover, input:hover { border-color: var(--border-strong); }
 /* ---------------- 主布局 ---------------- */
 #layout {
   display: grid;
-  grid-template-columns: var(--tracks-w) 1fr var(--chat-w);
+  /* 中栏 minmax(0,1fr)：卷帘永远可收缩，不被侧栏内容顶开 */
+  grid-template-columns: var(--tracks-w) minmax(0, 1fr) var(--chat-w);
   min-height: 0;
   min-width: 0;
   overflow: hidden;
@@ -370,6 +370,8 @@ select:hover, input:hover { border-color: var(--border-strong); }
   flex-direction: column;
   height: var(--dock-h);
   min-height: 0;
+  position: relative;
+  z-index: 50;   /* 打开时在最顶层：不被任何面板/抽屉覆盖 */
 }
 #dock.folded { height: var(--dock-fold-h); }
 #dock.folded #dock-body { display: none; }
@@ -502,35 +504,25 @@ select:hover, input:hover { border-color: var(--border-strong); }
 #import-project-name { flex: 0 0 150px; font-size: var(--fs-sm); }
 #import-project-row button { font-size: var(--fs-sm); padding: 2px 8px; }
 
-/* ================= 响应式三档（Q-UI-6 定案） =================
-   紧凑 < 1440：单列 + 侧栏抽屉 + dock 默认折叠
-   标准 1440–2200：母版稿
-   扩展 > 2200：面板加宽、字号微增
+/* ================= 响应式（面板不隐藏：默认打开、可同时打开） =================
+   >2200 加宽 ｜ 1440–2200 标准 ｜ 1180–1439 / 960–1179 逐级收窄 ｜ <960 整页横向滚动
 */
 @media (max-width: 1439px) {
-  :root { --tracks-w: 0px; --chat-w: 0px; }
-  #layout { grid-template-columns: 1fr; }
-  #segbar { grid-template-columns: 64px 1fr 0; }
-  #segbar .seg-labels { padding: 0 6px; }
-  #segbar .seg-lb { letter-spacing: .06em; }
-
-  #tracks-panel, #chat-panel {
-    position: fixed;
-    top: 44px; bottom: 26px;
-    z-index: 40;
-    width: 264px;
-    transition: transform .12s linear;
-    border-right: 1px solid var(--border-strong);
-    box-shadow: 0 0 0 rgba(0,0,0,0);
-  }
-  #tracks-panel { left: 0; transform: translateX(-100%); border-right: 1px solid var(--border-strong); }
-  #chat-panel { right: 0; width: 320px; transform: translateX(100%); border-left: 1px solid var(--border-strong); }
-  body.drawer-tracks #tracks-panel { transform: translateX(0); }
-  body.drawer-chat #chat-panel { transform: translateX(0); }
-  .drawer-btn { display: inline-block; }
-  /* 紧凑档：dock 展开高度小一档（折叠判定由 JS 按档位决定，类名统一 .folded） */
-  #dock:not(.folded) { height: 170px; }
+  :root { --tracks-w: 208px; --chat-w: 320px; }
+  #segbar { height: 48px; }
+  #segbar .seg-lb { letter-spacing: .10em; }
   .dh-hint { display: none; }
+  #dock:not(.folded) { height: 176px; }
+}
+
+@media (max-width: 1179px) {
+  :root { --tracks-w: 184px; --chat-w: 288px; }
+}
+
+@media (max-width: 959px) {
+  :root { --tracks-w: 156px; --chat-w: 240px; }
+  body { overflow-x: auto; }
+  #segbar, #layout { min-width: 760px; }
 }
 
 @media (min-width: 2201px) {

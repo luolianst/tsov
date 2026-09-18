@@ -434,16 +434,6 @@ function boot() {
   bus.on('state', syncMetro);
   syncMetro();
 
-  /* UI 批A：紧凑档抽屉（轨道 / 对话面板） */
-  $('btn-drawer-tracks').addEventListener('click', () => {
-    document.body.classList.toggle('drawer-tracks');
-    document.body.classList.remove('drawer-chat');
-  });
-  $('btn-drawer-chat').addEventListener('click', () => {
-    document.body.classList.toggle('drawer-chat');
-    document.body.classList.remove('drawer-tracks');
-  });
-
   bus.on('state', () => { refreshStatusBar(); refreshToolbar(); });
   bus.on('error', showError);
   bus.on('toast', showToast);
