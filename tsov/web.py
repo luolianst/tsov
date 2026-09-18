@@ -31,6 +31,8 @@ from pydantic import BaseModel
 
 from .core.score import Instrument, Score, Track
 from .host import EditBatch, Project
+from .web_actions import (READ_TOOLS, SCORE_WRITING_TOOLS, impact_of,  # 批B（ADR-0017）动作呈现层
+                         summarize_args, tool_label)
 
 WEB_VERSION = "0.1.0"
 AGENT_SESSION_DIR = "output/agent-sessions"
@@ -340,6 +342,16 @@ class _StopRequested(Exception):
     """用户请求停止（agent_stop 置位时流式读取中断抛出）。"""
 
 
+def _read_json_safe(path: Path) -> dict | None:
+    """读 JSON（批B：动作快照用）；文件不存在/损坏 → None（快照失败不阻塞 agent 会话）。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
 def _load_session_messages(jsonl_path: Path) -> list[dict]:
     """读会话 JSONL → wire 消息列表（role/content/tool_calls/tool_call_id）。"""
     msgs: list[dict] = []
@@ -581,15 +593,33 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
                 if state.agent_stop.is_set():
                     stopped = True
                     break
+                tool_name = tc["name"]
+                targs = tc["arguments"] if isinstance(tc["arguments"], dict) else {}
+                # 批B（ADR-0017）：动作前快照——scratch 不存在 = 轮首，取工程当前谱
+                pre_snap = _read_json_safe(edited_path) or proj.score.to_dict()
                 try:
-                    observation = registry.get(tc["name"]).handler(tc["arguments"])
+                    observation = registry.get(tool_name).handler(tc["arguments"])
                 except Exception as e:  # noqa: BLE001 工具出错也作为观测回喂（与 AgentLoop 同策略）
-                    observation = f"工具 {tc['name']} 错误: {type(e).__name__}: {e}"
+                    observation = f"工具 {tool_name} 错误: {type(e).__name__}: {e}"
                 tool_count += 1
+                # 批B：动作后快照 → 影响范围（"改了哪些轨/几个音/哪个参数"）
+                post_snap = _read_json_safe(edited_path)
+                impact = impact_of(pre_snap, post_snap) if (post_snap and tool_name in SCORE_WRITING_TOOLS) else None
                 bus.publish(
                     project_name,
                     "agent_tool",
-                    {"session_id": session_id, "tool": tc["name"], "observation": observation},
+                    {
+                        "session_id": session_id, "tool": tool_name, "observation": observation,
+                        # ---- 动作卡 v2 字段（批B B1-1；旧字段保留 = SSE 兼容）----
+                        "tool_call_id": tc.get("id"),
+                        "turn": turn,
+                        "action_id": f"{session_id}:{turn}:{tc.get('id') or tool_count}",
+                        "label": tool_label(tool_name),
+                        "summary": summarize_args(tool_name, targs),
+                        "impact": impact,
+                        "read_only": tool_name in READ_TOOLS,
+                        "undoable": bool(impact and impact.get("text")),
+                    },
                 )
                 session.add("tool", observation, tool_call_id=tc["id"])
         else:
