@@ -581,7 +581,8 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
                     "session_id": session_id,
                     "turn": turn,
                     "content": out["content"] or "",
-                    "tool_calls": [{"name": tc["name"], "arguments": tc["arguments"]} for tc in out["tool_calls"]],
+                    "tool_calls": [{"name": tc["name"], "arguments": tc["arguments"],
+                                    "id": tc.get("id")} for tc in out["tool_calls"]],
                 },
             )
             if not out["tool_calls"]:

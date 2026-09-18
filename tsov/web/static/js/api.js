@@ -47,6 +47,10 @@ export const api = {
   exportProject: (name, opts) => post('/api/projects/' + encodeURIComponent(name) + '/export', opts || {}),
   favorite: (name) => post('/api/projects/' + encodeURIComponent(name) + '/favorite', {}),
   favorites: (name) => req('/api/projects/' + encodeURIComponent(name) + '/favorites'),
+  /* 批B B1-2：动作级撤销（快照日志；seq 由 agent_tool 事件给出） */
+  actionUndo: (name, seq) =>
+    post('/api/projects/' + encodeURIComponent(name) + '/agent-actions/' + encodeURIComponent(seq) + '/undo', {}),
+  actions: (name) => req('/api/projects/' + encodeURIComponent(name) + '/agent-actions'),
   listSessions: () => req('/api/sessions'),
   loadSession: (project, name) => post('/api/sessions/load', { project, name }),
 

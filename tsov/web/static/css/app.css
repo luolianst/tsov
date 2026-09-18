@@ -376,6 +376,48 @@ body.chat-folded #rail-chat { display: flex; }
   background: var(--agent-soft);
   overflow: hidden;
 }
+
+/* ================= 动作卡（批B B1-1 · 工具即控件，ADR-0017） ================= */
+.actgroup { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 2px; }
+.ac-group-head {
+  align-self: flex-start; cursor: pointer;
+  font-size: var(--fs-xs); color: var(--muted);
+  background: transparent; border: none; padding: 0 2px;
+}
+.ac-group-head:hover { color: var(--text); }
+.actcard {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--agent);
+  border-radius: var(--radius-agent);
+  background: var(--agent-soft);
+  padding: 5px 8px;
+}
+.ac-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ac-label { font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; }
+.ac-sum { font-size: var(--fs-xs); color: var(--muted); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ac-sp { flex: 1; }
+.ac-btn {
+  flex: none; cursor: pointer;
+  font-size: var(--fs-xs); padding: 1px 6px; line-height: 1.5;
+  background: transparent; color: var(--muted);
+  border: 1px solid var(--border); border-radius: var(--radius-note);
+}
+.ac-btn:hover { color: var(--text); border-color: var(--border-strong); }
+.ac-undo:hover { color: var(--accent); border-color: var(--accent); }
+.ac-btn:disabled { opacity: .45; cursor: not-allowed; }
+.ac-impact { margin-top: 3px; font-size: var(--fs-xs); font-family: var(--font-mono); color: var(--text); }
+.ac-receipt { margin-top: 2px; font-size: var(--fs-xs); color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ac-detail {
+  margin: 4px 0 0; padding: 5px 7px; max-height: 220px; overflow: auto;
+  background: var(--bg-sunken); border-radius: var(--radius-note);
+  font: var(--fs-xs)/1.5 var(--font-mono); color: var(--muted);
+  white-space: pre-wrap; word-break: break-all;
+}
+.ac-readrow { font-size: var(--fs-xs); color: var(--faint); font-family: var(--font-mono); padding: 0 2px; }
+.actgroup.folded .actcard.over { display: none; }     /* 折叠：只留前 3 张 */
+.actcard.undone { opacity: .55; border-left-color: var(--faint); }
+.actcard.stale { opacity: .45; }
+.actcard.stale .ac-impact, .actcard.stale .ac-receipt { text-decoration: line-through; }
 .toolcard summary { cursor: pointer; padding: 6px 10px; font-size: var(--fs-sm); color: var(--text); font-family: var(--font-mono); user-select: none; }
 .toolcard pre {
   margin: 0; padding: 8px 10px;

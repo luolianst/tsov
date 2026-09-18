@@ -111,22 +111,134 @@ function sysMsg(msg) {
   appendCard(n, { kind: 'sys', text: msg, ts: Date.now() });
 }
 
-function toolCard(name, observation) {
-  const d = el('toolcard');
-  const details = document.createElement('details');
-  const summary = document.createElement('summary');
-  summary.textContent = '⚙ ' + name;
-  details.appendChild(summary);
-  const pre = document.createElement('pre');
-  if (observation !== undefined) pre.textContent = observation;
-  details.appendChild(pre);
-  d.appendChild(details);
-  const n = appendCard(d, { kind: 'tool', name, text: observation || '', ts: Date.now() });
-  return { card: n, pre, summary };
+/* ---------------- 动作卡（批B B1-1 · 工具即控件，ADR-0017） ----------------
+   - 写类工具 → 完整动作卡（标签 · 参数摘要 · 影响范围 · 回执 · [撤销][详情]）
+   - 只读工具 → 单行汇总（"只读 ×N：…"，防刷屏；复述单 Q1 默认）
+   - 单轮写卡 >3 张 → 折叠为"本轮 N 个动作"（复述单 Q2 默认） */
+
+const MAX_VISIBLE_CARDS = 3;
+const groups = new Map();   // turn -> { root, cards, readNode, readLabels, head }
+
+function receiptLine(obs) {
+  const s = String(obs || '').split(/\r?\n/).find((l) => l.trim()) || '';
+  const t = s.trim();
+  return t.length > 96 ? t.slice(0, 95) + '…' : t;
+}
+
+function groupFor(turn) {
+  const t = (turn == null) ? 0 : turn;
+  let g = groups.get(t);
+  if (g) return g;
+  const root = el('actgroup');
+  root.dataset.turn = String(t);
+  logEl.appendChild(root);
+  g = { turn: t, root, cards: 0, readNode: null, readLabels: [], head: null };
+  groups.set(t, g);
+  return g;
+}
+
+function updateGroupHead(g) {
+  const folded = g.root.classList.contains('folded');
+  if (!g.head) {
+    g.head = document.createElement('button');
+    g.head.className = 'ac-group-head';
+    g.head.addEventListener('click', () => {
+      const f = g.root.classList.toggle('folded');
+      g.head.textContent = '本轮 ' + g.cards + ' 个动作 ' + (f ? '▸' : '▾');
+    });
+    g.root.prepend(g.head);
+  }
+  g.head.textContent = '本轮 ' + g.cards + ' 个动作 ' + (folded ? '▸' : '▾');
+}
+
+function buildActionCard(rec) {
+  const root = el('actcard');
+  root.dataset.actionId = rec.action_id || '';
+  if (rec.seq != null) root.dataset.seq = String(rec.seq);
+  if (rec.tool) root.dataset.tool = rec.tool;
+
+  const head = el('ac-head');
+  head.appendChild(text('ac-label', '⚙ ' + (rec.label || rec.tool || '工具')));
+  if (rec.summary) head.appendChild(text('ac-sum', rec.summary));
+  head.appendChild(el('ac-sp'));
+  if (rec.undoable && rec.seq != null) {
+    const b = document.createElement('button');
+    b.className = 'ac-btn ac-undo';
+    b.textContent = '撤销';
+    b.title = '撤销这个动作（其后动作将失效）';
+    b.addEventListener('click', () => doActionUndo(rec, b));
+    head.appendChild(b);
+  }
+  const more = document.createElement('button');
+  more.className = 'ac-btn ac-more';
+  more.textContent = '详情';
+  head.appendChild(more);
+  root.appendChild(head);
+
+  if (rec.impact && rec.impact.text) root.appendChild(text('ac-impact', '影响：' + rec.impact.text));
+  const rc = receiptLine(rec.observation);
+  if (rc) root.appendChild(text('ac-receipt', '回执：' + rc));
+
+  const detail = document.createElement('pre');
+  detail.className = 'ac-detail';
+  detail.hidden = true;
+  detail.textContent = (rec.args ? '参数：' + rec.args + LF : '') + '回执：' + LF + (rec.observation || '');
+  root.appendChild(detail);
+  more.addEventListener('click', () => {
+    detail.hidden = !detail.hidden;
+    more.textContent = detail.hidden ? '详情' : '收起';
+  });
+  return root;
+}
+
+/** 渲染一条动作记录（live 事件与 renderAll 回放共用） */
+function appendActionRec(rec) {
+  const g = groupFor(rec.turn);
+  if (rec.read_only) {
+    g.readLabels.push(rec.label || rec.tool || '工具');
+    if (!g.readNode) { g.readNode = text('ac-readrow', ''); g.root.appendChild(g.readNode); }
+    g.readNode.textContent = '只读 ×' + g.readLabels.length + '：' + g.readLabels.join(' · ');
+    return;
+  }
+  const card = buildActionCard(rec);
+  g.cards += 1;
+  if (g.cards > MAX_VISIBLE_CARDS) {
+    card.classList.add('over');
+    updateGroupHead(g);
+    if (!g.root.classList.contains('folded')) g.root.classList.add('folded');
+  }
+  g.root.appendChild(card);
+  if (g.head) updateGroupHead(g);
+}
+
+/** 动作级撤销（批B B1-2 服务端接口；seq 由快照日志提供，无 seq 不显示按钮） */
+async function doActionUndo(rec, btn) {
+  if (!store.project || rec.seq == null) return;
+  btn.disabled = true;
+  try {
+    const r = await api.actionUndo(store.project, rec.seq);
+    toast('已撤销动作 #' + rec.seq + '：' + (rec.label || rec.tool) + (r && r.commit ? ' @' + String(r.commit).slice(0, 7) : ''));
+    markStaleFrom(rec.turn, rec.action_id);
+  } catch (e) {
+    setError('撤销失败：' + e.message);
+    btn.disabled = false;
+  }
+}
+
+/** 撤销后：同轮其后动作卡置灰（链式失效提示） */
+function markStaleFrom(turn, actionId) {
+  const g = groups.get(turn == null ? 0 : turn);
+  if (!g) return;
+  let seen = false;
+  for (const node of g.root.querySelectorAll('.actcard')) {
+    if (node.dataset.actionId === actionId) { seen = true; node.classList.add('undone'); continue; }
+    if (seen) { node.classList.add('stale'); const b = node.querySelector('.ac-undo'); if (b) b.disabled = true; }
+  }
 }
 
 function renderAll() {
   logEl.innerHTML = '';
+  groups.clear();                       // 批B：动作分组跟着重建
   const arr = logs[currentProject] || [];
   for (const r of arr) {
     if (r.kind === 'sys') { logEl.appendChild(text('msg sys', r.text)); continue; }
@@ -138,7 +250,8 @@ function renderAll() {
       logEl.appendChild(m);
       continue;
     }
-    if (r.kind === 'tool') {
+    if (r.kind === 'action') { appendActionRec(r); continue; }   // 批B：动作卡 v2
+    if (r.kind === 'tool') {   // 旧记录（sessionStorage 兼容）
       const d = el('toolcard');
       const details = document.createElement('details');
       const summary = document.createElement('summary');
@@ -212,7 +325,7 @@ async function send(message) {
 
 /* ---------------- 事件接线 ---------------- */
 
-let pendingTool = null;
+const pendingTools = {};   // tool_call_id -> {name, arguments}（批B：动作卡配对）
 
 function wireEvents() {
   bus.on('agent_delta', (d) => {
@@ -246,25 +359,46 @@ function wireEvents() {
       const t = el('tag'); t.textContent = tag; m.prepend(t);
       appendCard(m, { kind: 'assistant', text: d.content, tag, ts: Date.now() });
     }
+    // 批B：本轮工具调用入待配表（tool_call_id → 原始参数，供动作卡"详情"用）
     for (const tc of d.tool_calls || []) {
-      pendingTool = toolCard(tc.name, undefined);
-      pendingTool.pre.textContent = '参数：' + JSON.stringify(tc.arguments, null, 2);
+      pendingTools[tc.id || tc.name] = { name: tc.name, arguments: tc.arguments };
     }
   });
 
   bus.on('agent_tool', (d) => {
-    if (pendingTool && pendingTool.summary.textContent.indexOf(d.tool) >= 0) {
-      pendingTool.pre.textContent += LF + '观测：' + LF + (d.observation || '');
-      pendingTool = null;
-    } else {
-      toolCard(d.tool, d.observation || '');
+    // 批B：动作卡 v2——按 tool_call_id 配对（弃旧"文本包含"匹配）
+    const key = d.tool_call_id || d.tool;
+    const pending = pendingTools[key];
+    delete pendingTools[key];
+    const rec = {
+      kind: 'action',
+      tool: d.tool,
+      tool_call_id: d.tool_call_id || null,
+      action_id: d.action_id || null,
+      turn: (d.turn == null) ? 0 : d.turn,
+      label: d.label || d.tool,
+      summary: d.summary || '',
+      impact: d.impact || null,
+      read_only: !!d.read_only,
+      undoable: !!d.undoable,
+      seq: (d.seq == null) ? null : d.seq,
+      args: pending ? JSON.stringify(pending.arguments, null, 2) : '',
+      observation: d.observation || '',
+      ts: Date.now(),
+    };
+    appendActionRec(rec);
+    if (currentProject) {
+      logs[currentProject].push(rec);
+      if (logs[currentProject].length > MAX_LOGS) logs[currentProject].shift();
+      persist();
     }
+    logEl.scrollTop = logEl.scrollHeight;
   });
 
   bus.on('agent_answer', (d) => {
     setAgentBusy(false);
     streamCard = null;
-    pendingTool = null;
+    for (const k of Object.keys(pendingTools)) delete pendingTools[k];
     const tag = 'agent 完成 · ' + d.turns + ' 轮 · ' + d.tool_calls_made + ' 次工具调用' +
       (d.adopted ? ' · 编辑已采用（见 diff 叠层）' : ' · 无谱面改动') +
       (d.stopped ? ' · 已停止' : '');
@@ -287,7 +421,7 @@ function wireEvents() {
   bus.on('agent_error', (d) => {
     setAgentBusy(false);
     streamCard = null;
-    pendingTool = null;
+    for (const k of Object.keys(pendingTools)) delete pendingTools[k];
     appendCard(text('msg error', 'agent 出错：' + (d.error || '')), { kind: 'error', text: 'agent 出错：' + (d.error || ''), ts: Date.now() });
   });
 }
@@ -367,7 +501,7 @@ export function switchProject(project) {
   currentProject = project;
   if (!logs[currentProject]) logs[currentProject] = loadLogs(currentProject);
   streamCard = null;
-  pendingTool = null;
+  for (const k of Object.keys(pendingTools)) delete pendingTools[k];
   renderAll();
 }
 
