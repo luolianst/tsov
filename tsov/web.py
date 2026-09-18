@@ -74,6 +74,15 @@ class RenderIn(BaseModel):
     rev: str | None = None   # 议题 ④：A/B 对比试听旧版（git show，不动 HEAD）
 
 
+class ExportIn(BaseModel):
+    """导出矩阵选项（修正轮2：UI 导出弹窗 → host export_matrix）。"""
+    mix: bool = True
+    stems: bool = True
+    buses: bool = False
+    midi: bool = True
+    midi_stems: bool = False
+
+
 class ChatIn(BaseModel):
     project: str
     message: str
@@ -842,6 +851,37 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
             finally:
                 session.close()
         return FileResponse(str(wav_path), media_type="audio/wav", filename=f"{name}.wav")
+
+    # ---------------- 导出 / 收藏（修正轮2） ----------------
+
+    @app.post("/api/projects/{name}/export")
+    def export(name: str, body: ExportIn) -> dict:
+        """导出矩阵（master / 总线 / 每轨 stems + MIDI）→ 工程 exports/<时间戳>/。"""
+        proj = st().get_project(name)
+        proj.save()
+        engine = st().engine()
+        out_dir = proj.root / "exports" / datetime.now().strftime("%Y%m%d-%H%M%S")
+        session = engine.load(proj.score)
+        try:
+            report = engine.export(session, out_dir,
+                                   mix=body.mix, buses=body.buses, stems=body.stems,
+                                   midi=body.midi, midi_stems=body.midi_stems)
+        finally:
+            session.close()
+        return report
+
+    @app.post("/api/projects/{name}/favorite")
+    def favorite(name: str) -> dict:
+        """收藏当前版本（git tag：fav/<时间戳>；强留存 + 恢复入口）。"""
+        proj = st().get_project(name)
+        r = proj.favorite()
+        if not r.get("ok"):
+            raise HTTPException(400, r.get("error") or "收藏失败")
+        return r
+
+    @app.get("/api/projects/{name}/favorites")
+    def favorites(name: str) -> dict:
+        return {"favorites": st().get_project(name).favorites()}
 
     @app.post("/api/projects/{name}/play")
     def play(name: str) -> dict:

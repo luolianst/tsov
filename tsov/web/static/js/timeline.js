@@ -2,7 +2,7 @@
 
 import { bus } from './events.js';
 import { api } from './api.js';
-import { KEYS_W, store, tempo, beatsPerBar, segments, scoreBounds, setSelection, setError } from './state.js';
+import { KEYS_W, store, tempo, beatsPerBar, segments, scoreBounds, setSelection, setError, toggleOverlay } from './state.js';
 import { pal, trackColors } from './theme.js';
 
 let canvas, ctx, W = 0, H = 0, dpr = 1;
@@ -79,7 +79,9 @@ export function draw() {
   ctx.fillText('小节', 6, H - 6);
 }
 
-/* ---- 轨道头面板（DOM；UI 批A：音量/声像/M/S + 选中态） ---- */
+/* ---- 轨道头面板（DOM；修正轮2：去推子 + 单击选中 / Ctrl 多选 / 双击进单轨） ---- */
+
+let onEnter = null;   // 双击回调（main.js 注入）
 
 async function postMix(ti, value, label) {
   if (!store.project) return;
@@ -112,9 +114,13 @@ function renderTracks(el) {
     return;
   }
   const tc = trackColors();
+  const single = store.viewMode === 'single';
   store.score.tracks.forEach((tr, ti) => {
+    const isMain = single && store.singleTrack === ti;
+    const isOverlay = store.overlayTracks.has(ti);
     const item = document.createElement('div');
     item.className = 'track-item' + (store.hiddenTracks.has(ti) ? ' hidden-track' : '') +
+      (isMain ? ' main-track' : '') + (isOverlay ? ' is-overlay' : '') +
       (store.selection.track === ti ? ' selected' : '');
     item.dataset.track = String(ti);
 
@@ -142,71 +148,69 @@ function renderTracks(el) {
       bus.dispatch('view');
     };
     top.appendChild(name);
+    const m = document.createElement('button');
+    m.className = 'ms' + (tr.mute ? ' on' : '');
+    m.textContent = 'M';
+    m.title = '静音';
+    m.onclick = (e) => { e.stopPropagation(); postMix(ti, { mute: !tr.mute }, tr.mute ? '取消静音' : '静音'); };
+    const s = document.createElement('button');
+    s.className = 'ms solo' + (tr.solo ? ' on' : '');
+    s.textContent = 'S';
+    s.title = '独奏';
+    s.onclick = (e) => { e.stopPropagation(); postMix(ti, { solo: !tr.solo }, tr.solo ? '取消独奏' : '独奏'); };
+    if (isMain || isOverlay) {
+      const mk = document.createElement('span');
+      mk.className = 'tr-mark';
+      mk.textContent = isMain ? '主轨' : '叠加';
+      top.appendChild(mk);
+    }
+    top.appendChild(m);
+    top.appendChild(s);
     top.appendChild(eye);
 
     const sub = document.createElement('div');
     sub.className = 'track-sub';
     const inst = tr.instrument || {};
     sub.textContent = (inst.program || 'default') + ' · ' + tr.notes.length + ' 音' +
-      (tr.mute ? ' · M' : '') + (tr.solo ? ' · S' : '') + (tr.bus && tr.bus !== 'master' ? ' · ' + tr.bus : '');
-
-    const ctl = document.createElement('div');
-    ctl.className = 'track-ctl';
-    const vol = document.createElement('input');
-    vol.type = 'range'; vol.min = '0'; vol.max = '200';
-    vol.value = String(Math.round(((inst.volume != null) ? inst.volume : 1) * 100));
-    vol.title = '音量（%）';
-    const volVal = document.createElement('span');
-    volVal.className = 'vol-val';
-    volVal.textContent = vol.value + '%';
-    vol.addEventListener('input', () => { volVal.textContent = vol.value + '%'; });
-    vol.addEventListener('change', (e) => { e.stopPropagation(); postMix(ti, { volume: Number(vol.value) / 100 }, '音量 ' + vol.value + '%'); });
-    vol.onclick = (e) => e.stopPropagation();
-
-    const pan = document.createElement('input');
-    pan.type = 'range'; pan.min = '-100'; pan.max = '100';
-    pan.value = String(Math.round((tr.pan || 0) * 100));
-    pan.className = 'pan';
-    pan.title = '声像（-100 全左 / +100 全右）';
-    pan.addEventListener('change', (e) => { e.stopPropagation(); postMix(ti, { pan: Number(pan.value) / 100 }, '声像 ' + pan.value); });
-    pan.onclick = (e) => e.stopPropagation();
-
-    const m = document.createElement('button');
-    m.className = 'ms' + (tr.mute ? ' on' : '');
-    m.textContent = 'M';
-    m.title = '静音';
-    m.onclick = (e) => { e.stopPropagation(); postMix(ti, { mute: !tr.mute }, tr.mute ? '取消静音' : '静音'); };
-
-    const s = document.createElement('button');
-    s.className = 'ms solo' + (tr.solo ? ' on' : '');
-    s.textContent = 'S';
-    s.title = '独奏';
-    s.onclick = (e) => { e.stopPropagation(); postMix(ti, { solo: !tr.solo }, tr.solo ? '取消独奏' : '独奏'); };
-
-    ctl.appendChild(vol);
-    ctl.appendChild(volVal);
-    ctl.appendChild(pan);
-    ctl.appendChild(m);
-    ctl.appendChild(s);
+      (tr.bus && tr.bus !== 'master' ? ' · ' + tr.bus : '');
+    /* 窄档小字行会隐藏（CSS）→ 信息并进 tooltip */
+    item.title = (tr.name || ('track ' + ti)) + ' · ' + sub.textContent +
+      (isMain ? ' ｜ 主轨（单轨写谱中）' : '') + (isOverlay ? ' ｜ 灰叠加' : '') +
+      ' ｜ 双击：' + (single ? '切换主轨' : '进入单轨写谱');
 
     body.appendChild(top);
     body.appendChild(sub);
-    body.appendChild(ctl);
     item.appendChild(chip);
     item.appendChild(body);
-    item.addEventListener('click', () => setSelection(ti, []));
+    item.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      /* 单轨模式：单击其他轨 = 灰叠加开关；总谱模式：Ctrl/Shift = 叠加集 */
+      if ((single && ti !== store.singleTrack) || e.ctrlKey || e.metaKey || e.shiftKey) {
+        toggleOverlay(ti);
+        return;
+      }
+      setSelection(ti, []);
+    });
+    item.addEventListener('dblclick', (e) => {
+      if (e.target.closest('button')) return;
+      if (onEnter) onEnter(ti);   // 进入单轨 / 切换主轨（main.js 处理）
+    });
     el.appendChild(item);
   });
 }
 
 let lastSelTrack = null;
 
-export function init(rulerCanvas, trackListEl, segmentsInfoEl, metaInfoEl) {
+export function init(rulerCanvas, trackListEl, segmentsInfoEl, metaInfoEl, opts) {
   canvas = rulerCanvas;
   ctx = canvas.getContext('2d');
+  onEnter = (opts && opts.onEnter) || null;
   resize();
   new ResizeObserver(() => { resize(); draw(); }).observe(canvas);
   for (const topic of ['state', 'view']) bus.on(topic, draw);
+
+  /* 修正轮2：视图模式切换 → 重画行（主轨/叠加标记） */
+  bus.on('viewmode', () => renderTracks(trackListEl));
 
   bus.on('state', () => {
     renderTracks(trackListEl);

@@ -10,19 +10,45 @@
 <header id="topbar">
   <div class="brand">tsov<span class="brand-sub">可视化宿主</span></div>
 
-  <div class="group">
-    <select id="project-select" title="选择工程"></select>
-    <button id="btn-refresh-projects" title="刷新工程列表">⟳</button>
-    <button id="btn-new-project" title="新建工程">＋ 新建</button>
-    <button id="btn-import-project" title="导入 score json → 新工程（脚本直出产物回流，M-V6 批1）">📥 导入</button>
-    <button id="btn-rename" title="改工程显示名（score 标题，一个 commit，可撤销）">✏️ 改名</button>
+  <select id="project-select" title="选择工程"></select>
+
+  <div class="group menu-wrap">
+    <button id="btn-menu-file" class="menu-btn" title="文件：新建 / 导入 / 导出 / 版本 / 收藏">☰ 文件</button>
+    <div id="menu-file" class="menu-pop" hidden>
+      <button class="mi" id="mi-new">新建工程…</button>
+      <button class="mi" id="mi-rename">重命名工程…</button>
+      <button class="mi" id="mi-import">导入工程…<span class="mi-sub">score.json 回流</span></button>
+      <div class="mi-block" id="import-project-row" hidden>
+        <select id="import-project-select" title="候选：output/ 下可导入的 score json"></select>
+        <input id="import-project-path" placeholder="或粘贴 output/ 内 json 路径">
+        <div class="mi-block-row">
+          <input id="import-project-name" placeholder="工程名（可改）" size="14">
+          <button id="btn-import-project-confirm">导入</button>
+          <button id="btn-import-project-cancel">✕</button>
+        </div>
+      </div>
+      <button class="mi" id="mi-refresh">刷新工程列表</button>
+      <div class="mi-sep"></div>
+      <button class="mi" id="mi-export">导出…<span class="mi-sub">master · 分轨 stems · MIDI</span></button>
+      <div class="mi-row">
+        <span class="mi-label">听旧版</span>
+        <select id="cmp-base" title="对比基准（旧版本，只读参考）"></select>
+        <button id="btn-cmp-listen" title="试听左槽版本（缓存渲染，不动 HEAD）">▶</button>
+        <span id="cmp-head" class="muted small"></span>
+      </div>
+      <div class="mi-sep"></div>
+      <button class="mi" id="mi-fav">收藏当前版本 ★<span class="mi-sub">强留存</span></button>
+      <button class="mi" id="mi-fav-restore">恢复收藏版本…</button>
+      <div class="mi-sep"></div>
+      <button class="mi" id="mi-settings">设置…</button>
+    </div>
   </div>
 
   <div class="group transport">
     <button id="btn-play-wav" title="浏览器试听（wav 流）">▶ 试听</button>
     <button id="btn-play-host" title="后端宿主播放（sounddevice）">🔊 宿主</button>
     <button id="btn-stop" title="停止试听">⏹</button>
-    <button id="btn-render" title="离线渲染 wav">渲染</button>
+    <button id="btn-render" title="离线渲染试听 wav（导出见「☰ 文件 → 导出…」）">渲染</button>
   </div>
 
   <div class="group metro-group">
@@ -30,36 +56,43 @@
     <label class="metro" title="拍号（形如 6/8 / 3/4）"><input id="sig-input" placeholder="4/4" size="4"></label>
   </div>
 
-  <div class="group">
-    <button id="btn-undo" title="撤销一步（快照栈）">↩ 撤销</button>
-    <button id="btn-redo" title="重做">↪ 重做</button>
-  </div>
-
-  <div class="group">
-    <span class="muted" title="缩放">缩放</span>
+  <div class="group editor-group">
+    <button id="btn-undo" title="撤销一步（快照栈）">↩</button>
+    <button id="btn-redo" title="重做">↪</button>
+    <span class="tb-sep"></span>
     <button id="btn-zoom-out" title="缩小时间轴">−</button>
     <button id="btn-zoom-in" title="放大时间轴">＋</button>
     <button id="btn-fit" title="适配整谱">适配</button>
-    <select id="snap-sel" title="写谱吸附（M-V3）：新建/移动/缩放的时值对齐网格（1/8 = 半拍，1/16 = 四分之一拍）">
+    <select id="snap-sel" title="写谱吸附：新建/移动/缩放的时值对齐网格">
       <option value="0">吸附关</option>
       <option value="0.5">吸附 1/8</option>
       <option value="0.25">吸附 1/16</option>
     </select>
   </div>
 
-  <div class="group" title="A/B 对比试听（议题 ④）：左槽选任意历史版本，右槽=HEAD；试听走 git show 缓存渲染，不动 HEAD">
-    <span class="muted">版本</span>
-    <select id="cmp-base" title="对比基准（旧版本，只读参考）"></select>
-    <span id="cmp-head" class="muted small">↔ HEAD</span>
-    <button id="btn-cmp-listen" title="试听左槽版本（缓存渲染）">▶ 听旧版</button>
-  </div>
-
-  <div id="import-project-row" hidden>
-    <select id="import-project-select" title="候选：output/ 下可导入的 score json（脚本直出产物）"></select>
-    <input id="import-project-path" placeholder="或粘贴 output/ 内 json 路径（如 task2/score_task2.json）">
-    <input id="import-project-name" placeholder="工程名（可改）" size="16">
-    <button id="btn-import-project-confirm" title="导入并打开">导入</button>
-    <button id="btn-import-project-cancel" title="收起">✕</button>
+  <div class="tb-right">
+    <button id="btn-theme" title="切换深/浅（母版双态）">◐</button>
+    <div class="menu-wrap">
+      <button id="btn-menu-set" class="menu-btn" title="设置（输出 / 主题 / 版本留存）">⚙</button>
+      <div id="menu-set" class="menu-pop right" hidden>
+        <div class="set-group"><div class="sg-t">音频输出</div>
+          <div class="set-row"><label>输出</label><select id="set-out"><option>系统共享（默认 · 零配置）</option></select></div>
+          <div class="set-row"><label>设备</label><span class="muted small" id="set-device">系统默认设备</span></div>
+          <div class="set-hint">ASIO / 低延迟后续迭代（Q-UI-3）</div>
+        </div>
+        <div class="set-group"><div class="sg-t">外观</div>
+          <div class="set-row"><label>主题</label>
+            <select id="set-theme"><option value="light">浅色（默认）</option><option value="dark">深色</option></select>
+          </div>
+        </div>
+        <div class="set-group"><div class="sg-t">版本留存</div>
+          <div class="set-hint">弱留存：用户操作 20 步 · 每轮对话 5 轮（滑动窗口自动清理）</div>
+          <div class="set-hint">强留存：★ 收藏版本（永久）· 长任务完成自动收藏</div>
+          <div class="set-hint muted">（机制重设计中 → docs/待办-机制重设计-2026-09-18.md）</div>
+        </div>
+        <div class="set-foot">改动即生效 · 无需保存</div>
+      </div>
+    </div>
   </div>
 </header>
 
@@ -74,25 +107,40 @@
 
 <main id="layout">
   <aside id="tracks-panel">
-    <div class="panel-title">轨道</div>
+    <div class="panel-head">
+      <span class="panel-title">轨道</span>
+      <button id="btn-fold-tracks" class="fold-btn" title="收起面板（收成窄边条）">◀</button>
+    </div>
     <div id="track-list"></div>
     <div class="panel-title">乐句</div>
     <div id="segments-info" class="muted small">（无）</div>
     <div class="panel-title">工程</div>
     <div id="meta-info" class="muted small">（未打开）</div>
   </aside>
+  <div id="rail-tracks" class="rail" title="展开轨道面板"><span>轨道 ▶</span></div>
 
   <section id="roll-wrap">
+    <div id="stage-head" hidden>
+      <button id="btn-back-lanes" title="返回总谱预览（Esc）">◀ 总谱</button>
+      <span class="sb-chip"><span id="single-chip" class="track-chip"></span><b id="single-name">—</b></span>
+      <span class="muted small" id="single-info"></span>
+      <span class="sb-hint muted small">单击左侧其他轨 = 灰叠加 ｜ 双击 = 切主轨 ｜ Esc 返回</span>
+    </div>
     <canvas id="ruler"></canvas>
-    <canvas id="roll"></canvas>
+    <div id="stage-body">
+      <canvas id="lanes" title="总谱预览：单击选中 / Ctrl 多选 / 双击进入单轨写谱"></canvas>
+      <canvas id="roll" hidden></canvas>
+    </div>
   </section>
 
+  <div id="rail-chat" class="rail right" title="展开对话面板"><span>◀ 对话</span></div>
   <aside id="chat-panel">
     <div id="chat-head">
       <div class="panel-title">对话框 · 语义编辑</div>
       <div id="chat-head-btns">
-        <button id="btn-new-session" title="结束当前对话线程；下一轮起新会话（历史 JSONL 保留，可导入续接）">🆕 新会话</button>
-        <button id="btn-import-session" title="导入历史会话：回看消息 + 接着聊">📥 导入</button>
+        <button id="btn-fold-chat" class="fold-btn" title="收起面板（收成窄边条）">▶</button>
+        <button id="btn-new-session" title="结束当前对话线程；下一轮起新会话（历史 JSONL 保留）">🆕<span class="btn-txt"> 新会话</span></button>
+        <button id="btn-import-session" title="导入历史会话：回看消息 + 接着聊">📥<span class="btn-txt"> 导入</span></button>
         <button id="btn-stop-agent" title="停止当前 agent 会话（已落盘修改保留）" hidden>⏹ 停止</button>
       </div>
     </div>
@@ -126,9 +174,10 @@
   </aside>
 </main>
 
-<section id="dock" title="下方面板：效果器 / 音源 / 混音台（可折叠）">
+<section id="dock" title="下方面板：通道 / 效果器 / 音源 / 混音台（可折叠）">
   <div class="dock-head">
-    <button class="dock-tab active" data-pane="fx">效果器</button>
+    <button class="dock-tab active" data-pane="chan">通道</button>
+    <button class="dock-tab" data-pane="fx">效果器</button>
     <button class="dock-tab" data-pane="src">音源</button>
     <button class="dock-tab" data-pane="mix">混音台</button>
     <span class="dh-spacer"></span>
@@ -136,7 +185,8 @@
     <button id="dock-fold" title="折叠/展开（记忆到 localStorage）" style="border:none;background:none;font-size:12px">▾ 收起</button>
   </div>
   <div id="dock-body">
-    <div class="dock-pane active" id="dock-fx"></div>
+    <div class="dock-pane active" id="dock-chan"></div>
+    <div class="dock-pane" id="dock-fx"></div>
     <div class="dock-pane" id="dock-src"></div>
     <div class="dock-pane" id="dock-mix"></div>
   </div>
@@ -151,10 +201,43 @@
   <button data-op="vel-" title="力度 -0.1">力度 −</button>
   <button data-op="vel+" title="力度 +0.1">力度 +</button>
   <button data-op="delete" title="删除选中音（按索引降序执行）">🗑 删除</button>
-  <label id="ann-mode-wrap" title="标注模式（M-V3）：选区操作先挂起为「人工标注」，随下条对话发送——确定性应用、最高优先级、不走 LLM">
+  <label id="ann-mode-wrap" title="标注模式：选区操作先挂起为「人工标注」，随下条对话发送">
     <input type="checkbox" id="ann-mode"> 标注模式
   </label>
   <button data-op="close" title="关闭工具条（保留选区）">✕</button>
+</div>
+
+<div id="dlg-export" class="dlg-wrap" hidden>
+  <div class="dlg">
+    <div class="dlg-hd">导出</div>
+    <div class="dlg-body">
+      <label class="ck"><input type="checkbox" id="ex-mix" checked> 混音 master（mix.wav）</label>
+      <label class="ck"><input type="checkbox" id="ex-stems" checked> 每轨 stems（stems/&lt;轨&gt;.wav）</label>
+      <label class="ck"><input type="checkbox" id="ex-buses"> 总线 stems（buses/，工程有总线时）</label>
+      <label class="ck"><input type="checkbox" id="ex-midi" checked> MIDI Type1（多轨 .mid）</label>
+      <label class="ck"><input type="checkbox" id="ex-midi-stems"> 每轨 MIDI（midi-stems/）</label>
+      <div class="dlg-hint">产物目录：<code>output/&lt;工程&gt;/exports/&lt;时间戳&gt;/</code>（wav/mid 不入库）</div>
+      <div id="ex-result" class="dlg-result" hidden></div>
+    </div>
+    <div class="dlg-ft">
+      <button id="ex-cancel">关闭</button>
+      <button id="ex-run" class="primary">开始导出</button>
+    </div>
+  </div>
+</div>
+
+<div id="dlg-fav" class="dlg-wrap" hidden>
+  <div class="dlg">
+    <div class="dlg-hd">收藏版本</div>
+    <div class="dlg-body">
+      <div class="dlg-hint">收藏 = 工程 git tag（永久保留，不随日常提交清理）</div>
+      <div id="fav-list" class="fav-list"></div>
+    </div>
+    <div class="dlg-ft">
+      <button id="fav-cancel">关闭</button>
+      <button id="fav-restore" class="primary">恢复到选中版本</button>
+    </div>
+  </div>
 </div>
 
 <footer id="statusbar">

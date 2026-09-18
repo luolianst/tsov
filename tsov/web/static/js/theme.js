@@ -20,6 +20,7 @@ const P = {
     ghostFillCreate: 'rgba(46,125,79,0.22)', ghostStrokeCreate: '#2E7D4F',
     residual: 'rgba(20,20,20,0.35)',
     segPhrase: 'rgba(217,58,43,0.22)', segPause: 'rgba(20,20,20,0.10)', segBreath: 'rgba(20,20,20,0.05)',
+    selSoft: '#E9E9E5', panelBg: '#FAFAF8', laneLabel: '#9B9B96',
   },
   dark: {
     rollBg: '#1D1F21', rowWhite: '#212325', rowBlack: '#17181A',
@@ -36,6 +37,7 @@ const P = {
     ghostFillCreate: 'rgba(63,191,143,0.25)', ghostStrokeCreate: '#3FBF8F',
     residual: 'rgba(233,235,236,0.30)',
     segPhrase: 'rgba(255,80,64,0.30)', segPause: 'rgba(233,235,236,0.12)', segBreath: 'rgba(233,235,236,0.06)',
+    selSoft: '#26292C', panelBg: '#212325', laneLabel: '#6B737A',
   },
 };
 

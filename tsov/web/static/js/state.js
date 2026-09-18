@@ -25,6 +25,11 @@ export const store = {
   /* 卷帘视图 */
   view: { pxPerSec: 90, pxPerSemi: 14, scrollSec: 0, midiTop: 84 },
 
+  /* 视图模式（修正轮2）：'lanes' = 总谱预览（每轨 lane）| 'single' = 单轨写谱 */
+  viewMode: 'lanes',
+  singleTrack: 0,
+  overlayTracks: new Set(),   // single 模式灰叠加轨（不可编辑）
+
   /* 轨道可见性（Set<trackIndex>；空 = 全可见） */
   hiddenTracks: new Set(),
 
@@ -79,6 +84,55 @@ export function setAgentBusy(b) { store.agentBusy = !!b; bus.dispatch('agentbusy
 export function setView(partial) {
   Object.assign(store.view, partial);
   bus.dispatch('view');
+}
+
+/* ---------------- 视图模式（修正轮2：总谱 lane ↔ 单轨写谱） ---------------- */
+
+export function setViewMode(mode, track) {
+  const m = (mode === 'single') ? 'single' : 'lanes';
+  if (m === 'lanes') {
+    store.overlayTracks = new Set();
+  }
+  store.viewMode = m;
+  if (track != null) {
+    store.singleTrack = Math.max(0, track | 0);
+    store.overlayTracks.delete(store.singleTrack);
+  }
+  bus.dispatch('viewmode');
+}
+
+export function setSingleTrack(ti) {
+  store.singleTrack = Math.max(0, ti | 0);
+  store.overlayTracks.delete(store.singleTrack);
+  store.selection = { track: store.singleTrack, indices: [] };
+  bus.dispatch('viewmode');
+}
+
+/* 灰叠加开关（返回是否已成为叠加） */
+export function toggleOverlay(ti) {
+  if (ti === store.singleTrack) return false;
+  if (store.overlayTracks.has(ti)) store.overlayTracks.delete(ti);
+  else store.overlayTracks.add(ti);
+  bus.dispatch('viewmode');
+  return store.overlayTracks.has(ti);
+}
+
+export function isOverlay(ti) { return store.overlayTracks.has(ti); }
+
+/* 单轨视图：把纵向视图适配到该轨音域 */
+export function fitViewTrack(ti, h) {
+  const tr = store.score && store.score.tracks[ti];
+  let lo = 127, hi = 0;
+  if (tr) {
+    for (const n of tr.notes) {
+      if (n.pitch_midi < lo) lo = n.pitch_midi;
+      if (n.pitch_midi > hi) hi = n.pitch_midi;
+    }
+  }
+  if (lo > hi) { lo = 60; hi = 72; }
+  const rows = Math.max(10, hi - lo + 5);
+  const pxPerSemi = Math.min(24, Math.max(6, Math.floor((h - 4) / rows)));
+  setView({ pxPerSemi, midiTop: hi + 3 });
 }
 
 /* M-V3：标注队列（选区操作挂起；随下条对话发送，后端确定性先行应用） */

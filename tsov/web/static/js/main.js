@@ -2,12 +2,13 @@
 
 import { api } from './api.js';
 import { bus, connectEvents } from './events.js';
-import { store, setState, setError, toast, fitView, setView, clearDiff, setAnnotations, clearAnnotations, setSnap } from './state.js';
+import { store, setState, setError, toast, fitView, setView, clearDiff, setAnnotations, clearAnnotations, setSnap, setViewMode, setSingleTrack, fitViewTrack } from './state.js';
 import * as roll from './roll.js';
 import * as timeline from './timeline.js';
 import * as segbar from './segbar.js';
 import * as dock from './dock.js';
-import { initTheme } from './theme.js';
+import * as lanes from './lanes.js';
+import { initTheme, setTheme, themeName, trackColors } from './theme.js';
 import { initDiffBadge } from './diff.js';
 import * as chat from './chat.js';
 import * as playback from './playback.js';
@@ -83,10 +84,16 @@ async function openProject(name) {
     store.project = name;
     connectEvents(name);
     chat.switchProject(name);
+    /* 修正轮2：切工程 → 回到总谱视图（单轨态不带过去） */
+    setViewMode('lanes');
+    $('stage-head').hidden = true;
+    $('lanes').hidden = false;
+    $('roll').hidden = true;
     bus.dispatch('state');
     requestAnimationFrame(() => {
-      const rc = $('roll').getBoundingClientRect();
+      const rc = $('stage-body').getBoundingClientRect();
       fitView(rc.width, rc.height);
+      lanes.resizeNow();
     });
     toast('已打开工程 ' + name);
   } catch (e) { setError(e.message); }
@@ -150,12 +157,24 @@ async function doImportProject() {
   } catch (e) { setError(e.message); }
 }
 
+async function renameProject() {
+  if (!store.project) { setError('先打开一个工程'); return; }
+  const cur = (store.score && store.score.title) || store.project;
+  const title = prompt('新的工程显示名（score 标题，一个 commit，可撤销）：', cur);
+  if (!title || !title.trim()) return;
+  try {
+    const r = await api.setTitle(store.project, title.trim());
+    toast('已改名：' + r.title + ' @' + String(r.commit || '').slice(0, 7));
+  } catch (e) { setError(e.message); }
+}
+
 /* ---------------- 启动 ---------------- */
 
 function boot() {
   initTheme();   // UI 批A：浅色默认（?theme= / localStorage 可覆盖）
   roll.init($('roll'));
-  timeline.init($('ruler'), $('track-list'), $('segments-info'), $('meta-info'));
+  lanes.init($('lanes'), { onEnter: enterSingle });
+  timeline.init($('ruler'), $('track-list'), $('segments-info'), $('meta-info'), { onEnter: enterSingle });
   segbar.init($('seg-rows'));
   dock.init($('dock'));
   initDiffBadge($('status-diff'));
@@ -183,6 +202,185 @@ function boot() {
     stopBtn: $('btn-stop'),
     playHostBtn: $('btn-play-host'),
     renderBtn: $('btn-render'),
+  });
+
+  /* ================= 修正轮2：菜单 / 面板收起 / 视图模式 / 导出 / 收藏 ================= */
+
+  /* ---- 二级菜单（文件 / 设置）；点外部或 Esc 关闭 ---- */
+  const menuFile = $('menu-file'), menuSet = $('menu-set');
+  function closeMenus(except) {
+    for (const m of [menuFile, menuSet]) if (m && m !== except) m.hidden = true;
+  }
+  function toggleMenu(pop) {
+    const show = pop.hidden;
+    closeMenus(pop);
+    pop.hidden = !show;
+  }
+  $('btn-menu-file').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(menuFile); });
+  $('btn-menu-set').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(menuSet); });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.menu-pop') && !e.target.closest('.menu-btn')) closeMenus(null);
+  });
+
+  $('mi-new').addEventListener('click', () => { closeMenus(null); newProject(); });
+  $('mi-rename').addEventListener('click', () => { closeMenus(null); renameProject(); });
+  $('mi-import').addEventListener('click', (e) => { e.stopPropagation(); showImportRow(); });
+  $('mi-refresh').addEventListener('click', () => { closeMenus(null); loadProjects(true); });
+  $('mi-export').addEventListener('click', () => { closeMenus(null); openExport(); });
+  $('mi-fav').addEventListener('click', () => { closeMenus(null); doFavorite(); });
+  $('mi-fav-restore').addEventListener('click', () => { closeMenus(null); openFavDlg(); });
+  $('mi-settings').addEventListener('click', () => { closeMenus(null); menuSet.hidden = false; });
+
+  /* ---- 主题（◐ 与设置菜单同步） ---- */
+  $('btn-theme').addEventListener('click', () => { setTheme(themeName() === 'dark' ? 'light' : 'dark'); closeMenus(null); });
+  const setThemeSel = $('set-theme');
+  function syncThemeSel() { if (setThemeSel) setThemeSel.value = (themeName() === 'dark') ? 'dark' : 'light'; }
+  if (setThemeSel) setThemeSel.addEventListener('change', () => setTheme(setThemeSel.value));
+  window.addEventListener('tsov-theme', () => { syncThemeSel(); bus.dispatch('view'); });
+  syncThemeSel();
+  const setOut = $('set-out');
+  if (setOut) setOut.addEventListener('change', () => toast('输出：' + setOut.value + '（ASIO / 低延迟后续迭代）'));
+
+  /* ---- 面板收起（窄边条；默认全开；独立不互斥；记忆 localStorage） ---- */
+  function applyFold(panel, folded) {
+    document.body.classList.toggle(panel === 'tracks' ? 'tracks-folded' : 'chat-folded', folded);
+    try { localStorage.setItem('tsov.fold.' + panel, folded ? '1' : '0'); } catch (e) { /* ignore */ }
+    // 中栏尺寸变化 → 画布重算
+    requestAnimationFrame(() => { roll.resizeNow(); lanes.resizeNow(); });
+  }
+  for (const [panel, btnId, railId] of [['tracks', 'btn-fold-tracks', 'rail-tracks'], ['chat', 'btn-fold-chat', 'rail-chat']]) {
+    let saved = null;
+    try { saved = localStorage.getItem('tsov.fold.' + panel); } catch (e) { /* ignore */ }
+    applyFold(panel, saved === '1');
+    $(btnId).addEventListener('click', () => applyFold(panel, true));
+    $(railId).addEventListener('click', () => applyFold(panel, false));
+  }
+
+  /* ---- 总谱 ↔ 单轨写谱（修正轮2） ---- */
+  function renderSingleHead() {
+    const ti = store.singleTrack;
+    const tr = store.score && store.score.tracks[ti];
+    const tc = trackColors();
+    $('single-name').textContent = tr ? (tr.name || ('track ' + ti)) : '—';
+    $('single-chip').style.background = tc[ti % tc.length];
+    const inst = (tr && tr.instrument) || {};
+    $('single-info').textContent = tr ? (tr.notes.length + ' 音 · ' + (inst.program || 'default')) : '';
+  }
+  function enterSingle(ti) {
+    setViewMode('single', ti);
+    setSingleTrack(ti);
+    $('stage-head').hidden = false;
+    $('lanes').hidden = true;
+    $('roll').hidden = false;
+    const h = $('stage-body').getBoundingClientRect().height;
+    fitViewTrack(ti, h);
+    roll.resizeNow();
+    renderSingleHead();
+  }
+  function backToLanes() {
+    if (store.viewMode !== 'single') return;
+    setViewMode('lanes');
+    $('stage-head').hidden = true;
+    $('lanes').hidden = false;
+    $('roll').hidden = true;
+    const rc = $('stage-body').getBoundingClientRect();
+    fitView(rc.width, rc.height);
+    lanes.resizeNow();
+  }
+  $('btn-back-lanes').addEventListener('click', backToLanes);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeMenus(null);
+      if (!$('dlg-export').hidden) { $('dlg-export').hidden = true; return; }
+      if (!$('dlg-fav').hidden) { $('dlg-fav').hidden = true; return; }
+      backToLanes();
+    }
+  });
+
+  /* ---- 导出弹窗（三级；接 host export_matrix） ---- */
+  const dlgExport = $('dlg-export');
+  function openExport() {
+    if (!store.project) { setError('先打开一个工程'); return; }
+    $('ex-result').hidden = true;
+    $('ex-result').textContent = '';
+    dlgExport.hidden = false;
+  }
+  $('ex-cancel').addEventListener('click', () => { dlgExport.hidden = true; });
+  $('ex-run').addEventListener('click', async () => {
+    if (!store.project) return;
+    const btn = $('ex-run');
+    btn.disabled = true; btn.textContent = '导出中…';
+    try {
+      const r = await api.exportProject(store.project, {
+        mix: $('ex-mix').checked, stems: $('ex-stems').checked, buses: $('ex-buses').checked,
+        midi: $('ex-midi').checked, midi_stems: $('ex-midi-stems').checked,
+      });
+      const files = r.files || [];
+      $('ex-result').hidden = false;
+      $('ex-result').textContent = '✓ 已导出 ' + files.length + ' 个文件 → ' + r.out_dir + '\n' +
+        files.map((f) => '· ' + f).join('\n');
+      toast('导出完成：' + files.length + ' 个文件');
+    } catch (e) {
+      $('ex-result').hidden = false;
+      $('ex-result').textContent = '✗ ' + e.message;
+    } finally {
+      btn.disabled = false; btn.textContent = '开始导出';
+    }
+  });
+
+  /* ---- 收藏版本（强留存 = git tag；恢复走现有 rollback） ---- */
+  const dlgFav = $('dlg-fav');
+  let favPick = null;
+  async function doFavorite() {
+    if (!store.project) { setError('先打开一个工程'); return; }
+    try {
+      const r = await api.favorite(store.project);
+      toast('已收藏 ' + r.tag + '（git tag，可随时恢复）');
+    } catch (e) { setError(e.message); }
+  }
+  async function openFavDlg() {
+    if (!store.project) { setError('先打开一个工程'); return; }
+    favPick = null;
+    const list = $('fav-list');
+    list.innerHTML = '<div class="fav-none">读取中…</div>';
+    dlgFav.hidden = false;
+    try {
+      const r = await api.favorites(store.project);
+      const favs = r.favorites || [];
+      list.innerHTML = '';
+      if (!favs.length) { list.innerHTML = '<div class="fav-none">（暂无收藏——用「收藏当前版本 ★」创建）</div>'; return; }
+      for (const f of favs) {
+        const it = document.createElement('div');
+        it.className = 'fav-item';
+        const tg = document.createElement('span');
+        tg.className = 'fav-tag';
+        tg.textContent = f.tag;
+        const inf = document.createElement('span');
+        inf.textContent = f.info || '';
+        it.appendChild(tg); it.appendChild(inf);
+        it.addEventListener('click', () => {
+          favPick = f.tag;
+          for (const x of Array.from(list.children)) x.classList.toggle('picked', x === it);
+        });
+        list.appendChild(it);
+      }
+    } catch (e) {
+      list.innerHTML = '';
+      const err = document.createElement('div');
+      err.className = 'fav-none';
+      err.textContent = '读取失败：' + e.message;
+      list.appendChild(err);
+    }
+  }
+  $('fav-cancel').addEventListener('click', () => { dlgFav.hidden = true; });
+  $('fav-restore').addEventListener('click', async () => {
+    if (!favPick || !store.project) { setError('先点选一个收藏版本'); return; }
+    try {
+      await api.rollback(store.project, favPick);
+      dlgFav.hidden = true;
+      toast('已恢复到 ' + favPick);
+      await openProject(store.project);
+    } catch (e) { setError(e.message); }
   });
 
   /* SSE → store（本地直接消费事件负载，契约 §六 数据流） */
@@ -222,16 +420,8 @@ function boot() {
     }).catch((err) => setError('听旧版失败：' + err.message));
   });
 
-  /* 工具栏 */
+  /* 工具栏（修正轮2：择要保留顶栏；新建/导入/改名/刷新/收藏等在「☰ 文件」二级菜单） */
   $('project-select').addEventListener('change', (e) => openProject(e.target.value));
-  $('btn-refresh-projects').addEventListener('click', () => loadProjects(true));
-  $('btn-new-project').addEventListener('click', newProject);
-
-  /* M-V6 批1：导入 score json → 工程 */
-  $('btn-import-project').addEventListener('click', () => {
-    const row = $('import-project-row');
-    if (row.hidden) showImportRow(); else row.hidden = true;
-  });
   $('import-project-select').addEventListener('change', (e) => {
     const opt = e.target.selectedOptions[0];
     if (!opt || !e.target.value) return;
@@ -259,17 +449,7 @@ function boot() {
     bus.dispatch('diff');
   });
 
-  /* 工程改名（score 标题，一个 commit） */
-  $('btn-rename').addEventListener('click', async () => {
-    if (!store.project) { setError('先打开一个工程'); return; }
-    const cur = (store.score && store.score.title) || store.project;
-    const title = prompt('新的工程显示名（score 标题，一个 commit，可撤销）：', cur);
-    if (!title || !title.trim()) return;
-    try {
-      const r = await api.setTitle(store.project, title.trim());
-      toast('已改名：' + r.title + ' @' + String(r.commit || '').slice(0, 7));
-    } catch (e) { setError(e.message); }
-  });
+  /* 工程改名：见 renameProject（「☰ 文件 → 重命名工程…」） */
 
   /* 选区工具条（M-V3 雏形：点音符 → 命令层直编） */
   const selBar = $('sel-bar');

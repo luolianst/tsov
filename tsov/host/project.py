@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 import json
 import subprocess
+import time
 from pathlib import Path
 
 from ..analysis.dataset import midi_to_note_name
@@ -236,6 +237,33 @@ class Project:
     # ------------------------------------------------------------------
     # 工程摘要（LLM 上下文节流）
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # 收藏（修正轮2：强留存 = git tag；Q44 版本留存机制落地后可演进）
+    # ------------------------------------------------------------------
+
+    def favorite(self, name: str | None = None) -> dict:
+        """收藏当前版本 = git tag（fav/<时间戳>[-标签]）。"""
+        if not (self.root / ".git").exists():
+            return {"ok": False, "error": "工程无 git 仓库"}
+        label = "".join(ch for ch in str(name or "") if (ch.isalnum() or ch in "-_"))[:32]
+        tag = "fav/" + time.strftime("%Y%m%d-%H%M%S") + (("-" + label) if label else "")
+        proc = self._git("tag", tag)
+        if proc.returncode != 0:
+            return {"ok": False, "error": (proc.stderr or "git tag 失败").strip()}
+        return {"ok": True, "tag": tag}
+
+    def favorites(self) -> list[dict]:
+        """收藏列表（fav/* tag + 指向 commit 的缩略信息；新→旧）。"""
+        if not (self.root / ".git").exists():
+            return []
+        proc = self._git("tag", "--list", "fav/*")
+        tags = [t.strip() for t in (proc.stdout or "").splitlines() if t.strip()]
+        out: list[dict] = []
+        for t in sorted(tags, reverse=True):
+            info = self._git("log", "-1", "--format=%h %s", t)
+            out.append({"tag": t, "info": (info.stdout or "").strip()})
+        return out
 
     def summary(self, cap: int = SUMMARY_NOTE_CAP) -> str:
         score = self.score

@@ -95,9 +95,13 @@ export function draw() {
 
   /* ---- 音符 ---- */
   const sel = store.selection;
+  const single = store.viewMode === 'single';
   if (store.score) {
     store.score.tracks.forEach((tr, ti) => {
       if (store.hiddenTracks.has(ti)) return;
+      /* 单轨写谱（修正轮2）：只画主轨 + 灰叠加轨（低对比、不可编辑） */
+      const isGhost = single && ti !== store.singleTrack;
+      if (isGhost && !store.overlayTracks.has(ti)) return;
       const tc = trackColors();
       const color = tc[ti % tc.length];
       for (let ni = 0; ni < tr.notes.length; ni++) {
@@ -105,6 +109,15 @@ export function draw() {
         const x = xOf(n.start), y = yOf(n.pitch_midi);
         const w = Math.max(2, (n.end - n.start) * v.pxPerSec), h = v.pxPerSemi - 1;
         if (x + w < KEYS_W || x > W || y + h < 0 || y > H) continue;
+
+        if (isGhost) {
+          /* 灰叠加（修正轮2）：统一灰、低对比、不可编辑 */
+          ctx.fillStyle = p.laneLabel;
+          ctx.globalAlpha = 0.45;
+          ctx.fillRect(x, y + 0.5, w, h);
+          ctx.globalAlpha = 1;
+          continue;
+        }
 
         /* diff 叠层（只对 track 0） */
         let stroke = null, fill = color;
@@ -201,8 +214,10 @@ let mouseInCanvas = false;
 function hitNote(mx, my) {
   if (!store.score) return null;
   const v = store.view;
+  const single = store.viewMode === 'single';
   for (let ti = store.score.tracks.length - 1; ti >= 0; ti--) {
     if (store.hiddenTracks.has(ti)) continue;
+    if (single && ti !== store.singleTrack) continue;   // 单轨模式：叠加轨不可点
     const notes = store.score.tracks[ti].notes;
     for (let ni = notes.length - 1; ni >= 0; ni--) {
       const n = notes[ni];
@@ -423,12 +438,14 @@ export function init(rollCanvas) {
         if (hit.edge === 'right') drag.mode = 'resize-right';
       }
     } else {
-      /* 铅笔：创建新音符（默认时长 = 半拍，可拖动拉长） */
-      setSelection(0, []);
+      /* 铅笔：创建新音符（默认时长 = 半拍，可拖动拉长）
+         修正轮2：单轨写谱模式 → 建到主轨；总谱模式卷帘不可见 */
+      const createTrack = store.viewMode === 'single' ? store.singleTrack : (store.selection.track || 0);
+      setSelection(createTrack, []);
       const t0 = Math.max(0, snapT(tOf(e.offsetX)));
       const beat = 60 / tempo();
       const dur = Math.max(MIN_DUR, beat / 2);
-      drag = { mode: 'create', track: 0, index: null, orig: null,
+      drag = { mode: 'create', track: createTrack, index: null, orig: null,
                ghost: { start: t0, end: t0 + dur, pitch: midiOf(e.offsetY) } };
     }
   });
@@ -502,4 +519,12 @@ export function init(rollCanvas) {
   for (const topic of ['state', 'view', 'selection', 'diff', 'playhead', 'playing']) {
     bus.on(topic, draw);
   }
+  bus.on('viewmode', draw);   // 修正轮2：总谱 ↔ 单轨切换重绘
+}
+
+/* 修正轮2：外部（main.js 切换显隐后）主动重算尺寸 + 重绘 */
+export function resizeNow() {
+  if (!canvas) return;
+  resize();
+  draw();
 }

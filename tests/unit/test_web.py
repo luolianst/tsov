@@ -675,3 +675,31 @@ def test_import_candidates_skips_projects_and_junk(env):
     (env["dir"] / "p1" / "agent-edited.json").write_text(json.dumps(_score_payload()), encoding="utf-8")  # 工程内部文件 → 跳过
     cands = c.get("/api/import-candidates").json()["candidates"]
     assert [x["path"] for x in cands] == ["raw.json"]
+
+
+def test_favorite_and_list(env):
+    """修正轮2：收藏当前版本（git tag）+ 收藏列表。"""
+    c = env["client"]
+    c.post("/api/projects", json={"name": "favproj"})
+    r = c.post("/api/projects/favproj/favorite")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True and body["tag"].startswith("fav/")
+    lst = c.get("/api/projects/favproj/favorites").json()["favorites"]
+    assert any(f["tag"] == body["tag"] for f in lst)
+
+
+@pytest.mark.skipif(not _HAS_SF, reason="缺 vendor/soundfonts/FluidR3_GM.sf2")
+def test_export_matrix_endpoint(env):
+    """修正轮2：导出端点（mix + MIDI 真链路；stems 变体由 host 单测覆盖）。"""
+    c = env["client"]
+    c.post("/api/projects", json={"name": "expproj"})
+    r = c.post("/api/projects/expproj/export",
+               json={"mix": True, "stems": False, "buses": False, "midi": True, "midi_stems": False})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    files = body["files"]
+    assert any(f.endswith("mix.wav") for f in files)
+    assert any(f.endswith(".mid") for f in files)
+    out = Path(body["out_dir"])
+    assert out.is_dir() and all(Path(f).is_file() for f in files)

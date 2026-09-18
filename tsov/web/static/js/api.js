@@ -44,6 +44,9 @@ export const api = {
   chatStop: () => post('/api/chat/stop', {}),
   chatReset: (project) => post('/api/chat/reset', { project }),
   setTitle: (name, title) => post('/api/projects/' + encodeURIComponent(name) + '/title', { title }),
+  exportProject: (name, opts) => post('/api/projects/' + encodeURIComponent(name) + '/export', opts || {}),
+  favorite: (name) => post('/api/projects/' + encodeURIComponent(name) + '/favorite', {}),
+  favorites: (name) => req('/api/projects/' + encodeURIComponent(name) + '/favorites'),
   listSessions: () => req('/api/sessions'),
   loadSession: (project, name) => post('/api/sessions/load', { project, name }),
 
