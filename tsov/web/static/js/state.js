@@ -200,3 +200,31 @@ export function segments() {
   if (m && Array.isArray(m.segments)) return m.segments;
   return [];
 }
+
+/* ---------------- 批B（ADR-0017）：只读可编程面 ----------------
+   window.__tsovState() —— 返回当前前端状态快照（只读，调用即取新值）。
+   用途：CDP 实测断言 / 外部 agent（MCP 线）观察宿主状态；不提供写入口（写走命令层）。 */
+export function snapshot() {
+  return {
+    project: store.project,
+    score: store.score,               // ADR-0005 schema（大对象，按需取字段）
+    summary: store.summary,
+    gitLog: store.gitLog,
+    history: store.history,
+    selection: { track: store.selection.track, indices: store.selection.indices.slice() },
+    viewMode: store.viewMode,
+    singleTrack: store.singleTrack,
+    overlayTracks: Array.from(store.overlayTracks),
+    hiddenTracks: Array.from(store.hiddenTracks),
+    view: Object.assign({}, store.view),
+    snapFrac: store.snapFrac,
+    pendingAnnotations: store.pendingAnnotations.slice(),
+    agentBusy: store.agentBusy,
+    playing: store.playing,
+    playhead: store.playhead,
+    hasDiff: !!store.diff,
+    error: store.error,
+  };
+}
+
+if (typeof window !== 'undefined') window.__tsovState = snapshot;
