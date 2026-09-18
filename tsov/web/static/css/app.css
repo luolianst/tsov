@@ -127,16 +127,19 @@ select:hover, input:hover { border-color: var(--border-strong); }
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  row-gap: 4px;
-  gap: 12px;
-  padding: 6px 12px;
+  row-gap: 3px;
+  gap: 10px;
+  padding: 5px 10px;
   background: var(--bg-elev);
   border-bottom: 1px solid var(--border);
-  min-height: 44px;
+  min-height: 40px;
 }
 .brand { font-weight: 700; font-size: var(--fs-xl); letter-spacing: .01em; white-space: nowrap; }
 .brand-sub { margin-left: 8px; font-weight: 400; font-size: var(--fs-sm); color: var(--muted); letter-spacing: .18em; }
-.group { display: flex; align-items: center; gap: 6px; flex: none; }
+.group { display: flex; align-items: center; gap: 5px; flex: none; }
+/* 修正轮2.2：◐/⚙ 必须并排（原本是块级堆叠 → 各占一行）；并钉在顶栏右端 */
+.tb-right { display: flex; align-items: center; gap: 5px; flex: none; margin-left: auto; }
+.tb-right button { flex: none; }
 #topbar button { white-space: nowrap; }
 #project-select { max-width: 300px; }
 #cmp-base { max-width: 240px; }
@@ -653,11 +656,21 @@ body.chat-folded #rail-chat { display: flex; }
   :root { --tracks-w: 160px; --chat-w: 320px; }
   .dh-hint { display: none; }
   #dock:not(.folded) { height: 176px; }
+  #project-select { max-width: 220px; }   /* 修正轮2.2：顶栏收窄 */
 }
 
 @media (max-width: 1179px) {
   :root { --tracks-w: 148px; --chat-w: 288px; }
   #chat-head-btns .btn-txt { display: none; }   /* 修正轮2：窄档按钮收成图标（不裁切） */
+  /* 修正轮2.2：顶栏紧凑化（副标题/传输按钮文字收掉，控件收窄，间距减小 → 832 下单行） */
+  #topbar { gap: 7px; row-gap: 3px; padding: 4px 6px; }
+  .brand-sub { display: none; }
+  .group.transport .btn-txt { display: none; }
+  .group.transport button { padding: 2px 6px; }
+  #project-select { max-width: 150px; }
+  .metro-group { gap: 6px; }
+  .metro input { width: 42px; }
+  #snap-sel { max-width: 70px; }
   #chat-actions button { font-size: var(--fs-sm); }
   /* 窄档轨道行：隐去小字行 + 缩小按钮（名字占满一行，行高仍 = --row-h，与 lane 保持对齐） */
   .track-item .track-sub { display: none; }
