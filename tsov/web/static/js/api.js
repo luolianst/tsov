@@ -22,6 +22,7 @@ function post(path, data) {
 
 export const api = {
   health: () => req('/api/health'),
+  meta: () => req('/api/meta'),
   listProjects: () => req('/api/projects'),
   createProject: (name, score) => post('/api/projects', { name, score: score || null }),
   importCandidates: () => req('/api/import-candidates'),

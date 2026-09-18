@@ -5,6 +5,9 @@ import { bus, connectEvents } from './events.js';
 import { store, setState, setError, toast, fitView, setView, clearDiff, setAnnotations, clearAnnotations, setSnap } from './state.js';
 import * as roll from './roll.js';
 import * as timeline from './timeline.js';
+import * as segbar from './segbar.js';
+import * as dock from './dock.js';
+import { initTheme } from './theme.js';
 import { initDiffBadge } from './diff.js';
 import * as chat from './chat.js';
 import * as playback from './playback.js';
@@ -150,8 +153,11 @@ async function doImportProject() {
 /* ---------------- 启动 ---------------- */
 
 function boot() {
+  initTheme();   // UI 批A：浅色默认（?theme= / localStorage 可覆盖）
   roll.init($('roll'));
   timeline.init($('ruler'), $('track-list'), $('segments-info'), $('meta-info'));
+  segbar.init($('seg-rows'));
+  dock.init($('dock'));
   initDiffBadge($('status-diff'));
   chat.init({
     logEl: $('chat-log'),
@@ -393,6 +399,49 @@ function boot() {
   $('snap-sel').addEventListener('change', (e) => {
     setSnap(e.target.value);
     toast('吸附：' + e.target.selectedOptions[0].textContent);
+  });
+
+  /* UI 批A：速度 / 拍号（命令层 set_tempo；只在此处编辑——段轨与顶栏不重复） */
+  async function postTempo(value, label) {
+    if (!store.project) { setError('先打开一个工程'); return; }
+    try {
+      const r = await api.postBatch(store.project, label, [{ op: 'set_tempo', track: 0, value }], '参数：' + label);
+      if (r.applied) toast('已更新 ' + label + ' @' + String(r.commit || '').slice(0, 7));
+      else setError('被拒：' + (r.errors || []).join('；'));
+    } catch (e) { setError(e.message); }
+  }
+  const tempoIn = $('tempo-input');
+  const sigIn = $('sig-input');
+  function syncMetro() {
+    const sc = store.score;
+    tempoIn.value = sc ? String(Math.round(sc.tempo * 10) / 10) : '';
+    sigIn.value = sc ? (sc.time_signature || '4/4') : '';
+  }
+  tempoIn.addEventListener('change', () => {
+    const t = Number(tempoIn.value);
+    if (!t || t < 20 || t > 400) { syncMetro(); return; }
+    if (store.score && Math.abs(t - store.score.tempo) < 1e-6) return;
+    postTempo({ tempo: t }, '速度 ♩=' + t);
+  });
+  tempoIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { tempoIn.blur(); } });
+  sigIn.addEventListener('change', () => {
+    const v = (sigIn.value || '').trim();
+    const cur = (store.score && store.score.time_signature) || '4/4';
+    if (!v || v === cur) return;
+    postTempo({ time_signature: v }, '拍号 ' + v);
+  });
+  sigIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { sigIn.blur(); } });
+  bus.on('state', syncMetro);
+  syncMetro();
+
+  /* UI 批A：紧凑档抽屉（轨道 / 对话面板） */
+  $('btn-drawer-tracks').addEventListener('click', () => {
+    document.body.classList.toggle('drawer-tracks');
+    document.body.classList.remove('drawer-chat');
+  });
+  $('btn-drawer-chat').addEventListener('click', () => {
+    document.body.classList.toggle('drawer-chat');
+    document.body.classList.remove('drawer-tracks');
   });
 
   bus.on('state', () => { refreshStatusBar(); refreshToolbar(); });

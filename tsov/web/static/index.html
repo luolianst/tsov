@@ -9,6 +9,7 @@
 <body>
 <header id="topbar">
   <div class="brand">tsov<span class="brand-sub">可视化宿主</span></div>
+  <button class="drawer-btn" id="btn-drawer-tracks" title="轨道面板（紧凑档抽屉）">☰ 轨道</button>
 
   <div class="group">
     <select id="project-select" title="选择工程"></select>
@@ -23,6 +24,11 @@
     <button id="btn-play-host" title="后端宿主播放（sounddevice）">🔊 宿主</button>
     <button id="btn-stop" title="停止试听">⏹</button>
     <button id="btn-render" title="离线渲染 wav">渲染</button>
+  </div>
+
+  <div class="group metro-group">
+    <label class="metro" title="速度（BPM：回车/失焦提交，命令层 set_tempo）">♩=<input id="tempo-input" type="number" min="20" max="400" step="0.1"></label>
+    <label class="metro" title="拍号（形如 6/8 / 3/4）"><input id="sig-input" placeholder="4/4" size="4"></label>
   </div>
 
   <div class="group">
@@ -56,7 +62,17 @@
     <button id="btn-import-project-confirm" title="导入并打开">导入</button>
     <button id="btn-import-project-cancel" title="收起">✕</button>
   </div>
+  <button class="drawer-btn" id="btn-drawer-chat" title="对话框面板（紧凑档抽屉）">对话 ☰</button>
 </header>
+
+<section id="segbar" title="全局段轨（只读：段落/和弦；速度与拍号在顶栏）">
+  <div class="seg-labels">
+    <div class="seg-lb">段落</div>
+    <div class="seg-lb">和弦</div>
+  </div>
+  <div class="seg-rows" id="seg-rows"></div>
+  <div class="seg-spacer"></div>
+</section>
 
 <main id="layout">
   <aside id="tracks-panel">
@@ -111,6 +127,23 @@
     </div>
   </aside>
 </main>
+
+<section id="dock" title="下方面板：效果器 / 音源 / 混音台（可折叠）">
+  <div class="dock-head">
+    <span class="dh-title">下方面板</span>
+    <button class="dock-tab active" data-pane="fx">效果器</button>
+    <button class="dock-tab" data-pane="src">音源</button>
+    <button class="dock-tab" data-pane="mix">混音台</button>
+    <span class="dh-spacer"></span>
+    <span class="dh-hint" id="dock-hint"></span>
+    <button id="dock-fold" title="折叠/展开（记忆到 localStorage）" style="border:none;background:none;font-size:12px">▾ 收起</button>
+  </div>
+  <div id="dock-body">
+    <div class="dock-pane active" id="dock-fx"></div>
+    <div class="dock-pane" id="dock-src"></div>
+    <div class="dock-pane" id="dock-mix"></div>
+  </div>
+</section>
 
 <div id="sel-bar" hidden>
   <span id="sel-info" class="muted small"></span>

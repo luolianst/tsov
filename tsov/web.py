@@ -658,6 +658,14 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
     def health() -> dict:
         return {"status": "ok", "version": WEB_VERSION}
 
+    @app.get("/api/meta")
+    def meta() -> dict:
+        """UI 批A：面板元数据（GM 音色名 / 效果类型）。"""
+        from .host.effect import effect_kinds
+        from .midi.export import GM_PROGRAMS
+
+        return {"programs": sorted(GM_PROGRAMS), "effect_kinds": effect_kinds()}
+
     # ---------------- 工程 ----------------
 
     @app.get("/api/projects")

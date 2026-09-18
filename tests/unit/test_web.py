@@ -83,6 +83,15 @@ def test_health_and_static(env):
     assert "可视化宿主" in r.text
 
 
+def test_meta_endpoint(env):
+    """UI 批A：面板元数据（GM 音色名 / 效果类型）。"""
+    r = env["client"].get("/api/meta")
+    assert r.status_code == 200
+    body = r.json()
+    assert "piano" in body["programs"] and "synth_bass" in body["programs"]
+    assert set(body["effect_kinds"]) >= {"reverb", "delay", "compressor", "gain"}
+
+
 def test_project_create_list_state(env):
     _make_project(env)
     r = env["client"].get("/api/projects")

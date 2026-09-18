@@ -4,8 +4,9 @@ import { bus } from './events.js';
 import { api } from './api.js';
 import { KEYS_W, store, scoreBounds, tempo, beatsPerBar, setSelection, setView } from './state.js';
 import { diffLayers } from './diff.js';
+import { pal, trackColors } from './theme.js';
 
-export const TRACK_COLORS = ['#4fc3f7', '#aed581', '#ffb74d', '#f06292', '#ba68c8', '#4db6ac', '#fff176', '#90a4ae'];
+export { trackColors };
 const BLACK = new Set([1, 3, 6, 8, 10]);
 const NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
@@ -43,6 +44,7 @@ export function draw() {
   ctx.clearRect(0, 0, W, H);
 
   const v = store.view;
+  const p = pal();
   const layers = diffLayers();
 
   /* ---- 琴键行底色 ---- */
@@ -50,7 +52,7 @@ export function draw() {
   for (let i = 0; i < rowsVisible(); i++) {
     const m = topMidi - i;
     const y = yOf(m);
-    ctx.fillStyle = BLACK.has(((m % 12) + 12) % 12) ? '#101216' : '#171a20';
+    ctx.fillStyle = BLACK.has(((m % 12) + 12) % 12) ? p.rowBlack : p.rowWhite;
     ctx.fillRect(KEYS_W, y, W - KEYS_W, v.pxPerSemi);
   }
 
@@ -69,10 +71,10 @@ export function draw() {
     if (x < KEYS_W) continue;
     if (x > W) break;
     if (Math.abs(k / bq - Math.round(k / bq)) < 1e-6) {
-      ctx.strokeStyle = '#39414f';
+      ctx.strokeStyle = p.barLine;
       ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
     } else if (v.pxPerSec * beat > 7) {
-      ctx.strokeStyle = '#242a34';
+      ctx.strokeStyle = p.beatLine;
       ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
     }
   }
@@ -82,9 +84,9 @@ export function draw() {
     for (const n of layers.removed) {
       const x = xOf(n.start), y = yOf(n.pitch_midi);
       const w = Math.max(2, (n.end - n.start) * v.pxPerSec), h = v.pxPerSemi - 1;
-      ctx.fillStyle = 'rgba(229, 57, 53, 0.30)';
+      ctx.fillStyle = p.diffDelFill;
       ctx.fillRect(x, y + 0.5, w, h);
-      ctx.strokeStyle = 'rgba(229, 57, 53, 0.8)';
+      ctx.strokeStyle = p.diffDelStroke;
       ctx.setLineDash([3, 2]);
       ctx.strokeRect(x + 0.5, y + 0.5, w, h);
       ctx.setLineDash([]);
@@ -96,7 +98,8 @@ export function draw() {
   if (store.score) {
     store.score.tracks.forEach((tr, ti) => {
       if (store.hiddenTracks.has(ti)) return;
-      const color = TRACK_COLORS[ti % TRACK_COLORS.length];
+      const tc = trackColors();
+      const color = tc[ti % tc.length];
       for (let ni = 0; ni < tr.notes.length; ni++) {
         const n = tr.notes[ni];
         const x = xOf(n.start), y = yOf(n.pitch_midi);
@@ -108,8 +111,8 @@ export function draw() {
         if (layers && ti === 0) {
           const key = Math.round(n.start * 1000) + '|' + n.pitch_midi;
           const cls = layers.classify.get(key);
-          if (cls === 'add') { fill = '#2e7d32'; stroke = '#66bb6a'; }
-          else if (cls === 'mod') { stroke = '#f9a825'; }
+          if (cls === 'add') { fill = p.diffAddFill; stroke = p.diffAddStroke; }
+          else if (cls === 'mod') { stroke = p.diffModStroke; }
         }
 
         /* 黄对照：旧音残影（虚线框在旧位置） */
@@ -118,14 +121,14 @@ export function draw() {
           if (old) {
             const ox = xOf(old.start), oy = yOf(old.pitch_midi);
             const ow = Math.max(2, (old.end - old.start) * v.pxPerSec);
-            ctx.fillStyle = 'rgba(249, 168, 37, 0.18)';
+            ctx.fillStyle = p.ghostFillMod;
             ctx.fillRect(ox, oy + 0.5, ow, v.pxPerSemi - 1);
-            ctx.strokeStyle = 'rgba(249, 168, 37, 0.7)';
+            ctx.strokeStyle = p.ghostStrokeMod;
             ctx.setLineDash([3, 2]);
             ctx.strokeRect(ox + 0.5, oy + 0.5, ow, v.pxPerSemi - 1);
             ctx.setLineDash([]);
             /* 新旧连线 */
-            ctx.strokeStyle = 'rgba(249, 168, 37, 0.35)';
+            ctx.strokeStyle = p.ghostStrokeMod;
             ctx.beginPath();
             ctx.moveTo(ox, oy + v.pxPerSemi / 2);
             ctx.lineTo(x, y + v.pxPerSemi / 2);
@@ -137,12 +140,12 @@ export function draw() {
         ctx.globalAlpha = 0.92;
         ctx.fillRect(x, y + 0.5, w, h);
         ctx.globalAlpha = 1;
-        ctx.strokeStyle = stroke || 'rgba(0,0,0,0.45)';
+        ctx.strokeStyle = stroke || p.noteStroke;
         ctx.strokeRect(x + 0.5, y + 0.5, w, h);
 
         /* 选中高亮 */
         if (sel.track === ti && sel.indices.includes(ni)) {
-          ctx.strokeStyle = '#ffffff';
+          ctx.strokeStyle = p.selStroke;
           ctx.lineWidth = 2;
           ctx.strokeRect(x + 1, y + 1, w - 1, h - 1);
           ctx.lineWidth = 1;
@@ -154,10 +157,10 @@ export function draw() {
   /* ---- 播放头 ---- */
   const px = xOf(store.playhead);
   if (store.playing && px >= KEYS_W && px <= W) {
-    ctx.strokeStyle = '#ff7043';
+    ctx.strokeStyle = p.playhead;
     ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke();
-    ctx.fillStyle = '#ff7043';
+    ctx.fillStyle = p.playhead;
     ctx.beginPath();
     ctx.moveTo(px - 5, 0); ctx.lineTo(px + 5, 0); ctx.lineTo(px, 7);
     ctx.closePath(); ctx.fill();
@@ -165,21 +168,21 @@ export function draw() {
   }
 
   /* ---- 左侧钢琴键盘列 ---- */
-  ctx.fillStyle = '#1b1e25';
+  ctx.fillStyle = p.rowBlack;
   ctx.fillRect(0, 0, KEYS_W, H);
   for (let i = 0; i < rowsVisible(); i++) {
     const m = topMidi - i;
     const y = yOf(m);
     const pc = ((m % 12) + 12) % 12;
-    ctx.fillStyle = BLACK.has(pc) ? '#22262e' : '#e8eaf0';
+    ctx.fillStyle = BLACK.has(pc) ? p.keyBlack : p.keyWhite;
     ctx.fillRect(0, y, KEYS_W - 4, v.pxPerSemi);
     if (pc === 0 && v.pxPerSemi >= 9) {
-      ctx.fillStyle = '#444a56';
+      ctx.fillStyle = p.keyLabel;
       ctx.font = '10px sans-serif';
       ctx.fillText(noteName(m), 6, y + v.pxPerSemi - 3);
     }
   }
-  ctx.strokeStyle = '#2c313c';
+  ctx.strokeStyle = p.keySep;
   ctx.beginPath(); ctx.moveTo(KEYS_W - 3.5, 0); ctx.lineTo(KEYS_W - 3.5, H); ctx.stroke();
 
   /* ---- 手势幽灵预览（最后画，覆盖在上层） ---- */
@@ -220,18 +223,19 @@ function hitNote(mx, my) {
 /* ---- 幽灵预览绘制（拖拽/新建时） ---- */
 function drawGhost() {
   if (!drag) return;
+  const p = pal();
   if (drag.mode === 'move-multi') {
-    /* M-V3：多选整体移动——逐音画蓝色幽灵 + 原位残影 */
+    /* M-V3：多选整体移动——逐音画幽灵 + 原位残影 */
     const v = store.view;
     for (const o of drag.origs) {
       const gx = xOf(o.n.start + drag.ghost.dt), gy = yOf(o.n.pitch_midi + drag.ghost.dp);
       const gw = Math.max(2, (o.n.end - o.n.start) * v.pxPerSec), gh = v.pxPerSemi - 1;
-      ctx.fillStyle = 'rgba(79, 195, 247, 0.30)';
+      ctx.fillStyle = p.ghostFillMove;
       ctx.fillRect(gx, gy + 0.5, gw, gh);
-      ctx.strokeStyle = '#4fc3f7';
+      ctx.strokeStyle = p.ghostStrokeMove;
       ctx.setLineDash([4, 3]);
       ctx.strokeRect(gx + 0.5, gy + 0.5, gw, gh);
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+      ctx.strokeStyle = p.residual;
       ctx.setLineDash([2, 2]);
       ctx.strokeRect(xOf(o.n.start) + 0.5, yOf(o.n.pitch_midi) + 0.5, gw, gh);
       ctx.setLineDash([]);
@@ -242,9 +246,9 @@ function drawGhost() {
   const v = store.view;
   const x = xOf(g.start), y = yOf(g.pitch);
   const w = Math.max(2, (g.end - g.start) * v.pxPerSec), h = v.pxPerSemi - 1;
-  ctx.fillStyle = drag.mode === 'create' ? 'rgba(102, 187, 106, 0.35)' : 'rgba(79, 195, 247, 0.30)';
+  ctx.fillStyle = drag.mode === 'create' ? p.ghostFillCreate : p.ghostFillMove;
   ctx.fillRect(x, y + 0.5, w, h);
-  ctx.strokeStyle = drag.mode === 'create' ? '#66bb6a' : '#4fc3f7';
+  ctx.strokeStyle = drag.mode === 'create' ? p.ghostStrokeCreate : p.ghostStrokeMove;
   ctx.setLineDash([4, 3]);
   ctx.strokeRect(x + 0.5, y + 0.5, w, h);
   ctx.setLineDash([]);
@@ -252,7 +256,7 @@ function drawGhost() {
   if (drag.mode === 'move' && drag.orig) {
     const ox = xOf(drag.orig.start), oy = yOf(drag.orig.pitch_midi);
     const ow = Math.max(2, (drag.orig.end - drag.orig.start) * v.pxPerSec);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.strokeStyle = p.residual;
     ctx.setLineDash([2, 2]);
     ctx.strokeRect(ox + 0.5, oy + 0.5, ow, h);
     ctx.setLineDash([]);
