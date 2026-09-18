@@ -118,6 +118,21 @@ function sysMsg(msg) {
 
 const MAX_VISIBLE_CARDS = 3;
 const groups = new Map();   // turn -> { root, cards, readNode, readLabels, head }
+const staleSeqs = new Set();    // 失效动作 seq（后端日志权威 + action_undone 事件增量）
+const undoneSeqs = new Set();   // 被撤销的动作 seq（红点：自身被撤）
+
+/** 把失效/撤销集合落到当前 DOM（重渲染后调用；新卡片创建时也会自查） */
+function applyStaleClasses() {
+  for (const g of groups.values()) {
+    for (const node of g.root.querySelectorAll('.actcard')) {
+      const s = Number(node.dataset.seq || 0);
+      if (!s) continue;
+      const b = node.querySelector('.ac-undo');
+      if (undoneSeqs.has(s)) { node.classList.add('undone'); node.classList.remove('stale'); if (b) b.disabled = true; }
+      else if (staleSeqs.has(s)) { node.classList.add('stale'); if (b) b.disabled = true; }
+    }
+  }
+}
 
 function receiptLine(obs) {
   const s = String(obs || '').split(/\r?\n/).find((l) => l.trim()) || '';
@@ -188,6 +203,12 @@ function buildActionCard(rec) {
     detail.hidden = !detail.hidden;
     more.textContent = detail.hidden ? '详情' : '收起';
   });
+  // 失效态（重渲染后新建的卡片也要自查）
+  if (rec.seq != null) {
+    const s = Number(rec.seq);
+    if (undoneSeqs.has(s)) { root.classList.add('undone'); const b = root.querySelector('.ac-undo'); if (b) b.disabled = true; }
+    else if (staleSeqs.has(s)) { root.classList.add('stale'); const b = root.querySelector('.ac-undo'); if (b) b.disabled = true; }
+  }
   return root;
 }
 
@@ -225,15 +246,36 @@ async function doActionUndo(rec, btn) {
   }
 }
 
-/** 撤销后：同轮其后动作卡置灰（链式失效提示） */
+/** 按动作日志恢复失效置灰（刷新/切工程后；后端为权威） */
+async function refreshActionStale() {
+  if (!currentProject) return;
+  let entries = [];
+  try {
+    const r = await api.actions(currentProject);
+    entries = r.entries || [];
+  } catch (e) { return; }
+  let changed = false;
+  for (const e of entries) {
+    const s = Number(e.seq || 0);
+    if (!s) continue;
+    if (e.stale || e.undone) { if (!staleSeqs.has(s)) { staleSeqs.add(s); changed = true; } }
+    if (e.undone) { if (!undoneSeqs.has(s)) { undoneSeqs.add(s); changed = true; } }
+  }
+  if (!changed && !staleSeqs.size) return;
+  applyStaleClasses();
+}
+
+/** 撤销后：同轮其后动作卡置灰（链式失效提示；同时记入集合供重渲染保持） */
 function markStaleFrom(turn, actionId) {
   const g = groups.get(turn == null ? 0 : turn);
   if (!g) return;
   let seen = false;
   for (const node of g.root.querySelectorAll('.actcard')) {
-    if (node.dataset.actionId === actionId) { seen = true; node.classList.add('undone'); continue; }
-    if (seen) { node.classList.add('stale'); const b = node.querySelector('.ac-undo'); if (b) b.disabled = true; }
+    const s = Number(node.dataset.seq || 0);
+    if (node.dataset.actionId === actionId) { seen = true; if (s) undoneSeqs.add(s); continue; }
+    if (seen && s) { staleSeqs.add(s); }
   }
+  applyStaleClasses();
 }
 
 function renderAll() {
@@ -266,6 +308,7 @@ function renderAll() {
     }
   }
   logEl.scrollTop = logEl.scrollHeight;
+  refreshActionStale();   // 批B：按动作日志恢复失效置灰（刷新/切工程后）
 }
 
 /* ---------------- 流式卡片 ---------------- */
@@ -393,6 +436,19 @@ function wireEvents() {
       persist();
     }
     logEl.scrollTop = logEl.scrollHeight;
+  });
+
+  /* 批B B1-2：动作撤销事件（含其他客户端触发）→ 按 seq 置灰同动作及其后卡片 */
+  bus.on('action_undone', (d) => {
+    const seq = Number(d && d.seq) || 0;
+    if (!seq) return;
+    for (const g of groups.values()) {
+      for (const node of g.root.querySelectorAll('.actcard')) {
+        const s = Number(node.dataset.seq || 0);
+        if (s && s >= seq) { if (s === seq) undoneSeqs.add(s); else staleSeqs.add(s); }
+      }
+    }
+    applyStaleClasses();
   });
 
   bus.on('agent_answer', (d) => {

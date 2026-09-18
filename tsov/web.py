@@ -31,8 +31,8 @@ from pydantic import BaseModel
 
 from .core.score import Instrument, Score, Track
 from .host import EditBatch, Project
-from .web_actions import (READ_TOOLS, SCORE_WRITING_TOOLS, impact_of,  # 批B（ADR-0017）动作呈现层
-                         summarize_args, tool_label)
+from .web_actions import (READ_TOOLS, SCORE_WRITING_TOOLS, ActionJournal,  # 批B（ADR-0017）动作呈现层
+                         impact_of, summarize_args, tool_label)
 
 WEB_VERSION = "0.1.0"
 AGENT_SESSION_DIR = "output/agent-sessions"
@@ -491,6 +491,7 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
     proj = state.get_project(project_name)
     root = proj.root
     edited_path = root / EDITED_SCORE_NAME
+    journal = ActionJournal(root)   # 批B B1-2：动作快照日志（动作级撤销 / Q44 弱留存原型）
     # 清掉上一轮残留——只采用「本轮」的编辑结果
     try:
         edited_path.unlink()
@@ -598,14 +599,21 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
                 targs = tc["arguments"] if isinstance(tc["arguments"], dict) else {}
                 # 批B（ADR-0017）：动作前快照——scratch 不存在 = 轮首，取工程当前谱
                 pre_snap = _read_json_safe(edited_path) or proj.score.to_dict()
+                pre_hash = journal.snapshot(pre_snap)
                 try:
                     observation = registry.get(tool_name).handler(tc["arguments"])
                 except Exception as e:  # noqa: BLE001 工具出错也作为观测回喂（与 AgentLoop 同策略）
                     observation = f"工具 {tool_name} 错误: {type(e).__name__}: {e}"
                 tool_count += 1
-                # 批B：动作后快照 → 影响范围（"改了哪些轨/几个音/哪个参数"）
+                # 批B：动作后快照 → 影响范围（"改了哪些轨/几个音/哪个参数"）+ 动作日志（可撤销）
                 post_snap = _read_json_safe(edited_path)
+                post_hash = journal.snapshot(post_snap)
                 impact = impact_of(pre_snap, post_snap) if (post_snap and tool_name in SCORE_WRITING_TOOLS) else None
+                entry = None
+                if impact is not None and impact.get("text") and tool_name in SCORE_WRITING_TOOLS:
+                    entry = journal.append(session_id=session_id, turn=turn, tool=tool_name,
+                                           args=summarize_args(tool_name, targs),
+                                           pre=pre_hash, post=post_hash, impact=impact)
                 bus.publish(
                     project_name,
                     "agent_tool",
@@ -619,7 +627,8 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
                         "summary": summarize_args(tool_name, targs),
                         "impact": impact,
                         "read_only": tool_name in READ_TOOLS,
-                        "undoable": bool(impact and impact.get("text")),
+                        "seq": entry["seq"] if entry else None,
+                        "undoable": bool(entry),
                     },
                 )
                 session.add("tool", observation, tool_call_id=tc["id"])
@@ -913,6 +922,38 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
     @app.get("/api/projects/{name}/favorites")
     def favorites(name: str) -> dict:
         return {"favorites": st().get_project(name).favorites()}
+
+    @app.get("/api/projects/{name}/agent-actions")
+    def agent_actions(name: str, limit: int = 60) -> dict:
+        """批B：动作快照日志（最近 limit 条；供前端回放与失效置灰）。"""
+        proj = st().get_project(name)
+        j = ActionJournal(proj.root)
+        return {"entries": j.entries[-max(1, int(limit)):]}
+
+    @app.post("/api/projects/{name}/agent-actions/{seq}/undo")
+    def agent_action_undo(name: str, seq: int) -> dict:
+        """批B：动作级撤销——恢复该动作前的快照（一条"撤销动作"commit，不动 git 历史）。"""
+        proj = st().get_project(name)
+        j = ActionJournal(proj.root)
+        entry = j.get(seq)
+        if not entry:
+            raise HTTPException(404, f"动作 #{seq} 不存在（可能已超出留存窗口）")
+        snap = j.load(entry.get("pre"))
+        if not snap:
+            raise HTTPException(409, "该动作没有可回退的快照")
+        try:
+            new_score = Score.from_dict(snap)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(500, f"快照解析失败：{type(e).__name__}: {e}") from e
+        result = proj.apply_score(new_score, f"撤销动作：{entry.get('label')}（#{seq}）")
+        j.mark_stale_from(seq)
+        if result.get("ok"):
+            st().bus.publish(name, "diff_applied", {**result["diff"], "commit": result["commit"]})
+            st().bus.publish(name, "state_updated", project_state(proj))
+        st().bus.publish(name, "action_undone",
+                         {"seq": seq, "ok": bool(result.get("ok")), "commit": result.get("commit")})
+        return {"ok": bool(result.get("ok")), "seq": seq, "commit": result.get("commit"),
+                "message": "" if result.get("ok") else "；".join(result.get("errors") or [])}
 
     @app.post("/api/projects/{name}/play")
     def play(name: str) -> dict:

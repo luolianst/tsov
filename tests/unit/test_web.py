@@ -703,3 +703,44 @@ def test_export_matrix_endpoint(env):
     assert any(f.endswith(".mid") for f in files)
     out = Path(body["out_dir"])
     assert out.is_dir() and all(Path(f).is_file() for f in files)
+
+
+def test_agent_actions_list_and_undo(env):
+    """批B B1-2：动作日志列表 + 动作级撤销（快照恢复 → 一条"撤销动作" commit）。"""
+    from tsov.web_actions import ActionJournal
+
+    c = env["client"]
+    c.post("/api/projects", json={"name": "actproj"})
+    d = env["dir"] / "actproj"
+
+    # 模拟一次 agent 写动作：pre = 当前谱，post = 音量 0.65 的谱
+    before = json.loads((d / "score.json").read_text(encoding="utf-8"))
+    after = json.loads(json.dumps(before))
+    after["tracks"][0]["instrument"]["volume"] = 0.65
+    j = ActionJournal(d)
+    h1, h2 = j.snapshot(before), j.snapshot(after)
+    j.append(session_id="s1", turn=1, tool="set_track_mix", args="轨 melody · 音量 0.65",
+             pre=h1, post=h2, impact={"text": "melody：音量 0.80→0.65"})
+    # 工程当前状态 = 动作后（走命令层，模拟"已采用"）
+    r = c.post("/api/projects/actproj/batch", json={
+        "label": "sim", "commands": [{"op": "set_track_mix", "track": 0, "value": {"volume": 0.65}}],
+        "commit_message": "模拟动作后状态",
+    })
+    assert r.status_code == 200
+
+    lst = c.get("/api/projects/actproj/agent-actions").json()["entries"]
+    assert len(lst) == 1 and lst[0]["seq"] == 1 and lst[0]["tool"] == "set_track_mix"
+
+    # 撤销 → 恢复 pre 快照（音量回 0.8）
+    r2 = c.post("/api/projects/actproj/agent-actions/1/undo")
+    assert r2.status_code == 200, r2.text
+    body = r2.json()
+    assert body["ok"] is True and body["commit"]
+    init_vol = float(before["tracks"][0]["instrument"]["volume"])
+    st = c.get("/api/projects/actproj/state").json()
+    assert abs(float(st["score"]["tracks"][0]["instrument"]["volume"]) - init_vol) < 1e-9
+    # 日志里已标记失效
+    lst2 = c.get("/api/projects/actproj/agent-actions").json()["entries"]
+    assert lst2[0]["stale"] is True and lst2[0]["undone"] is True
+    # 不存在的动作 → 404
+    assert c.post("/api/projects/actproj/agent-actions/99/undo").status_code == 404
