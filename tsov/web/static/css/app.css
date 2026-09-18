@@ -32,6 +32,7 @@
   --tracks-col: var(--tracks-w);
   --chat-col: var(--chat-w);
   --row-h: 46px;
+  --ruler-h: 40px;   /* 标尺高度；左栏面板头同高 → 轨道行与 lane 逐行对齐 */
   --rail-w: 26px;
   --radius: 0px;
   --radius-note: 3px;
@@ -81,8 +82,8 @@ body {
   color: var(--text);
   background: var(--bg);
   display: grid;
-  /* 顶栏 / 段轨 / 主区 / 下方面板 / 选区条 / 底栏 */
-  grid-template-rows: auto auto 1fr auto auto 26px;
+  /* 顶栏 / 主区 / 下方面板 / 选区条 / 底栏（修正轮2.1：段轨两行已删） */
+  grid-template-rows: auto 1fr auto auto 26px;
   /* 显式列 + minmax(0,1fr)：阻止子内容 min-content（如效果器链）把整页顶宽 */
   grid-template-columns: minmax(0, 1fr);
   overflow: hidden;
@@ -155,47 +156,8 @@ select:hover, input:hover { border-color: var(--border-strong); }
 }
 .metro input#sig-input { width: 46px; text-align: center; }
 
-/* ---------------- 全局段轨（段落 / 和弦，只读） ---------------- */
-#segbar {
-  display: grid;
-  grid-template-columns: var(--tracks-col) minmax(0, 1fr) var(--chat-col);
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
-  height: 52px;
-}
-#segbar .seg-labels {
-  display: flex; flex-direction: column; justify-content: center;
-  border-right: 1px solid var(--border);
-  padding: 0 10px;
-  gap: 2px;
-}
-#segbar .seg-lb {
-  height: 22px; display: flex; align-items: center;
-  font-size: var(--fs-xs); color: var(--faint);
-  letter-spacing: var(--lbl-track); font-weight: 700;
-}
-#segbar .seg-rows { position: relative; padding: 4px 0 4px var(--keys-w); overflow: hidden; }
-#segbar .seg-rows .seg-right-pad { display: none; }
-.seg-row { position: relative; height: 22px; }
-.seg-span {
-  position: absolute; top: 3px; height: 16px;
-  display: flex; align-items: center; padding: 0 6px;
-  font-size: var(--fs-xs); color: var(--muted);
-  background: var(--bg-sunken);
-  border-left: 2px solid var(--border-strong);
-  border-radius: 0 var(--radius-note) var(--radius-note) 0;
-  overflow: hidden; white-space: nowrap;
-}
-.seg-chord {
-  position: absolute; top: 3px; height: 16px;
-  display: flex; align-items: center; justify-content: center;
-  font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--muted);
-  background: var(--bg-sunken);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-note);
-  overflow: hidden; white-space: nowrap;
-}
-.seg-empty { position: absolute; top: 3px; left: 6px; font-size: var(--fs-xs); color: var(--faint); }
+/* ---------------- 全局段轨（已删：2026-09-18 洛怜「段落/和弦两行可以删了」；
+     后续以「书签」功能替代，见 docs/03-open-questions.md Q46） ---------------- */
 
 /* ---------------- 主布局 ---------------- */
 #layout {
@@ -240,6 +202,9 @@ body.chat-folded #rail-chat { display: flex; }
 /* 面板头（含收起钮） */
 .panel-head { display: flex; align-items: center; gap: 6px; padding: 0 6px 0 10px; }
 .panel-head .panel-title { flex: 1; min-width: 0; margin: 10px 0 4px; padding: 0; }
+/* 修正轮2.1：左栏面板头 = 标尺同高（否则首行与 lane 错位 13px） */
+#tracks-panel .panel-head { height: var(--ruler-h); }
+#tracks-panel .panel-head .panel-title { margin: 0; }
 .fold-btn {
   flex: none; padding: 0 5px; height: 18px; line-height: 1;
   font-size: var(--fs-xs); color: var(--muted);
@@ -256,6 +221,8 @@ body.chat-folded #rail-chat { display: flex; }
   overflow-y: auto;
   min-height: 0;
 }
+/* 修正轮2.1：子项不收缩（否则矮窗口下头部被压扁 → 行与 lane 错位）；超高整栏滚动 */
+#tracks-panel > * { flex: none; }
 .panel-title {
   font-size: var(--fs-xs);
   color: var(--faint);
@@ -329,7 +296,7 @@ body.chat-folded #rail-chat { display: flex; }
 #roll-wrap {
   position: relative;
   display: grid;
-  grid-template-rows: auto 40px minmax(0, 1fr);
+  grid-template-rows: auto var(--ruler-h) minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   background: var(--bg);
@@ -576,15 +543,15 @@ body.chat-folded #rail-chat { display: flex; }
 .note-menu button:hover { background: var(--bg-hover); }
 
 #import-project-row {
-  flex-basis: 100%;
   display: flex; align-items: center; gap: 6px;
   padding-top: 2px;
 }
 #import-project-row[hidden] { display: none; }
-#import-project-select { flex: 0 1 440px; min-width: 0; font-size: var(--fs-sm); }
-#import-project-path { flex: 1 1 220px; min-width: 0; font-size: var(--fs-sm); }
-#import-project-name { flex: 0 0 150px; font-size: var(--fs-sm); }
-#import-project-row button { font-size: var(--fs-sm); padding: 2px 8px; }
+/* 修正轮2.1：菜单内的导入块（纵向 flex）——旧的 topbar 横向 flex-basis 规则会变成"高度"，改宽度约束 */
+#import-project-select { width: 100%; min-width: 0; font-size: var(--fs-sm); }
+#import-project-path { width: 100%; min-width: 0; font-size: var(--fs-sm); }
+#import-project-name { flex: 1 1 auto; min-width: 0; font-size: var(--fs-sm); }
+#import-project-row button { font-size: var(--fs-sm); padding: 2px 8px; flex: none; }
 
 /* ================= 修正轮2 新增组件 ================= */
 
@@ -684,8 +651,6 @@ body.chat-folded #rail-chat { display: flex; }
 */
 @media (max-width: 1439px) {
   :root { --tracks-w: 160px; --chat-w: 320px; }
-  #segbar { height: 48px; }
-  #segbar .seg-lb { letter-spacing: .10em; }
   .dh-hint { display: none; }
   #dock:not(.folded) { height: 176px; }
 }
@@ -704,7 +669,7 @@ body.chat-folded #rail-chat { display: flex; }
 @media (max-width: 959px) {
   :root { --tracks-w: 136px; --chat-w: 240px; }
   body { overflow-x: auto; }
-  #segbar, #layout { min-width: 760px; }
+  #layout { min-width: 760px; }
   .track-eye { display: none; }   /* 极窄：隐去可见性按钮，给名字让位（信息在 tooltip） */
 }
 
@@ -717,9 +682,8 @@ body.chat-folded #rail-chat { display: flex; }
     --fs-sm: 12px;
     --fs-xs: 11px;
     --dock-h: 232px;
+    --row-h: 48px;   /* 修正轮2.1：字号提升后轨道行实际高度 48 —— 同步 lane 行高，避免逐行漂移 */
   }
   #topbar { padding: 8px 16px; }
   .track-body { padding: 6px 10px 7px; }
-  #segbar { height: 56px; }
-  .seg-row { height: 24px; }
 }

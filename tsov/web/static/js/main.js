@@ -5,7 +5,6 @@ import { bus, connectEvents } from './events.js';
 import { store, setState, setError, toast, fitView, setView, clearDiff, setAnnotations, clearAnnotations, setSnap, setViewMode, setSingleTrack, fitViewTrack } from './state.js';
 import * as roll from './roll.js';
 import * as timeline from './timeline.js';
-import * as segbar from './segbar.js';
 import * as dock from './dock.js';
 import * as lanes from './lanes.js';
 import { initTheme, setTheme, themeName, trackColors } from './theme.js';
@@ -175,7 +174,7 @@ function boot() {
   roll.init($('roll'));
   lanes.init($('lanes'), { onEnter: enterSingle });
   timeline.init($('ruler'), $('track-list'), $('segments-info'), $('meta-info'), { onEnter: enterSingle });
-  segbar.init($('seg-rows'));
+  /* 修正轮2.1：段轨已删（洛怜：段落/和弦两行可以删；后续以「书签」替代，见 Q46） */
   dock.init($('dock'));
   initDiffBadge($('status-diff'));
   chat.init({
