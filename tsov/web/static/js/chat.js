@@ -5,7 +5,9 @@
 
 import { api } from './api.js';
 import { bus } from './events.js';
-import { store, setAgentBusy, clearDiff, toast, setError, clearAnnotations } from './state.js';
+import { store, setAgentBusy, clearDiff, toast, setError, clearAnnotations,
+         setSelection, setSingleTrack, addAgentTracks, clearAgentTracks,
+         peekUserActions, clearUserActions } from './state.js';
 
 const LF = String.fromCharCode(10);
 const MAX_LOGS = 400;
@@ -168,6 +170,7 @@ function updateGroupHead(g) {
 
 function buildActionCard(rec) {
   const root = el('actcard');
+  root.title = '点击聚焦改动范围';
   root.dataset.actionId = rec.action_id || '';
   if (rec.seq != null) root.dataset.seq = String(rec.seq);
   if (rec.tool) root.dataset.tool = rec.tool;
@@ -202,6 +205,12 @@ function buildActionCard(rec) {
   more.addEventListener('click', () => {
     detail.hidden = !detail.hidden;
     more.textContent = detail.hidden ? '详情' : '收起';
+  });
+  // 批B B1-3：点动作卡 → 聚焦改动范围（选中该轨 / 单轨视图切到该轨）
+  root.addEventListener('click', (e) => {
+    if (e.target && e.target.tagName === 'BUTTON') return;
+    if (e.target && e.target.tagName === 'PRE') return;
+    focusImpact(rec);
   });
   // 失效态（重渲染后新建的卡片也要自查）
   if (rec.seq != null) {
@@ -278,6 +287,16 @@ function markStaleFrom(turn, actionId) {
   applyStaleClasses();
 }
 
+/** 批B B1-3：点动作卡 → 聚焦改动范围（选中该轨；单轨视图则切主轨） */
+function focusImpact(rec) {
+  const tracks = (rec.impact && rec.impact.tracks) || [];
+  if (!tracks.length) return;
+  const ti = Number(tracks[0].index) || 0;
+  if (store.viewMode === 'single') setSingleTrack(ti);
+  else setSelection(ti, []);
+  toast('聚焦：' + (tracks[0].name || ('轨 ' + ti)));
+}
+
 function renderAll() {
   logEl.innerHTML = '';
   groups.clear();                       // 批B：动作分组跟着重建
@@ -351,18 +370,24 @@ async function send(message) {
   const baseRev = (cmpSel && cmpSel.value) || 'HEAD';   // 议题 ④：编辑目标版本标识（默认 HEAD）
   const anns = store.pendingAnnotations.map((q) => q.ann);   // M-V3：人工标注（确定性优先，随消息发送）
   const sel = (store.selection && store.selection.indices.length) ? store.selection : null;
+  const ua = peekUserActions();   // 批B B1-4：用户手动操作（回流 agent 上下文）
+  clearAgentTracks();             // 批B B1-3：新一轮清上一轮改动标记
   appendCard(text('msg user', message), { kind: 'user', text: message, ts: Date.now() });
   inputEl.value = '';
   setAgentBusy(true);
   sysMsg('已发送（' + (anns.length ? '含 ' + anns.length + ' 条人工标注：确定性先行、不走 LLM；' : '')
+    + (ua.length ? '含 ' + ua.length + ' 条手动操作摘要；' : '')
     + 'SSE 事件流；目标版本 ' + baseRev + '）…');
   try {
-    const res = await api.chat(store.project, message, baseRev, anns.length ? anns : null, sel);
+    const res = await api.chat(store.project, message, baseRev, anns.length ? anns : null, sel, ua.length ? ua : null);
     sysMsg('session：' + res.session_id);
     if (anns.length) clearAnnotations();   // 已随消息送达（后端确定性应用；失败会出 agent_error）
+    if (ua.length) clearUserActions();     // 批B B1-4：已送达，清缓冲
   } catch (e) {
     setAgentBusy(false);
-    appendCard(text('msg error', '启动失败：' + e.message), { kind: 'error', text: '启动失败：' + e.message, ts: Date.now() });
+    const msg = '启动失败：' + e.message;
+    appendCard(text('msg error', msg), { kind: 'error', text: msg, ts: Date.now() });
+    if (String(e.message || '').indexOf('409') >= 0) sysMsg('（已有会话在跑：若界面卡在"运行中"，刷新页面即可复位）');
   }
 }
 
@@ -430,6 +455,9 @@ function wireEvents() {
       ts: Date.now(),
     };
     appendActionRec(rec);
+    if (rec.impact && rec.impact.tracks && rec.impact.tracks.length) {
+      addAgentTracks(rec.impact.tracks.map((t) => t.index));   // 批B B1-3：轨道行 + lane 标记
+    }
     if (currentProject) {
       logs[currentProject].push(rec);
       if (logs[currentProject].length > MAX_LOGS) logs[currentProject].shift();

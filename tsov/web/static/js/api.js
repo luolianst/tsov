@@ -1,5 +1,7 @@
 /* api.js —— REST 封装（docs/05 §三 全部接口；模块间只经本文件访问后端） */
 
+import { noteUserAction } from './state.js';
+
 async function req(path, opts) {
   let res;
   try {
@@ -29,9 +31,15 @@ export const api = {
   importProject: (source, name) => post('/api/projects/import', { source, name: name || null }),
 
   getState: (name) => req('/api/projects/' + encodeURIComponent(name) + '/state'),
-  postBatch: (name, label, commands, commitMessage) =>
-    post('/api/projects/' + encodeURIComponent(name) + '/batch',
-      { label: label || '', commands, commit_message: commitMessage || null }),
+  postBatch: (name, label, commands, commitMessage) => {
+    const desc = label || ('命令层：' + (commands || []).map((c) => c.op).join(' + '));
+    return post('/api/projects/' + encodeURIComponent(name) + '/batch',
+      { label: label || '', commands, commit_message: commitMessage || null }).then((r) => {
+        /* 批B B1-4：成功落盘的用户手动操作 → 缓冲（下条消息回流给 agent） */
+        if (r && r.applied > 0) noteUserAction(desc);
+        return r;
+      });
+  },
   undo: (name) => post('/api/projects/' + encodeURIComponent(name) + '/undo'),
   redo: (name) => post('/api/projects/' + encodeURIComponent(name) + '/redo'),
   rollback: (name, rev) =>
@@ -40,7 +48,7 @@ export const api = {
   getSummary: (name) => req('/api/projects/' + encodeURIComponent(name) + '/summary'),
   render: (name, out) => post('/api/projects/' + encodeURIComponent(name) + '/render', { out: out || null }),
   play: (name) => post('/api/projects/' + encodeURIComponent(name) + '/play'),
-  chat: (project, message, baseRev, annotations, selection) => post('/api/chat', { project, message, base_rev: baseRev || 'HEAD', annotations: annotations || null, selection: selection || null }),
+  chat: (project, message, baseRev, annotations, selection, userActions) => post('/api/chat', { project, message, base_rev: baseRev || 'HEAD', annotations: annotations || null, selection: selection || null, user_actions: userActions || null }),
   chatStop: () => post('/api/chat/stop', {}),
   chatReset: (project) => post('/api/chat/reset', { project }),
   setTitle: (name, title) => post('/api/projects/' + encodeURIComponent(name) + '/title', { title }),

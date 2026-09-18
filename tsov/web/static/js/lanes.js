@@ -60,6 +60,7 @@ export function draw() {
     if (y0 > H) break;
     const selected = store.selection.track === ti;
     const overlay = store.overlayTracks.has(ti);
+    const touched = store.agentTracks.has(ti);   // 批B B1-3：本轮 agent 改动过
     ctx.fillStyle = selected ? p.selSoft : (overlay ? p.rowBlack : p.rollBg);
     ctx.fillRect(0, y0, W, rh);
     /* 标签槽 */
@@ -72,6 +73,10 @@ export function draw() {
     const nm = sc.tracks[ti].name || ('track ' + ti);
     ctx.fillText(nm.length > 8 ? nm.slice(0, 8) + '…' : nm, 9, y0 + Math.min(rh - 8, rh / 2 + 4));
     if (overlay) ctx.fillText('叠加', 9, y0 + rh - 8);
+    if (touched) {   /* 批B B1-3：改动标记（标签槽右缘小方块，agent 语义色） */
+      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--agent').trim() || '#141414';
+      ctx.fillRect(KEYS - 9, y0 + rh / 2 - 3, 5, 6);
+    }
     /* 行分隔线 */
     ctx.strokeStyle = p.beatLine;
     ctx.beginPath(); ctx.moveTo(0, y0 + rh + 0.5); ctx.lineTo(W, y0 + rh + 0.5); ctx.stroke();
@@ -178,7 +183,7 @@ export function init(el, opts) {
     if (onEnter) onEnter(ti);
   });
 
-  for (const topic of ['state', 'view', 'selection', 'viewmode', 'playhead', 'playing']) {
+  for (const topic of ['state', 'view', 'selection', 'viewmode', 'playhead', 'playing', 'agenttracks']) {
     bus.on(topic, draw);
   }
 }

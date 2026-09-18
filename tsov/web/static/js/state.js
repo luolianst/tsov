@@ -33,6 +33,9 @@ export const store = {
   /* 轨道可见性（Set<trackIndex>；空 = 全可见） */
   hiddenTracks: new Set(),
 
+  /* 批B B1-3：agent 本次改动过的轨（改动高亮；空 = 无标记） */
+  agentTracks: new Set(),
+
   /* M-V3：标注队列（[{ann:{index,action,value}, label}]，随下条对话发送）+ 写谱吸附比例（0=关/0.5=1/8/0.25=1/16） */
   pendingAnnotations: [],
   snapFrac: 0,
@@ -119,6 +122,22 @@ export function toggleOverlay(ti) {
 
 export function isOverlay(ti) { return store.overlayTracks.has(ti); }
 
+/* ---------------- 批B B1-3：agent 改动高亮 ---------------- */
+export function setAgentTracks(indices) {
+  store.agentTracks = new Set((indices || []).map(Number));
+  bus.dispatch('agenttracks');
+}
+export function addAgentTracks(indices) {
+  let changed = false;
+  for (const i of indices || []) { const n = Number(i); if (!store.agentTracks.has(n)) { store.agentTracks.add(n); changed = true; } }
+  if (changed) bus.dispatch('agenttracks');
+}
+export function clearAgentTracks() {
+  if (!store.agentTracks.size) return;
+  store.agentTracks = new Set();
+  bus.dispatch('agenttracks');
+}
+
 /* 单轨视图：把纵向视图适配到该轨音域 */
 export function fitViewTrack(ti, h) {
   const tr = store.score && store.score.tracks[ti];
@@ -201,6 +220,20 @@ export function segments() {
   return [];
 }
 
+/* ---------------- 批B B1-4：用户操作缓冲（回流 agent 上下文） ----------------
+   手动改动经命令层成功落盘后记一条（api.postBatch 钩子），随下条消息发送一次、发送后清空。 */
+const userActions = [];
+
+export function noteUserAction(text) {
+  const t = String(text || '').trim();
+  if (!t) return;
+  userActions.push(t);
+  if (userActions.length > 20) userActions.shift();   // 缓冲上限（Q44 弱留存窗口原型）
+}
+
+export function peekUserActions() { return userActions.slice(-10); }
+export function clearUserActions() { userActions.length = 0; }
+
 /* ---------------- 批B（ADR-0017）：只读可编程面 ----------------
    window.__tsovState() —— 返回当前前端状态快照（只读，调用即取新值）。
    用途：CDP 实测断言 / 外部 agent（MCP 线）观察宿主状态；不提供写入口（写走命令层）。 */
@@ -216,6 +249,8 @@ export function snapshot() {
     singleTrack: store.singleTrack,
     overlayTracks: Array.from(store.overlayTracks),
     hiddenTracks: Array.from(store.hiddenTracks),
+    agentTracks: Array.from(store.agentTracks),
+    pendingUserActions: userActions.slice(),
     view: Object.assign({}, store.view),
     snapFrac: store.snapFrac,
     pendingAnnotations: store.pendingAnnotations.slice(),

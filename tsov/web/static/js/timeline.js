@@ -121,6 +121,7 @@ function renderTracks(el) {
     const item = document.createElement('div');
     item.className = 'track-item' + (store.hiddenTracks.has(ti) ? ' hidden-track' : '') +
       (isMain ? ' main-track' : '') + (isOverlay ? ' is-overlay' : '') +
+      (store.agentTracks.has(ti) ? ' agent-touched' : '') +          // 批B B1-3：agent 改动标记
       (store.selection.track === ti ? ' selected' : '');
     item.dataset.track = String(ti);
 
@@ -211,6 +212,8 @@ export function init(rulerCanvas, trackListEl, segmentsInfoEl, metaInfoEl, opts)
 
   /* 修正轮2：视图模式切换 → 重画行（主轨/叠加标记） */
   bus.on('viewmode', () => renderTracks(trackListEl));
+  bus.on('agenttracks', () => renderTracks(trackListEl));   // 批B B1-3：改动高亮
+
 
   bus.on('state', () => {
     renderTracks(trackListEl);

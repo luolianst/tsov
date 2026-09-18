@@ -414,6 +414,11 @@ body.chat-folded #rail-chat { display: flex; }
   white-space: pre-wrap; word-break: break-all;
 }
 .ac-readrow { font-size: var(--fs-xs); color: var(--faint); font-family: var(--font-mono); padding: 0 2px; }
+/* 批B B1-3：轨道行 agent 改动标记（静态，不闪） */
+.track-item.agent-touched { box-shadow: inset 3px 0 0 0 var(--agent); }
+.track-item.agent-touched .track-name::after {
+  content: '✦'; margin-left: 5px; font-size: 9px; color: var(--agent); vertical-align: 1px;
+}
 .actgroup.folded .actcard.over { display: none; }     /* 折叠：只留前 3 张 */
 .actcard.undone { opacity: .55; border-left-color: var(--faint); }
 .actcard.stale { opacity: .45; }
