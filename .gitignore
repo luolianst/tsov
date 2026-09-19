@@ -43,6 +43,9 @@ dsp_output/
 analysis_cache/
 *.pkl
 
+# 教材 PDF（个人学习参考，不入库）
+docs/refs/音乐教材/
+
 # 第三方源码 vendor（crepe 权重 ~180MB，不入库；ADR-0007）
 vendor/
 
