@@ -27,6 +27,20 @@ GM_PROGRAMS = {
     "bass": 33,      # Electric Bass (finger)
     "synth_bass": 38,  # Synth Bass 1
     "strings": 48,   # String Ensemble 1
+    # 管弦乐单件（2026-09-21 增补 · geyun 接口测试预置；纯新增、不改旧名）
+    "violin": 40,       # GM#41 Violin
+    "viola": 41,        # GM#42 Viola
+    "cello": 42,        # GM#43 Cello
+    "contrabass": 43,   # GM#44 Contrabass
+    "harp": 46,         # GM#47 Orchestral Harp
+    "timpani": 47,      # GM#48 Timpani
+    "flute": 73,        # GM#74 Flute
+    "oboe": 68,         # GM#69 Oboe
+    "clarinet": 71,     # GM#72 Clarinet
+    "bassoon": 70,      # GM#71 Bassoon
+    "french_horn": 60,  # GM#61 French Horn
+    "trumpet": 56,      # GM#57 Trumpet
+    "trombone": 57,     # GM#58 Trombone
     "organ": 16,       # Drawbar Organ
     "brass": 61,       # Brass Section
     "synth_lead": 81,  # Lead 2 (sawtooth)
