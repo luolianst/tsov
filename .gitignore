@@ -53,3 +53,4 @@ vendor/
 tmp/
 temp/
 *.bak
+tsov-settings.json
