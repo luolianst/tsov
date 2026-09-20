@@ -1,6 +1,6 @@
 /* diff.js —— diff 数据 → 卷帘叠层着色（绿=added、红=removed 残影、黄=changed 新旧对照） */
 
-import { store } from './state.js';
+import { store, refTag } from './state.js';
 import { bus } from './events.js';
 
 const TOL = 0.03;   // 与后端 diff_notes tol_s 同量级（前端仅用于把 diff 条目关联回当前音符）
@@ -43,7 +43,8 @@ export function badgeHtml(d) {
   if (d.added && d.added.length) parts.push('<span class="badge-add">+' + d.added.length + '</span>');
   if (d.removed && d.removed.length) parts.push('<span class="badge-del">-' + d.removed.length + '</span>');
   if (d.changed && d.changed.length) parts.push('<span class="badge-mod">~' + d.changed.length + '</span>');
-  if (d.commit) parts.push(' <span class="muted">@' + String(d.commit).slice(0, 7) + '</span>');
+  const ref = refTag(d);
+  if (ref) parts.push(' <span class="muted">' + ref + '</span>');
   return parts.length ? 'diff：' + parts.join(' ') : '';
 }
 

@@ -2,7 +2,7 @@
 
 import { api } from './api.js';
 import { bus, connectEvents } from './events.js';
-import { store, setState, setError, toast, fitView, setView, clearDiff, setAnnotations, clearAnnotations, setSnap, setViewMode, setSingleTrack, fitViewTrack } from './state.js';
+import { store, setState, setError, toast, fitView, setView, clearDiff, setAnnotations, clearAnnotations, setSnap, setViewMode, setSingleTrack, fitViewTrack, refTag } from './state.js';
 import * as roll from './roll.js';
 import * as timeline from './timeline.js';
 import * as dock from './dock.js';
@@ -165,7 +165,7 @@ async function renameProject() {
   if (!title || !title.trim()) return;
   try {
     const r = await api.setTitle(store.project, title.trim());
-    toast('已改名：' + r.title + ' @' + String(r.commit || '').slice(0, 7));
+    toast('已改名：' + r.title + ' ' + refTag(r));
   } catch (e) { setError(e.message); }
 }
 
@@ -392,7 +392,7 @@ function boot() {
     if (d.added && d.added.length) parts.push('+' + d.added.length);
     if (d.removed && d.removed.length) parts.push('-' + d.removed.length);
     if (d.changed && d.changed.length) parts.push('~' + d.changed.length);
-    box.textContent = parts.length ? ('本轮 diff ' + parts.join(' ') + (d.commit ? ' @' + String(d.commit).slice(0, 7) : '')) : '';
+    box.textContent = parts.length ? ('本轮 diff ' + parts.join(' ') + (refTag(d) ? ' ' + refTag(d) : '')) : '';
   });
 
   /* 版本对比（议题 ④）：左槽选历史版本 → 试听；base_rev 由 chat.js 读取 */
@@ -550,7 +550,7 @@ function boot() {
     });
     try {
       const r = await api.postBatch(store.project, label, commands, '标注：' + label);
-      if (r.applied) toast('已执行 ' + label + ' @' + String(r.commit || '').slice(0, 7));
+      if (r.applied) toast('已执行 ' + label + ' ' + refTag(r));
       else setError('被拒：' + (r.errors || []).join('；'));
     } catch (err) { setError(err.message); }
   });
@@ -587,7 +587,7 @@ function boot() {
     if (!store.project) { setError('先打开一个工程'); return; }
     try {
       const r = await api.postBatch(store.project, label, [{ op: 'set_tempo', track: 0, value }], '参数：' + label);
-      if (r.applied) toast('已更新 ' + label + ' @' + String(r.commit || '').slice(0, 7));
+      if (r.applied) toast('已更新 ' + label + ' ' + refTag(r));
       else setError('被拒：' + (r.errors || []).join('；'));
     } catch (e) { setError(e.message); }
   }

@@ -2,7 +2,7 @@
 
 import { bus } from './events.js';
 import { api } from './api.js';
-import { KEYS_W, store, tempo, beatsPerBar, segments, scoreBounds, setSelection, setError, toggleOverlay } from './state.js';
+import { KEYS_W, store, tempo, beatsPerBar, segments, scoreBounds, setSelection, setError, toggleOverlay, refTag } from './state.js';
 import { pal, trackColors } from './theme.js';
 
 let canvas, ctx, W = 0, H = 0, dpr = 1;
@@ -87,7 +87,7 @@ async function postMix(ti, value, label) {
   if (!store.project) return;
   try {
     const r = await api.postBatch(store.project, label, [{ op: 'set_track_mix', track: ti, value }], '参数：' + label);
-    if (r.applied) bus.dispatch('toast', '已更新 ' + label + ' @' + String(r.commit || '').slice(0, 7));
+    if (r.applied) bus.dispatch('toast', '已更新 ' + label + ' ' + refTag(r));
     else setError('被拒：' + (r.errors || []).join('；'));
   } catch (e) { setError(e.message); }
 }

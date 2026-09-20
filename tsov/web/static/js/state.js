@@ -51,6 +51,14 @@ export function toast(msg) {
   bus.dispatch('toast', store.toast);
 }
 
+/* M-V7 D2（ADR-0019）：编辑不再逐条 commit——展示引用优先 commit（收藏点），否则窗口快照号 */
+export function refTag(r) {
+  if (!r) return '';
+  if (r.commit) return '@' + String(r.commit).slice(0, 7);
+  const s = r.seq;
+  return (s === 0 || s) ? '@#' + s : '';
+}
+
 /* 用 GET state / state_updated 事件的数据装载 store（保持选区不闪断） */
 export function setState(s, opts) {
   const keep = (opts && opts.preserveSelection) ? store.selection : null;

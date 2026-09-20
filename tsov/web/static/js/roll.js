@@ -2,7 +2,7 @@
 
 import { bus } from './events.js';
 import { api } from './api.js';
-import { KEYS_W, store, scoreBounds, tempo, beatsPerBar, setSelection, setView } from './state.js';
+import { KEYS_W, store, scoreBounds, tempo, beatsPerBar, setSelection, setView, refTag } from './state.js';
 import { diffLayers } from './diff.js';
 import { pal, trackColors } from './theme.js';
 
@@ -289,7 +289,7 @@ async function submitDrag() {
       const { start, end, pitch } = d.ghost;
       cmd.push({ op: 'add', track: d.track, index: null, value: { pitch_midi: pitch, start: round3(start), end: round3(end) } });
       const r = await api.postBatch(store.project, '添加音符', cmd, '手绘：添加音符');
-      if (r.applied) showStatus('已添加 ' + midiName(pitch) + ' @' + (r.commit || '').slice(0, 7));
+      if (r.applied) showStatus('已添加 ' + midiName(pitch) + ' ' + refTag(r));
       else showStatus('被拒：' + (r.errors || []).join('；'), true);
       return;
     }
@@ -306,7 +306,7 @@ async function submitDrag() {
       }
       const r = await api.postBatch(store.project, '移动 ' + d.origs.length + ' 音', cmd,
                                     '手绘：移动 ' + d.origs.length + ' 音');
-      if (r.applied) showStatus('已移动 ' + d.origs.length + ' 音 @' + (r.commit || '').slice(0, 7));
+      if (r.applied) showStatus('已移动 ' + d.origs.length + ' 音 ' + refTag(r));
       else showStatus('被拒：' + (r.errors || []).join('；'), true);
       return;
     }
@@ -322,7 +322,7 @@ async function submitDrag() {
       cmd.push({ op: 'set_time', track: d.track, index: d.index, value: { start: ns, end: ne } });
     }
     const r = await api.postBatch(store.project, d.mode === 'move' ? '移动音符' : '缩放音符', cmd, '手绘：' + (d.mode === 'move' ? '移动' : '缩放'));
-    if (r.applied) showStatus((d.mode === 'move' ? '已移动' : '已缩放') + ' @' + (r.commit || '').slice(0, 7));
+    if (r.applied) showStatus((d.mode === 'move' ? '已移动' : '已缩放') + ' ' + refTag(r));
     else showStatus('被拒：' + (r.errors || []).join('；'), true);
   } catch (err) {
     showStatus(err.message, true);
@@ -342,7 +342,7 @@ function closeNoteMenu() { if (noteMenu) { noteMenu.remove(); noteMenu = null; }
 async function postNoteOp(hit, commands, label) {
   try {
     const r = await api.postBatch(store.project, label, commands, label);
-    if (r.applied) showStatus('已执行 ' + label + ' @' + (r.commit || '').slice(0, 7));
+    if (r.applied) showStatus('已执行 ' + label + ' ' + refTag(r));
     else showStatus('被拒：' + (r.errors || []).join('；'), true);
   } catch (err) { showStatus(err.message, true); }
 }

@@ -3,7 +3,7 @@
 
 import { bus } from './events.js';
 import { api } from './api.js';
-import { store, setError } from './state.js';
+import { store, setError, refTag } from './state.js';
 import { themeName, trackColors } from './theme.js';
 
 let dockEl = null, chanPane = null, fxPane = null, srcPane = null, mixPane = null, hintEl = null;
@@ -19,7 +19,7 @@ async function post(label, commands) {
   if (!store.project) { setError('先打开一个工程'); return null; }
   try {
     const r = await api.postBatch(store.project, label, commands, '面板：' + label);
-    if (r.applied) bus.dispatch('toast', '已执行 ' + label + ' @' + String(r.commit || '').slice(0, 7));
+    if (r.applied) bus.dispatch('toast', '已执行 ' + label + ' ' + refTag(r));
     else setError('被拒：' + (r.errors || []).join('；'));
     return r;
   } catch (e) { setError(e.message); return null; }

@@ -5,7 +5,7 @@
 
 import { api } from './api.js';
 import { bus } from './events.js';
-import { store, setAgentBusy, clearDiff, toast, setError, clearAnnotations,
+import { store, setAgentBusy, clearDiff, toast, setError, clearAnnotations, refTag,
          setSelection, setSingleTrack, addAgentTracks, clearAgentTracks,
          peekUserActions, clearUserActions } from './state.js';
 
@@ -56,7 +56,7 @@ function runQuickCmd(value) {
     if (!store.project) { setError('先打开一个工程'); return; }
     api.postBatch(store.project, '+2', [{ op: 'transpose', track: 0, index: null, value: 2 }], '命令层 demo：+2 半音')
       .then((r) => {
-        if (r.applied) toast('命令层：已 +2 半音 @' + (r.commit || '').slice(0, 7));
+        if (r.applied) toast('命令层：已 +2 半音 ' + refTag(r));
         else setError('命令被拒：' + (r.errors || []).join('；'));
       })
       .catch((err) => setError(err.message));
@@ -247,7 +247,7 @@ async function doActionUndo(rec, btn) {
   btn.disabled = true;
   try {
     const r = await api.actionUndo(store.project, rec.seq);
-    toast('已撤销动作 #' + rec.seq + '：' + (rec.label || rec.tool) + (r && r.commit ? ' @' + String(r.commit).slice(0, 7) : ''));
+    toast('已撤销动作 #' + rec.seq + '：' + (rec.label || rec.tool) + (refTag(r) ? ' ' + refTag(r) : ''));
     markStaleFrom(rec.turn, rec.action_id);
   } catch (e) {
     setError('撤销失败：' + e.message);
