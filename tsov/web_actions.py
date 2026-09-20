@@ -12,10 +12,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
-import time
-from pathlib import Path
 from typing import Any
 
 from .core.score import Score
@@ -236,96 +232,6 @@ def impact_of(pre: Any, post: Any, top: int = 5) -> dict:
 # 动作快照日志（批B B1-2 · 动作级撤销；Q44 弱留存窗口的原型）
 # ---------------------------------------------------------------------------
 
-class ActionJournal:
-    """单工程的动作快照日志：每个写类工具调用前后各存一份 score 快照。
-
-    - 快照内容寻址（`<sha1[:12]>.json`）：同内容只存一份；
-    - `index.json` 记录动作条目（seq/tool/label/args/pre/post/impact/时间/失效标记）；
-    - 撤销 = 取该动作的 `pre` 快照恢复（由调用方走 Project.apply_score，产生一条"撤销动作"commit）；
-    - 窗口（MAX_ENTRIES）外淘汰最旧条目，并 GC 不再被引用的快照文件——Q44「弱留存」的现成原型。
-    """
-
-    MAX_ENTRIES = 60   # 窗口大小（Q44 落地时改为「操作 20 步」语义）
-
-    def __init__(self, root: Path | str):
-        self.dir = Path(root) / ".agent-actions"
-        self.index_path = self.dir / "index.json"
-        self.dir.mkdir(parents=True, exist_ok=True)
-        self.entries: list[dict] = []
-        try:
-            data = json.loads(self.index_path.read_text(encoding="utf-8"))
-            if isinstance(data, dict) and isinstance(data.get("entries"), list):
-                self.entries = [e for e in data["entries"] if isinstance(e, dict)]
-        except (OSError, ValueError):
-            self.entries = []
-        self._seq = max([int(e.get("seq", 0)) for e in self.entries], default=0)
-
-    # ---- 快照 ----
-    def snapshot(self, score: dict | None) -> str | None:
-        """存快照（内容寻址）→ hash；非 dict / 缺内容 → None。"""
-        if not isinstance(score, dict):
-            return None
-        data = json.dumps(score, ensure_ascii=False, sort_keys=True).encode("utf-8")
-        h = hashlib.sha1(data).hexdigest()[:12]
-        p = self.dir / f"{h}.json"
-        if not p.is_file():
-            p.write_bytes(data)
-        return h
-
-    def load(self, h: str | None) -> dict | None:
-        if not h:
-            return None
-        try:
-            return json.loads((self.dir / f"{h}.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return None
-
-    # ---- 条目 ----
-    def append(self, *, session_id: str, turn: int, tool: str, args: str,
-               pre: str | None, post: str | None, impact: dict | None) -> dict:
-        self._seq += 1
-        entry = {
-            "seq": self._seq, "session_id": session_id, "turn": turn, "tool": tool,
-            "label": tool_label(tool), "args": args, "pre": pre, "post": post,
-            "impact": impact or {"text": ""}, "ts": time.time(),
-            "stale": False, "undone": False,
-        }
-        self.entries.append(entry)
-        self._trim()
-        self._save()
-        return entry
-
-    def get(self, seq: int) -> dict | None:
-        for e in self.entries:
-            if int(e.get("seq", 0)) == int(seq):
-                return e
-        return None
-
-    def mark_stale_from(self, seq: int, undone: bool = True) -> None:
-        """撤销 #seq → 其后（含自身）动作标记失效（前端置灰的依据）。"""
-        for e in self.entries:
-            if int(e.get("seq", 0)) >= int(seq):
-                e["stale"] = True
-                if int(e.get("seq", 0)) == int(seq):
-                    e["undone"] = undone
-        self._save()
-
-    def _trim(self) -> None:
-        if len(self.entries) <= self.MAX_ENTRIES:
-            return
-        drop, self.entries = self.entries[:-self.MAX_ENTRIES], self.entries[-self.MAX_ENTRIES:]
-        keep = {e.get("pre") for e in self.entries} | {e.get("post") for e in self.entries}
-        for e in drop:
-            for h in (e.get("pre"), e.get("post")):
-                if h and h not in keep:
-                    try:
-                        (self.dir / f"{h}.json").unlink()
-                    except OSError:
-                        pass
-
-    def _save(self) -> None:
-        try:
-            self.index_path.write_text(
-                json.dumps({"entries": self.entries}, ensure_ascii=False, indent=1), encoding="utf-8")
-        except OSError:
-            pass
+# M-V7 D2（ADR-0019）：ActionJournal 已下沉至 host/journal.py（快照窗口 · 双账本）；
+# 此处保留旧导入路径，供既有 import（web.py / 测试）过渡。
+from .host.journal import ActionJournal  # noqa: F401

@@ -20,6 +20,7 @@ import copy
 import json
 import os
 import threading
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -32,6 +33,7 @@ from pydantic import BaseModel
 from .core.score import Instrument, Score, Track
 from .host import EditBatch, Project
 from .host.cache import StemStore, score_keys   # M-V7 D1（ADR-0018）：轨道级 freeze / stem 库
+from .host.state import ProjectState, global_settings_path, set_global_settings  # M-V7 D2（ADR-0019）：计数/设置
 from .web_actions import (READ_TOOLS, SCORE_WRITING_TOOLS, ActionJournal,  # 批B（ADR-0017）动作呈现层
                          impact_of, summarize_args, tool_label)
 
@@ -50,6 +52,13 @@ STATIC_DIR = Path(__file__).parent / "web" / "static"  # 契约 docs/05 §四：
 # ---------------------------------------------------------------------------
 # 请求模型
 # ---------------------------------------------------------------------------
+
+
+class SettingsIn(BaseModel):
+    """留存设置补丁（M-V7 D2）：不动字段可省略；`timed_favorite` 为 {"enabled", "interval_min"}。"""
+
+    auto_favorite_iters: int | None = None
+    timed_favorite: dict | None = None
 
 
 class ProjectCreate(BaseModel):
@@ -476,6 +485,47 @@ def _stream_chat(bus: EventBus, project: str, session_id: str, messages: list[di
     return {"content": content, "tool_calls": tool_calls, "message": message}
 
 
+def _retention_tick(state: WebState, project_name: str, *, agent_turns: int = 0) -> None:
+    """留存钩子（ADR-0019 / M-V7 D2）：迭代计数 → 阈值自动收藏；定时档惰性检查。
+
+    - 调用点：agent 轮末（finally，正常/停止/异常都过）+ 用户写操作（/batch 等）。
+    - 计数口径：自上次 git 点以来的 agent 迭代轮数（手势不计入）；HEAD 变化 → 自动归零。
+    - 自动收藏：计数 ≥ 阈值且有改动 → commit + `fav/<ts>-auto`；无改动保留计数（防空收）。
+    - 定时档：默认关；开启后（惰性检查）距上次检查 ≥ 间隔且有改动 → `fav/<ts>-time`。
+    - 失败静默（由调用方兜底），本函数内不抛。
+    """
+    proj = state.get_project(project_name)
+    ps = ProjectState(proj.root)
+    ps.sync_git_point(proj.head_hash())          # 任何 HEAD 变化（收藏/回滚…）→ 计数归零
+    if agent_turns:
+        ps.add_turns(int(agent_turns))
+
+    settings = ps.settings()
+    threshold = max(1, int(settings.get("auto_favorite_iters", 40)))
+    if ps.counter >= threshold and proj.is_dirty():
+        iters = ps.counter
+        r = proj.favorite(auto=True)
+        if r.get("ok"):
+            ps.reset_counter()
+            ps.data["last_commit"] = proj.head_hash() or ps.last_commit
+            state.bus.publish(project_name, "favorite",
+                              {"tag": r["tag"], "source": "auto", "iters": iters})
+
+    tf = settings.get("timed_favorite") or {}
+    if bool(tf.get("enabled")):
+        interval = max(60.0, float(tf.get("interval_min", 30)) * 60.0)
+        now = time.time()
+        if now - ps.last_timed_check >= interval:
+            ps.mark_timed_check(now)
+            if proj.is_dirty():
+                r = proj.favorite(timed=True)
+                if r.get("ok"):
+                    ps.reset_counter()
+                    ps.data["last_commit"] = proj.head_hash() or ps.last_commit
+                    state.bus.publish(project_name, "favorite", {"tag": r["tag"], "source": "time"})
+    ps.save()
+
+
 def _run_agent_session(state: WebState, project_name: str, task: str, session_id: str, base_rev: str = "HEAD",
                        annotations: list[dict] | None = None, selection: dict | None = None,
                        user_actions: list[str] | None = None) -> None:
@@ -495,7 +545,8 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
     proj = state.get_project(project_name)
     root = proj.root
     edited_path = root / EDITED_SCORE_NAME
-    journal = ActionJournal(root)   # 批B B1-2：动作快照日志（动作级撤销 / Q44 弱留存原型）
+    journal = ActionJournal(root)   # 快照窗口（M-V7 D2：动作级撤销 + 弱留存双口径）
+    round_key = f"{session_id}:{int(time.time())}"   # 本对话轮标识（agent 窗口淘汰口径）
     # 清掉上一轮残留——只采用「本轮」的编辑结果
     try:
         edited_path.unlink()
@@ -503,7 +554,7 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
         pass
 
     # ---- M-V3：人工标注确定性先行（最高优先级；ADR-0009「不走 LLM」）----
-    # 失败（非法标注 / 空结果守卫）→ 拒绝整条消息、谱不变；成功 → 一个独立 commit
+    # 失败（非法标注 / 空结果守卫）→ 拒绝整条消息、谱不变；成功 → 落盘 + 快照窗口条目（M-V7 D2：零 commit）
     ann_note = ""
     if annotations:
         try:
@@ -517,10 +568,10 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
                 return
             adopted = proj.apply_score(ann_result.new_score, f"人工标注（{len(annotations)} 条）")
             if adopted["ok"]:
-                bus.publish(project_name, "diff_applied", {**adopted["diff"], "commit": adopted["commit"]})
+                bus.publish(project_name, "diff_applied", {**adopted["diff"], "commit": adopted["commit"], "seq": adopted.get("seq")})
                 bus.publish(project_name, "state_updated", project_state(proj))
                 ann_note = (
-                    f"- 用户人工标注已确定性应用（{adopted['diff']['summary']}，commit {adopted['commit']}）："
+                    f"- 用户人工标注已确定性应用（{adopted['diff']['summary']}，快照 #{adopted.get('seq')}）："
                     + "；".join(ann_result.diff_summary[:6])
                     + "\n  这些是用户精确指定的修改：请在结果中保留、不得回退\n"
                 )
@@ -619,8 +670,9 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
                 impact = impact_of(pre_snap, post_snap) if (post_snap and tool_name in SCORE_WRITING_TOOLS) else None
                 entry = None
                 if impact is not None and impact.get("text") and tool_name in SCORE_WRITING_TOOLS:
-                    entry = journal.append(session_id=session_id, turn=turn, tool=tool_name,
-                                           args=summarize_args(tool_name, targs),
+                    entry = journal.append(source="agent", label=tool_label(tool_name),
+                                           session_id=session_id, turn=turn, round=round_key,
+                                           tool=tool_name, args=summarize_args(tool_name, targs),
                                            pre=pre_hash, post=post_hash, impact=impact)
                 bus.publish(
                     project_name,
@@ -650,7 +702,7 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
         if edited_path.is_file():
             try:
                 new_score = Score.from_dict(json.loads(edited_path.read_text(encoding="utf-8")))
-                result = proj.apply_score(new_score, f"agent：{task[:40]}")
+                result = proj.apply_score(new_score, f"agent：{task[:40]}", source="agent")
                 adopted = result if result["ok"] else None
             except Exception as e:  # noqa: BLE001 坏文件不阻塞回答
                 bus.publish(
@@ -660,7 +712,7 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
                      "observation": f"编辑结果采用失败：{type(e).__name__}: {e}"},
                 )
             if adopted:
-                bus.publish(project_name, "diff_applied", {**adopted["diff"], "commit": adopted["commit"]})
+                bus.publish(project_name, "diff_applied", {**adopted["diff"], "commit": adopted["commit"], "seq": adopted.get("seq")})
                 bus.publish(project_name, "state_updated", project_state(proj))
 
         bus.publish(
@@ -685,6 +737,11 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
     except Exception as e:  # noqa: BLE001 LLM/致命错误 → agent_error 事件（锁在 finally 释放）
         bus.publish(project_name, "agent_error", {"session_id": session_id, "error": f"{type(e).__name__}: {e}"})
     finally:
+        # M-V7 D2（ADR-0019）：轮末留存钩子——迭代计数 + 阈值自动收藏 + 定时档惰性（失败静默）
+        try:
+            _retention_tick(state, project_name, agent_turns=turns)
+        except Exception:  # noqa: BLE001 留存钩子失败不影响主流程
+            pass
         state.agent_lock.release()
 
 
@@ -785,12 +842,17 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
             if not isinstance(op, str):
                 raise HTTPException(400, f"第 {i} 条命令缺 op")
             batch.add(op, track=int(c.get("track", 0)), index=c.get("index"), value=c.get("value"))
-        result = proj.apply_batch(batch, commit_message=body.commit_message or body.label or "编辑")
+        result = proj.apply_batch(batch, commit_message=body.commit_message or body.label or "编辑",
+                                  source="user")
         if result["applied"] == 0:
             # 全部命令被拒 → 工程不动；契约 §五：applied=0 + errors 清单仍在响应体里
             return result
-        st().bus.publish(name, "diff_applied", {**result["diff"], "commit": result["commit"]})
+        st().bus.publish(name, "diff_applied", {**result["diff"], "commit": result["commit"], "seq": result.get("seq")})
         st().bus.publish(name, "state_updated", project_state(proj))
+        try:
+            _retention_tick(st(), name)   # M-V7 D2：写操作触发留存检查（定时档惰性）
+        except Exception:  # noqa: BLE001 留存钩子失败不影响主流程
+            pass
         return result
 
     @app.post("/api/projects/{name}/undo")
@@ -938,11 +1000,15 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
 
     @app.post("/api/projects/{name}/favorite")
     def favorite(name: str) -> dict:
-        """收藏当前版本（git tag：fav/<时间戳>；强留存 + 恢复入口）。"""
+        """收藏当前版本（M-V7 D2：commit+tag 二连；强留存 + 恢复入口）。"""
         proj = st().get_project(name)
         r = proj.favorite()
         if not r.get("ok"):
             raise HTTPException(400, r.get("error") or "收藏失败")
+        ps = ProjectState(proj.root)      # 收藏 = 新 git 点 → 计数归零
+        ps.sync_git_point(proj.head_hash())
+        ps.reset_counter()
+        ps.save()
         return r
 
     @app.get("/api/projects/{name}/favorites")
@@ -951,30 +1017,63 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
 
     @app.get("/api/projects/{name}/agent-actions")
     def agent_actions(name: str, limit: int = 60) -> dict:
-        """批B：动作快照日志（最近 limit 条；供前端回放与失效置灰）。"""
+        """动作快照日志（窗口内最近 limit 条；供前端回放与失效置灰）。"""
         proj = st().get_project(name)
-        j = ActionJournal(proj.root)
+        j = proj.journal
         return {"entries": j.entries[-max(1, int(limit)):]}
+
+    # ---------------- 快照窗口 / 留存设置（M-V7 D2，ADR-0019） ----------------
+
+    @app.get("/api/projects/{name}/window")
+    def window(name: str, limit: int = 40) -> dict:
+        """快照窗口（弱留存）：条目 + 游标 + 容量（供 D3 UI / 回滚下拉）。"""
+        proj = st().get_project(name)
+        w = proj.journal.window()
+        w["entries"] = w["entries"][-max(1, int(limit)):]
+        return w
+
+    @app.get("/api/projects/{name}/settings")
+    def get_settings(name: str) -> dict:
+        """留存设置（合成视图：工程档 > 全局档 > env > 默认）+ 当前迭代计数。"""
+        proj = st().get_project(name)
+        ps = ProjectState(proj.root)
+        return {"settings": ps.settings(), "counter": ps.counter,
+                "global_path": str(global_settings_path())}
+
+    @app.post("/api/projects/{name}/settings")
+    def set_settings(name: str, body: SettingsIn) -> dict:
+        """写工程档设置（`.tsov-state.json`；部分字段更新）。"""
+        proj = st().get_project(name)
+        ps = ProjectState(proj.root)
+        patch = {k: v for k, v in body.model_dump().items() if v is not None}
+        return {"ok": True, "settings": ps.set_project_settings(patch)}
+
+    @app.post("/api/settings")
+    def set_settings_global(body: SettingsIn) -> dict:
+        """写全局档设置（仓库根 `tsov-settings.json`，跨工程）。"""
+        patch = {k: v for k, v in body.model_dump().items() if v is not None}
+        return {"ok": True, "global": set_global_settings(patch),
+                "path": str(global_settings_path())}
 
     @app.post("/api/projects/{name}/agent-actions/{seq}/undo")
     def agent_action_undo(name: str, seq: int) -> dict:
-        """批B：动作级撤销——恢复该动作前的快照（一条"撤销动作"commit，不动 git 历史）。"""
+        """动作级撤销（M-V7 D2：窗口回跳——恢复该动作前快照，零 commit，其后动作置灰）。"""
         proj = st().get_project(name)
-        j = ActionJournal(proj.root)
+        j = proj.journal
         entry = j.get(seq)
         if not entry:
             raise HTTPException(404, f"动作 #{seq} 不存在（可能已超出留存窗口）")
-        snap = j.load(entry.get("pre"))
+        snap = j.jump(seq)   # 游标跳到动作前 + 其后（含自身）标记失效
         if not snap:
             raise HTTPException(409, "该动作没有可回退的快照")
         try:
             new_score = Score.from_dict(snap)
         except Exception as e:  # noqa: BLE001
             raise HTTPException(500, f"快照解析失败：{type(e).__name__}: {e}") from e
-        result = proj.apply_score(new_score, f"撤销动作：{entry.get('label')}（#{seq}）")
-        j.mark_stale_from(seq)
+        result = proj.apply_score(new_score, f"撤销动作：{entry.get('label')}（#{seq}）",
+                                  source="user", record=False)
         if result.get("ok"):
-            st().bus.publish(name, "diff_applied", {**result["diff"], "commit": result["commit"]})
+            st().bus.publish(name, "diff_applied", {**result["diff"], "commit": result["commit"], "seq": result.get("seq")})
             st().bus.publish(name, "state_updated", project_state(proj))
         st().bus.publish(name, "action_undone",
                          {"seq": seq, "ok": bool(result.get("ok")), "commit": result.get("commit")})
