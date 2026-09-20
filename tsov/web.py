@@ -61,6 +61,12 @@ class SettingsIn(BaseModel):
     timed_favorite: dict | None = None
 
 
+class WindowJumpIn(BaseModel):
+    """快照点跳转（M-V7 D3）：恢复到窗口内第 cursor 个位置。"""
+
+    cursor: int
+
+
 class ProjectCreate(BaseModel):
     name: str
     score: dict | None = None
@@ -1015,6 +1021,13 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
     def favorites(name: str) -> dict:
         return {"favorites": st().get_project(name).favorites()}
 
+    @app.delete("/api/projects/{name}/favorites")
+    def favorite_delete(name: str, tag: str) -> dict:
+        """删除收藏 tag（只删标签，不动提交；M-V7 D3）。"""
+        if not st().get_project(name).delete_favorite(tag):
+            raise HTTPException(400, f"删除失败：{tag!r}（不存在或非收藏标签）")
+        return {"ok": True, "tag": tag}
+
     @app.get("/api/projects/{name}/agent-actions")
     def agent_actions(name: str, limit: int = 60) -> dict:
         """动作快照日志（窗口内最近 limit 条；供前端回放与失效置灰）。"""
@@ -1031,6 +1044,16 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
         w = proj.journal.window()
         w["entries"] = w["entries"][-max(1, int(limit)):]
         return w
+
+    @app.post("/api/projects/{name}/window/jump")
+    def window_jump(name: str, body: WindowJumpIn) -> dict:
+        """快照点跳转（M-V7 D3）：恢复到窗口内任意位置（零 commit；其后条目下次编辑分歧置灰）。"""
+        proj = st().get_project(name)
+        if not proj.jump_window(int(body.cursor)):
+            raise HTTPException(400, "该快照点不可恢复（越界或快照缺失）")
+        st().bus.publish(name, "state_updated", project_state(proj))
+        w = proj.journal.window()
+        return {"ok": True, "cursor": w["cursor"], "can_undo": w["can_undo"], "can_redo": w["can_redo"]}
 
     @app.get("/api/projects/{name}/settings")
     def get_settings(name: str) -> dict:
