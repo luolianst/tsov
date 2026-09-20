@@ -290,6 +290,25 @@ class Project:
         )
         return True
 
+    def jump_window(self, cursor: int) -> bool:
+        """快照点跳转（M-V7 D3 回滚下拉「最近窗口」段）：恢复到窗口内任意位置，零 commit。"""
+        r = self.journal.jump_to_cursor(int(cursor))
+        if not r or not r.get("snapshot"):
+            return False
+        try:
+            self.score = Score.from_dict(r["snapshot"])
+        except Exception:  # noqa: BLE001 快照损坏
+            return False
+        self.save()
+        return True
+
+    def delete_favorite(self, tag: str) -> bool:
+        """删除收藏 tag（只删标签，不动提交；M-V7 D3）。"""
+        if not (self.root / ".git").exists() or not str(tag).startswith("fav/"):
+            return False
+        proc = self._git("tag", "-d", str(tag))
+        return proc.returncode == 0
+
     # ------------------------------------------------------------------
     # 工程摘要（LLM 上下文节流）
     # ------------------------------------------------------------------

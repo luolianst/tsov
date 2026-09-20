@@ -151,6 +151,22 @@ class ActionJournal:
                 return self.snapshot_at(i)
         return None
 
+    def jump_to_cursor(self, cursor: int) -> dict | None:
+        """快照点跳转（M-V7 D3 回滚下拉「最近窗口」段）：游标移到任意位置并返回该点快照。
+
+        - 越界钳制；快照缺失 → 不动游标、返回 None。
+        - 从旧点往后编辑时，其后条目由 append() 的分歧逻辑标 stale（与 undo 一致）。
+        """
+        if not self.entries:
+            return None
+        k = max(0, min(int(cursor), len(self.entries)))
+        snap = self.snapshot_at(k)
+        if snap is None:
+            return None
+        self.cursor = k
+        self._save()
+        return {"cursor": k, "snapshot": snap}
+
     def window(self) -> dict:
         """窗口视图（供 GET /window / D3 UI 消费）。"""
         return {
