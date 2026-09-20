@@ -451,7 +451,7 @@ def test_sessions_list_and_load(env, monkeypatch):
 
 @pytest.mark.skipif(not _HAS_SF, reason="缺 vendor/soundfonts/FluidR3_GM.sf2")
 def test_render_old_rev_and_wav_rev(env):
-    """render 带 rev：git show 旧版渲染到 .render-cache，不动 HEAD；wav?rev 可取流。"""
+    """render 带 rev：git show 旧版按 stem 库拼装到 .mix-cache（ADR-0018），不动 HEAD；wav?rev 可取流。"""
     name = _make_project(env)
     c = env["client"]
     # 先做一轮编辑，产生 HEAD~1 旧版
@@ -466,7 +466,8 @@ def test_render_old_rev_and_wav_rev(env):
     assert r2.status_code == 200
     body = r2.json()
     assert body["rev"] == (head + "~1")[:8]
-    assert (proj_root / ".render-cache" / ((head + "~1")[:8] + ".wav")).is_file()
+    assert body["rendered"] and body["cached"] == []          # 首次拼装：全轨现渲
+    assert (proj_root / ".mix-cache" / ((head + "~1")[:8] + ".wav")).is_file()
     # 坏版本 400
     r3 = c.post(f"/api/projects/{name}/render", json={"rev": "NO_SUCH_REV"})
     assert r3.status_code == 400
@@ -476,6 +477,38 @@ def test_render_old_rev_and_wav_rev(env):
     # HEAD 未被改动
     state = c.get(f"/api/projects/{name}/state").json()
     assert state["score"]["tracks"][0]["notes"][0]["pitch_midi"] == 62
+
+
+@pytest.mark.skipif(not _HAS_SF, reason="缺 vendor/soundfonts/FluidR3_GM.sf2")
+def test_stem_cache_hit_and_gc(env):
+    """M-V7 D1（ADR-0018）：render 走 stem 库（首渲全量 → 全命中）；推子不失效；GC 保留引用并清退役目录。"""
+    name = _make_project(env)
+    c = env["client"]
+    proj_root = env["dir"] / name
+
+    r1 = c.post(f"/api/projects/{name}/render", json={})
+    assert r1.status_code == 200
+    b1 = r1.json()
+    assert b1["rendered"] == ["melody"] and b1["cached"] == []
+    assert (proj_root / ".stem-cache").is_dir()
+
+    r2 = c.post(f"/api/projects/{name}/render", json={})
+    b2 = r2.json()
+    assert b2["rendered"] == [] and b2["cached"] == ["melody"]
+
+    # 推子改动（set_track_mix）→ 不触发重渲（ADR-0018 刀口）
+    rb = c.post(f"/api/projects/{name}/batch",
+                json={"label": "vol", "commands": [{"op": "set_track_mix", "track": 0, "value": {"volume": 0.5}}]})
+    assert rb.status_code == 200
+    r3 = c.post(f"/api/projects/{name}/render", json={})
+    b3 = r3.json()
+    assert b3["rendered"] == [] and b3["cached"] == ["melody"]
+
+    # GC：HEAD 引用者保留；退役 .render-cache 被清理
+    (proj_root / ".render-cache").mkdir(exist_ok=True)
+    g = c.post(f"/api/projects/{name}/cache/gc").json()
+    assert g["removed"] == [] and g["keep"] >= 1
+    assert ".render-cache" in g["legacy_removed"] and not (proj_root / ".render-cache").exists()
 
 
 def test_chat_accepts_base_rev(env, monkeypatch):
