@@ -1,11 +1,16 @@
-"""总线化混音（M-V4）：track → bus → master；volume/pan/mute/solo/automation 全应用。
+"""总线化混音（M-V4 / ADR-0018 换序）：track → bus → master；volume/pan/mute/solo/automation 全应用。
 
-设计要点：
+轨内管线（ADR-0018，2026-09-20 换序为 DAW 标准序）：
+    **音源 → 效果链 → 推子 → automation 音量 → 声像** → 总线 → master
+- 前段（音源+效果）＝ 可缓存部分（轨道级 freeze，`cache.StemStore`）；后段（推子/自动化/声像）**混音期实时应用、永不触发重渲**
 - pan = 线性平衡律：L = clip(1-p)、R = clip(1+p)（对侧衰减、中位不衰减 → mono 折叠 (L+R)/2 无损）
 - automation 数据在模型层（Track/Bus.automation），此处求值：线性插值、段外取端点值
 - mute/solo：任一轨 solo → 仅 solo 轨可闻（mute 恒静音）
 - 防削波：沿用旧 mix_graph 行为——full mix 峰值 >1 时整体缩放（`auto_scale=True` 缺省）
 - 总线容错：track.bus 指向不存在的总线 → 按 master 处理
+
+（换序前后差异只出现在「非线性效果 + 非单位推子」的轨：新序下效果输入不再被推子驱动；
+旧序产物对照见 `output/mv7-d1-compare/`，任务书 D1 闸门 1。）
 """
 
 from __future__ import annotations
@@ -13,6 +18,7 @@ from __future__ import annotations
 import numpy as np
 
 from ..core.score import Bus
+from .cache import StemStore
 from .effect import apply_effect_chain, effect_tail_seconds
 from .session import HostSession
 
@@ -48,6 +54,31 @@ def _pan_matrix(lg, rg) -> np.ndarray:
     return np.array([lg, rg], dtype=np.float32)
 
 
+def render_track_source(ht, samplerate: int, n_frames: int) -> np.ndarray:
+    """轨内**前段**（可缓存，ADR-0018）：音源合成 → 效果链（居中双单声道输入）。
+
+    返回 (n_frames, 2) float32；不含推子/自动化/声像（这些由 `apply_track_mix` 在混音期应用）。
+    """
+    buf = np.asarray(ht.source.render(ht.notes, samplerate, n_frames), dtype=np.float32)
+    stereo = np.stack([buf, buf], axis=1).astype(np.float32)
+    fx = getattr(ht.track.instrument, "effects", None) or []
+    if fx:
+        stereo = apply_effect_chain(stereo, samplerate, fx)
+    return stereo
+
+
+def apply_track_mix(stereo: np.ndarray, tr, times: np.ndarray) -> np.ndarray:
+    """轨内**后段**（混音期实时层，永不失效）：推子 → automation 音量 → 声像（平衡律）。"""
+    out = stereo * _num(getattr(tr.instrument, "volume", 1.0), 1.0)
+    auto = getattr(tr, "automation", None) or {}
+    vol_curve = _curve(auto.get("volume"), times)
+    if vol_curve is not None:
+        out = out * vol_curve[:, None].astype(np.float32)
+    pan_curve = _curve(auto.get("pan"), times)
+    lg, rg = _pan_gains(pan_curve if pan_curve is not None else _num(getattr(tr, "pan", 0.0), 0.0))
+    return out * _pan_matrix(lg, rg)
+
+
 def render_buses(
     session: HostSession,
     samplerate: int | None = None,
@@ -58,6 +89,9 @@ def render_buses(
     include_bus_processing: bool = True,
     include_master_processing: bool = True,
     auto_scale: bool = True,
+    cache: StemStore | None = None,
+    stats: dict | None = None,
+    on_progress=None,
 ) -> np.ndarray:
     """总线化混音渲染。
 
@@ -65,6 +99,8 @@ def render_buses(
     - `include_bus_processing=False`：轨道处理后直进 master（stems：总线前）
     - `include_master_processing=False`：跳过 master 推子/pan（stems/buses：master 前）
     - `auto_scale`：峰值 >1 整体缩放（full mix 缺省行为；导出矩阵用 False + 统一缩放）
+    - `cache`（ADR-0018）：轨道级 freeze 库——前段命中即读、未命中渲后入库
+    - `stats` / `on_progress`：缓存统计与逐轨进度回调（web 层用于 SSE 进度）
     - 返回 (n, 2) stereo；`stereo=False` 折叠为 mono (L+R)/2（与旧 mix_graph 数值一致）
     """
     samplerate = int(samplerate or session.samplerate)
@@ -92,22 +128,33 @@ def render_buses(
         if bool(getattr(tr, "mute", False)) or (any_solo and not bool(getattr(tr, "solo", False))):
             continue
 
-        buf = np.asarray(ht.source.render(ht.notes, samplerate, n_frames), dtype=np.float32)
-        # 轨内处理：fader（Instrument.volume）→ automation 音量曲线 → pan
-        buf = buf * _num(getattr(tr.instrument, "volume", 1.0), 1.0)
-        auto = getattr(tr, "automation", None) or {}
-        vol_curve = _curve(auto.get("volume"), times)
-        if vol_curve is not None:
-            buf = buf * vol_curve.astype(np.float32)
-        pan_curve = _curve(auto.get("pan"), times)
-        lg, rg = _pan_gains(pan_curve if pan_curve is not None else _num(getattr(tr, "pan", 0.0), 0.0))
-        stereo_buf = np.stack([buf * lg, buf * rg], axis=1).astype(np.float32)
+        name = tr.name or f"track-{idx}"
+        # 轨内前段（音源+效果）：ADR-0018 缓存路径（命中即读；未命中渲后入库）
+        if cache is not None:
+            key = cache.key_for(tr, samplerate)
+            buf = cache.load(key)
+            if buf is None:
+                if on_progress:
+                    on_progress({"idx": idx, "name": name, "state": "render"})
+                buf = render_track_source(ht, samplerate, n_frames)
+                cache.save(key, buf, samplerate)
+                if stats is not None:
+                    stats.setdefault("rendered", []).append(name)
+            else:
+                if stats is not None:
+                    stats.setdefault("cached", []).append(name)
+                if on_progress:
+                    on_progress({"idx": idx, "name": name, "state": "cached"})
+            if buf.shape[0] != n_frames:   # 工程时长变化 → 补齐/裁剪（零填充：该轨内容未变形）
+                if buf.shape[0] < n_frames:
+                    buf = np.pad(buf, ((0, n_frames - buf.shape[0]), (0, 0)))
+                else:
+                    buf = buf[:n_frames]
+        else:
+            buf = render_track_source(ht, samplerate, n_frames)
 
-        # 效果链（ADR-0013 落地）：作用于 pan 后 stereo 缓冲（reverb 有真实立体声尾巴；
-        # mute/solo/推子已先行，静音轨不会漏出残响）
-        fx = getattr(tr.instrument, "effects", None) or []
-        if fx:
-            stereo_buf = apply_effect_chain(stereo_buf, samplerate, fx)
+        # 轨内后段（混音期实时层）：推子 → automation → 声像
+        stereo_buf = apply_track_mix(np.asarray(buf, dtype=np.float32), tr, times)
 
         if target == "master" or not include_bus_processing:
             master += stereo_buf
