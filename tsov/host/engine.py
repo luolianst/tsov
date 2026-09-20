@@ -49,11 +49,16 @@ class HostEngine:
     # 离线渲染
     # ------------------------------------------------------------------
 
-    def render(self, session: HostSession, out_wav=None, stereo: bool = False) -> np.ndarray:
-        """音轨图 → 音频（默认 mono；stereo=True 走总线混音立体声）；out_wav 给定时同时写 WAV。"""
+    def render(self, session: HostSession, out_wav=None, stereo: bool = False,
+               cache=None, stats: dict | None = None, on_progress=None) -> np.ndarray:
+        """音轨图 → 音频（默认 mono；stereo=True 走总线混音立体声）；out_wav 给定时同时写 WAV。
+
+        - `cache`（ADR-0018）：轨道级 freeze 库（命中即读、未命中渲后入库）；stats/on_progress 供进度上报
+        """
         from .mix import render_buses
 
-        audio = render_buses(session, samplerate=self.samplerate, stereo=stereo)
+        audio = render_buses(session, samplerate=self.samplerate, stereo=stereo,
+                             cache=cache, stats=stats, on_progress=on_progress)
         if out_wav:
             write_wav(audio, out_wav, samplerate=self.samplerate)
         return audio

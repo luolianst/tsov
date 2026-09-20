@@ -38,8 +38,9 @@ def export_matrix(
     stems: bool = True,
     midi: bool = True,
     midi_stems: bool = False,
+    cache=None,
 ) -> dict:
-    """导出矩阵 → 报告 dict（含全部产物路径清单 `files`）。"""
+    """导出矩阵 → 报告 dict（含全部产物路径清单 `files`）。cache：ADR-0018 stem 库（可选）。"""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     sr = int(samplerate or session.samplerate)
@@ -47,7 +48,7 @@ def export_matrix(
     report: dict = {"out_dir": str(out), "samplerate": sr, "stereo": bool(stereo), "files": []}
 
     # 统一缩放系数（探针 = full mix；auto_scale=False 拿原始峰值）
-    probe = render_buses(session, sr, stereo=stereo, auto_scale=False)
+    probe = render_buses(session, sr, stereo=stereo, auto_scale=False, cache=cache)
     peak = float(np.max(np.abs(probe))) if probe.size else 0.0
     scale = (1.0 / peak) if peak > 1.0 else 1.0
     report["scale"] = round(scale, 6)
@@ -63,7 +64,7 @@ def export_matrix(
         for name in names:
             audio = render_buses(
                 session, sr, stereo=stereo, only_bus=name,
-                include_master_processing=False, auto_scale=False,
+                include_master_processing=False, auto_scale=False, cache=cache,
             )
             path = write_wav(audio * scale, out / "buses" / f"{_slug(name, 'bus')}.wav", sr)
             report["buses"][name] = path
@@ -74,7 +75,7 @@ def export_matrix(
         for i, ht in enumerate(session.tracks):
             audio = render_buses(
                 session, sr, stereo=stereo, only_track=i,
-                include_bus_processing=False, include_master_processing=False, auto_scale=False,
+                include_bus_processing=False, include_master_processing=False, auto_scale=False, cache=cache,
             )
             path = write_wav(audio * scale, out / "stems" / f"{i:02d}-{_slug(ht.track.name, 'track')}.wav", sr)
             report["stems"][ht.track.name or f"track-{i}"] = path
