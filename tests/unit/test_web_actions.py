@@ -65,46 +65,10 @@ def test_impact_of_notes_mix_and_noop():
     assert impact_of(a.to_dict(), None)["text"] == ""
 
 
-def test_action_journal_roundtrip_and_gc():
-    """批B B1-2：快照日志——内容寻址/持久/失效标记/窗口淘汰+GC。"""
-    import uuid
-    from pathlib import Path
+def test_action_journal_shim_reexport():
+    """M-V7 D2：ActionJournal 已下沉 host/journal.py；web_actions 保留旧导入路径（兼容层）。"""
+    from tsov.host.journal import ActionJournal as HostJournal
 
-    from tsov.web_actions import ActionJournal
+    from tsov.web_actions import ActionJournal as ShimJournal
 
-    from unit._cleanup import rmtree_force
-
-    d = Path("output") / f"acttest-{uuid.uuid4().hex[:10]}"
-    d.mkdir(parents=True, exist_ok=True)
-    try:
-        n1 = _note(0.0, 0.5, 60)
-        s1 = _score(0.8, [n1]).to_dict()
-        s2 = _score(0.65, [n1]).to_dict()
-        j = ActionJournal(d)
-        h1, h2 = j.snapshot(s1), j.snapshot(s2)
-        assert h1 and h2 and h1 != h2
-        assert (d / ".agent-actions" / f"{h1}.json").is_file()
-        e = j.append(session_id="s", turn=1, tool="set_track_mix", args="轨 melody · 音量 0.65",
-                     pre=h1, post=h2, impact={"text": "melody：音量 0.80→0.65"})
-        assert e["seq"] == 1 and e["label"] == "调音量/声像"
-
-        # 重新打开 → 条目与快照可读（持久化）
-        j2 = ActionJournal(d)
-        got = j2.get(1)
-        assert got and got["tool"] == "set_track_mix"
-        assert j2.load(got["pre"])["tracks"][0]["instrument"]["volume"] == 0.8
-        assert j2.load(got["post"])["tracks"][0]["instrument"]["volume"] == 0.65
-
-        # 失效标记持久
-        j2.mark_stale_from(1)
-        assert ActionJournal(d).get(1)["stale"] is True
-
-        # 窗口淘汰：超 MAX_ENTRIES → 只留最近 N 条
-        for _ in range(ActionJournal.MAX_ENTRIES + 3):
-            j2.append(session_id="s", turn=2, tool="set_tempo", args="♩=180",
-                      pre=h1, post=h2, impact={"text": "♩200→180"})
-        j3 = ActionJournal(d)
-        assert len(j3.entries) == ActionJournal.MAX_ENTRIES
-        assert j3.entries[0]["seq"] > 1
-    finally:
-        rmtree_force(d)
+    assert ShimJournal is HostJournal

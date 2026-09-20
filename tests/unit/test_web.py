@@ -131,21 +131,23 @@ def test_batch_transpose_undo_redo_rollback(env):
     _make_project(env)
     c = env["client"]
 
+    log0 = c.get("/api/projects/p1/log").json()["log"]
+
     r = c.post("/api/projects/p1/batch", json={
         "label": "+2", "commands": [{"op": "transpose", "track": 0, "index": None, "value": 2}],
         "commit_message": "第一轮：+2",
     })
     assert r.status_code == 200
     body = r.json()
-    assert body["applied"] == 1 and body["commit"]
+    assert body["applied"] == 1 and body["commit"] is None and body["seq"] == 1   # M-V7 D2：零 commit
     assert body["diff"]["total"] >= 1  # 全部音高变化 → added/removed 或 changed
 
     state = c.get("/api/projects/p1/state").json()
     assert state["history"]["can_undo"] is True
-    assert any("第一轮" in ln for ln in state["git_log"])
+    assert c.get("/api/projects/p1/log").json()["log"] == log0      # 编辑不落 git
     assert state["score"]["tracks"][0]["notes"][0]["pitch_midi"] == 62
 
-    # undo → 回到 60；redo → 62
+    # undo → 回到 60；redo → 62（窗口游标，零 commit）
     assert c.post("/api/projects/p1/undo").json()["ok"] is True
     assert c.get("/api/projects/p1/state").json()["score"]["tracks"][0]["notes"][0]["pitch_midi"] == 60
     assert c.post("/api/projects/p1/redo").json()["ok"] is True
@@ -157,12 +159,15 @@ def test_batch_transpose_undo_redo_rollback(env):
     r = c.post("/api/projects/p1/undo")
     assert r.status_code == 400
 
-    # 第二轮（此刻谱在 60）→ 63；rollback HEAD~1 → 回到 +2 版本（62）
+    # redo 回 62 → 收藏（git 点）→ 第二轮 +3 至 65 → 再收藏 → rollback HEAD~1 回到 62
+    assert c.post("/api/projects/p1/redo").json()["ok"] is True
+    assert c.get("/api/projects/p1/state").json()["score"]["tracks"][0]["notes"][0]["pitch_midi"] == 62
+    assert c.post("/api/projects/p1/favorite").json()["ok"] is True
     c.post("/api/projects/p1/batch", json={
         "label": "+3", "commands": [{"op": "transpose", "track": 0, "index": None, "value": 3}],
     })
-    before = c.get("/api/projects/p1/state").json()["score"]["tracks"][0]["notes"][0]["pitch_midi"]
-    assert before == 63
+    assert c.get("/api/projects/p1/state").json()["score"]["tracks"][0]["notes"][0]["pitch_midi"] == 65
+    assert c.post("/api/projects/p1/favorite").json()["ok"] is True
     r = c.post("/api/projects/p1/rollback", json={"rev": "HEAD~1"})
     assert r.status_code == 200
     assert c.get("/api/projects/p1/state").json()["score"]["tracks"][0]["notes"][0]["pitch_midi"] == 62
@@ -259,19 +264,20 @@ def test_chat_agent_round_trip(env, monkeypatch):
         time.sleep(0.05)
     assert Path(body["session_path"]).is_file()
 
-    # 等 agent 线程收尾（采用 + commit）
+    # 等 agent 线程收尾（采用结果落盘；M-V7 D2：零 commit → 以 state 变化为信号）
     deadline = time.time() + 10
     while time.time() < deadline:
-        log = c.get(f"/api/projects/{name}/log").json()["log"]
-        if any("agent：" in ln for ln in log):
+        st_ = c.get(f"/api/projects/{name}/state").json()
+        if st_["score"]["tracks"][0]["notes"][0]["pitch_midi"] == 74:
             break
         time.sleep(0.1)
 
-    log = c.get(f"/api/projects/{name}/log").json()["log"]
-    assert any("agent：" in ln for ln in log)
     state = c.get(f"/api/projects/{name}/state").json()
     assert state["score"]["tracks"][0]["notes"][0]["pitch_midi"] == 74
     assert state["history"]["can_undo"] is True
+    assert not any("agent：" in ln for ln in state["git_log"])       # 编辑零 commit
+    win = c.get(f"/api/projects/{name}/window").json()              # 快照窗口有 agent 条目
+    assert win["entries"] and any(e["source"] == "agent" for e in win["entries"])
 
     # 撤销本轮 → 回 60
     assert c.post(f"/api/projects/{name}/undo").json()["ok"] is True
@@ -413,7 +419,9 @@ def test_project_title_rename(env):
     assert r.status_code == 200 and r.json()["ok"]
     s = c.get(f"/api/projects/{name}/state").json()
     assert s["score"]["title"] == "新的标题"
-    assert any("改名" in ln for ln in s["git_log"])
+    assert not any("改名" in ln for ln in s["git_log"])               # M-V7 D2：零 commit
+    win = c.get(f"/api/projects/{name}/window").json()                # 改为快照窗口条目
+    assert any("改名" in e["label"] for e in win["entries"])
     # undo 可回标题
     assert c.post(f"/api/projects/{name}/undo").json()["ok"] is True
     assert c.get(f"/api/projects/{name}/state").json()["score"]["title"] != "新的标题"
@@ -458,6 +466,8 @@ def test_render_old_rev_and_wav_rev(env):
     proj_root = env["dir"] / name
     r = c.post(f"/api/projects/{name}/batch", json={"label": "+2", "commands": [{"op": "transpose", "track": 0, "index": None, "value": 2}]})
     assert r.status_code == 200
+    rf = c.post(f"/api/projects/{name}/favorite")          # M-V7 D2：编辑零 commit，收藏产生新版本
+    assert rf.status_code == 200 and rf.json()["ok"]
     log = c.get(f"/api/projects/{name}/log").json()["log"]
     head = log[0].split(" ")[0]
 
@@ -511,6 +521,88 @@ def test_stem_cache_hit_and_gc(env):
     assert ".render-cache" in g["legacy_removed"] and not (proj_root / ".render-cache").exists()
 
 
+# ---------------------------------------------------------------------------
+# M-V7 D2：留存双账本（快照窗口 / 自动收藏 / 设置）
+# ---------------------------------------------------------------------------
+
+
+def test_retention_autofavorite_threshold_and_reset(env):
+    """M-V7 D2（ADR-0019）：迭代计数 → 阈值自动收藏（fav/<ts>-auto）+ 清零；未达阈值不收藏、无改动不空收。"""
+    from tsov.host.state import ProjectState
+    from tsov.web import _retention_tick
+
+    name = _make_project(env)
+    proj_root = env["dir"] / name
+    c = env["client"]
+    ws_state = env["app"].state.tsov          # 与接口同一 WebState（钩子同源）
+
+    # 轮末累计 2 轮 → 只计数（默认阈值 40）
+    _retention_tick(ws_state, name, agent_turns=2)
+    assert ProjectState(proj_root).counter == 2
+
+    # 阈值降为 3（工程档）→ 再来 1 轮（3 ≥ 3）但无改动 → 不空收、计数保留
+    ps = ProjectState(proj_root)
+    ps.data["settings"] = {"auto_favorite_iters": 3}
+    ps.save()
+    _retention_tick(ws_state, name, agent_turns=1)
+    assert ProjectState(proj_root).counter == 3
+    assert not any("自动收藏" in ln for ln in c.get(f"/api/projects/{name}/log").json()["log"])
+
+    # 产生改动（/batch 自带留存检查）→ 自动收藏 + 清零 + tag -auto
+    r = c.post(f"/api/projects/{name}/batch", json={
+        "label": "改", "commands": [{"op": "transpose", "track": 0, "index": None, "value": 1}]})
+    assert r.status_code == 200
+    log = c.get(f"/api/projects/{name}/log").json()["log"]
+    assert any("自动收藏" in ln for ln in log)
+    favs = c.get(f"/api/projects/{name}/favorites").json()["favorites"]
+    assert any(f["tag"].endswith("-auto") for f in favs)
+    assert ProjectState(proj_root).counter == 0
+
+
+def test_window_and_settings_endpoints(env, monkeypatch):
+    """M-V7 D2：/window（条目+游标）与 /settings（工程档读写 + 合成视图）。"""
+    monkeypatch.setattr("tsov.host.state.global_settings_path",
+                        lambda: env["dir"] / "no-such-global.json")   # 隔离真实全局档
+
+    name = _make_project(env)
+    c = env["client"]
+
+    c.post(f"/api/projects/{name}/batch", json={"label": "+1", "commands": [{"op": "transpose", "track": 0, "index": None, "value": 1}]})
+    c.post(f"/api/projects/{name}/batch", json={"label": "+2", "commands": [{"op": "transpose", "track": 0, "index": None, "value": 1}]})
+    win = c.get(f"/api/projects/{name}/window").json()
+    assert [e["label"] for e in win["entries"]] == ["+1", "+2"]
+    assert win["cursor"] == 2 and win["can_undo"] and not win["can_redo"]
+    assert win["windows"] == {"user": 20, "agent_rounds": 5}
+    assert all(e["source"] == "user" for e in win["entries"])
+
+    # settings：默认 40 / 定时关；写工程档 → 合成视图立即反映；深合并不打掉兄弟字段
+    s0 = c.get(f"/api/projects/{name}/settings").json()
+    assert s0["settings"]["auto_favorite_iters"] == 40
+    assert s0["settings"]["timed_favorite"]["enabled"] is False
+    r = c.post(f"/api/projects/{name}/settings", json={"auto_favorite_iters": 7})
+    assert r.status_code == 200 and r.json()["settings"]["auto_favorite_iters"] == 7
+    c.post(f"/api/projects/{name}/settings", json={"timed_favorite": {"interval_min": 5}})
+    s1 = c.get(f"/api/projects/{name}/settings").json()["settings"]
+    assert s1["timed_favorite"]["interval_min"] == 5 and s1["timed_favorite"]["enabled"] is False
+    assert (env["dir"] / name / ".tsov-state.json").is_file()
+
+
+def test_settings_global_file(env, monkeypatch):
+    """M-V7 D2：全局档（跨工程）写入 + 合成优先级（工程档 > 全局档 > 默认）。"""
+    gpath = env["dir"] / "gsettings.json"
+    monkeypatch.setattr("tsov.host.state.global_settings_path", lambda: gpath)
+
+    name = _make_project(env)
+    c = env["client"]
+    r = c.post("/api/settings", json={"auto_favorite_iters": 21})
+    assert r.status_code == 200
+    assert gpath.is_file()                                     # 全局档已落盘
+    assert c.get(f"/api/projects/{name}/settings").json()["settings"]["auto_favorite_iters"] == 21
+    # 工程档覆盖全局档
+    c.post(f"/api/projects/{name}/settings", json={"auto_favorite_iters": 5})
+    assert c.get(f"/api/projects/{name}/settings").json()["settings"]["auto_favorite_iters"] == 5
+
+
 def test_chat_accepts_base_rev(env, monkeypatch):
     """chat 带 base_rev：路由接受并注入 fake stream 可见（不阻塞，只验证不 422）。"""
     name = _make_project(env)
@@ -548,7 +640,7 @@ def _install_final_only_stream(monkeypatch, seen: dict):
 
 
 def test_chat_annotations_applied_before_agent(env, monkeypatch):
-    """M-V3：chat 带 annotations → 确定性先行应用（独立 commit）+ brief 注入（不得回退）+ 选区上下文。"""
+    """M-V3 + M-V7 D2：chat 带 annotations → 确定性先行应用（快照窗口条目，零 commit）+ brief 注入（不得回退）+ 选区上下文。"""
     name = _make_project(env)
     seen: dict = {}
     _install_final_only_stream(monkeypatch, seen)
@@ -561,11 +653,13 @@ def test_chat_annotations_applied_before_agent(env, monkeypatch):
     assert r.status_code == 200
     assert _wait_agent_done(env, name)
 
-    # 标注已确定性应用：score 更新 + 独立 commit
+    # 标注已确定性应用：score 更新 + 快照窗口条目（M-V7 D2：零 commit）
     state = env["client"].get(f"/api/projects/{name}/state").json()
     assert state["score"]["tracks"][0]["notes"][0]["pitch_midi"] == 74
     log = env["client"].get(f"/api/projects/{name}/log").json()["log"]
-    assert any("人工标注" in ln for ln in log), log
+    assert not any("人工标注" in ln for ln in log), log
+    win = env["client"].get(f"/api/projects/{name}/window").json()
+    assert any("人工标注" in e["label"] for e in win["entries"])
     # brief 注入：标注已应用（不得回退）+ 选区上下文
     assert "messages" in seen, "agent 会话应已启动"
     brief = "\n".join(str(m.get("content", "")) for m in seen["messages"] if m.get("role") == "user")
@@ -739,12 +833,13 @@ def test_export_matrix_endpoint(env):
 
 
 def test_agent_actions_list_and_undo(env):
-    """批B B1-2：动作日志列表 + 动作级撤销（快照恢复 → 一条"撤销动作" commit）。"""
-    from tsov.web_actions import ActionJournal
+    """批B B1-2 + M-V7 D2：动作日志列表 + 动作级撤销（窗口回跳，零 commit；后续置灰）。"""
+    from tsov.host.journal import ActionJournal
 
     c = env["client"]
     c.post("/api/projects", json={"name": "actproj"})
     d = env["dir"] / "actproj"
+    log0 = c.get("/api/projects/actproj/log").json()["log"]
 
     # 模拟一次 agent 写动作：pre = 当前谱，post = 音量 0.65 的谱
     before = json.loads((d / "score.json").read_text(encoding="utf-8"))
@@ -752,28 +847,31 @@ def test_agent_actions_list_and_undo(env):
     after["tracks"][0]["instrument"]["volume"] = 0.65
     j = ActionJournal(d)
     h1, h2 = j.snapshot(before), j.snapshot(after)
-    j.append(session_id="s1", turn=1, tool="set_track_mix", args="轨 melody · 音量 0.65",
+    j.append(source="agent", label="调音量/声像", session_id="s1", turn=1, round="s1:1",
+             tool="set_track_mix", args="轨 melody · 音量 0.65",
              pre=h1, post=h2, impact={"text": "melody：音量 0.80→0.65"})
-    # 工程当前状态 = 动作后（走命令层，模拟"已采用"）
+    # 工程当前状态 = 动作后（走命令层，模拟"已采用"；这条 /batch 也进窗口）
     r = c.post("/api/projects/actproj/batch", json={
         "label": "sim", "commands": [{"op": "set_track_mix", "track": 0, "value": {"volume": 0.65}}],
-        "commit_message": "模拟动作后状态",
     })
     assert r.status_code == 200
 
     lst = c.get("/api/projects/actproj/agent-actions").json()["entries"]
-    assert len(lst) == 1 and lst[0]["seq"] == 1 and lst[0]["tool"] == "set_track_mix"
+    agent_rows = [e for e in lst if e["source"] == "agent"]
+    assert len(agent_rows) == 1 and agent_rows[0]["seq"] == 1 and agent_rows[0]["tool"] == "set_track_mix"
 
-    # 撤销 → 恢复 pre 快照（音量回 0.8）
+    # 撤销 → 窗口回跳恢复 pre 快照（音量回初始）；零 commit
     r2 = c.post("/api/projects/actproj/agent-actions/1/undo")
     assert r2.status_code == 200, r2.text
     body = r2.json()
-    assert body["ok"] is True and body["commit"]
+    assert body["ok"] is True and body["commit"] is None
     init_vol = float(before["tracks"][0]["instrument"]["volume"])
     st = c.get("/api/projects/actproj/state").json()
     assert abs(float(st["score"]["tracks"][0]["instrument"]["volume"]) - init_vol) < 1e-9
     # 日志里已标记失效
     lst2 = c.get("/api/projects/actproj/agent-actions").json()["entries"]
     assert lst2[0]["stale"] is True and lst2[0]["undone"] is True
+    # git log 不因编辑/撤销增长（M-V7 D2：零 commit）
+    assert c.get("/api/projects/actproj/log").json()["log"] == log0
     # 不存在的动作 → 404
     assert c.post("/api/projects/actproj/agent-actions/99/undo").status_code == 404
