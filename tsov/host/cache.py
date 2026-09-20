@@ -16,9 +16,28 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-CACHE_VERSION = 1          # 指纹口径版本（改口径时 +1 → 旧键自然失效）
+CACHE_VERSION = 2          # 手动口径版本（语义变更时 +1；自动失效见 CODE_FP）
 DIRNAME = ".stem-cache"
 LEGACY_DIRS = (".render-cache",)   # 退役目录（GC 时清理）
+
+
+def _code_fingerprint() -> str:
+    """渲染路径源码指纹（自动失效）：相关模块改任一字节 → 全部旧茎自然失效。
+
+    教训（M-V7 D4）：只靠人工 CACHE_VERSION 会漏 bump——D1 迭代中间态的旧茎被
+    静默命中（8.3e-3 级音差，见 `docs/M-V7-验收.md` §5.3）。自动指纹把
+    「记得 bump」从纪律变成机制。
+    """
+    h = hashlib.sha256()
+    base = Path(__file__).parent
+    for name in ("mix.py", "effect.py", "instrument.py", "engine.py", "cache.py"):
+        p = base / name
+        if p.is_file():
+            h.update(p.read_bytes())
+    return h.hexdigest()[:12]
+
+
+CODE_FP = _code_fingerprint()   # 模块加载时计算一次
 
 
 def track_key(track, samplerate: int) -> str:
@@ -26,6 +45,7 @@ def track_key(track, samplerate: int) -> str:
     inst = track.instrument
     payload = {
         "v": CACHE_VERSION,
+        "code": CODE_FP,
         "sr": int(samplerate),
         "backend": str(inst.backend),
         "program": str(inst.program),

@@ -64,6 +64,18 @@ def test_track_key_stability_and_invalidation():
     assert track_key(t, 22050) != k0                                     # 采样率入键
 
 
+def test_track_key_includes_code_fingerprint(monkeypatch):
+    """自动失效（M-V7 D4 发现①）：渲染路径源码指纹入键——改代码即全库失效。"""
+    from tsov.host import cache as cache_mod
+
+    t = _track(pitches=(60, 62))
+    k0 = track_key(t, SR)
+    assert isinstance(cache_mod.CODE_FP, str) and len(cache_mod.CODE_FP) == 12   # sha256[:12]
+    # 模拟"渲染代码变了" → 指纹变 → 键变（无需人工 bump）
+    monkeypatch.setattr(cache_mod, "CODE_FP", "deadbeef0000")
+    assert track_key(t, SR) != k0
+
+
 def test_stem_store_roundtrip_and_gc():
     """stem 库：float32 无声损往返；GC 保留引用、清理孤儿与退役目录。"""
     ws = _ws()
