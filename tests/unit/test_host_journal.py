@@ -92,6 +92,25 @@ def test_dual_windows_and_gc():
         rmtree_force(ws)
 
 
+def test_jump_to_cursor():
+    """快照点跳转（M-V7 D3）：任意位置恢复 + 越界钳制 + 缺失不动游标。"""
+    ws = _ws()
+    try:
+        j = ActionJournal(ws)
+        h0 = j.snapshot({"step": 0})
+        h1 = j.snapshot({"step": 1})
+        j.append(source="user", label="a", pre=h0, post=h1)
+        j.append(source="user", label="b", pre=h1, post=j.snapshot({"step": 2}))
+        r = j.jump_to_cursor(0)
+        assert r["cursor"] == 0 and r["snapshot"]["step"] == 0
+        r = j.jump_to_cursor(2)
+        assert r["cursor"] == 2 and r["snapshot"]["step"] == 2
+        assert j.jump_to_cursor(99)["cursor"] == 2          # 越界钳制到尾
+        assert ActionJournal(ws).cursor == 2                 # 持久化
+    finally:
+        rmtree_force(ws)
+
+
 def test_legacy_index_migration():
     """pre-D2 裸列表格式 index.json → 可读（老条目视为 agent，游标置尾）。"""
     ws = _ws()

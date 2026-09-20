@@ -603,6 +603,37 @@ def test_settings_global_file(env, monkeypatch):
     assert c.get(f"/api/projects/{name}/settings").json()["settings"]["auto_favorite_iters"] == 5
 
 
+def test_window_jump_and_favorite_delete(env):
+    """M-V7 D3：窗口跳转端点（零 commit 恢复快照点）+ 收藏删除端点。"""
+    name = _make_project(env)
+    c = env["client"]
+    log0 = c.get(f"/api/projects/{name}/log").json()["log"]
+
+    c.post(f"/api/projects/{name}/batch", json={"label": "+1", "commands": [{"op": "transpose", "track": 0, "index": None, "value": 1}]})
+    c.post(f"/api/projects/{name}/batch", json={"label": "+2", "commands": [{"op": "transpose", "track": 0, "index": None, "value": 1}]})
+    assert c.get(f"/api/projects/{name}/state").json()["score"]["tracks"][0]["notes"][0]["pitch_midi"] == 62
+
+    # 跳到 #0（窗口起点）→ 60；跳回 #2 → 62；全程零 commit
+    r = c.post(f"/api/projects/{name}/window/jump", json={"cursor": 0})
+    assert r.status_code == 200 and r.json()["cursor"] == 0
+    assert c.get(f"/api/projects/{name}/state").json()["score"]["tracks"][0]["notes"][0]["pitch_midi"] == 60
+    r = c.post(f"/api/projects/{name}/window/jump", json={"cursor": 2})
+    assert r.status_code == 200 and r.json()["can_undo"] is True
+    assert c.get(f"/api/projects/{name}/state").json()["score"]["tracks"][0]["notes"][0]["pitch_midi"] == 62
+    assert c.get(f"/api/projects/{name}/log").json()["log"] == log0     # 零 commit
+    # 空工程/越界行为：越界→钳制，故改用不存在工程路径验证 404 不需；这里验证坏工程名 404
+    assert c.post("/api/projects/no_such/window/jump", json={"cursor": 0}).status_code == 404
+
+    # 收藏删除：建 → 列出 → 删 → 空；坏 tag → 400
+    assert c.post(f"/api/projects/{name}/favorite").json()["ok"] is True
+    favs = c.get(f"/api/projects/{name}/favorites").json()["favorites"]
+    assert len(favs) == 1
+    tag = favs[0]["tag"]
+    assert c.request("DELETE", f"/api/projects/{name}/favorites", params={"tag": tag}).json()["ok"] is True
+    assert c.get(f"/api/projects/{name}/favorites").json()["favorites"] == []
+    assert c.request("DELETE", f"/api/projects/{name}/favorites", params={"tag": "not-a-fav"}).status_code == 400
+
+
 def test_chat_accepts_base_rev(env, monkeypatch):
     """chat 带 base_rev：路由接受并注入 fake stream 可见（不阻塞，只验证不 422）。"""
     name = _make_project(env)
