@@ -62,11 +62,42 @@ export async function rerender() {
   } catch (e) { setError(e.message); }
 }
 
+/* M-V7 D1（ADR-0018）：松手即听——手势落盘后自动重拼混音（缓存命中为亚秒级），播放中位置保持续播 */
+let freshTimer = 0;
+
+export function scheduleFresh() {
+  clearTimeout(freshTimer);
+  freshTimer = setTimeout(ensureFresh, 400);
+}
+
+export async function ensureFresh() {
+  if (!store.project) return;
+  const a = ensureAudio();
+  const wasPlaying = store.playing === 'wav' && !a.paused;
+  const pos = a.currentTime || 0;
+  const t0 = performance.now();
+  try {
+    const r = await api.render(store.project);
+    const n = (r.rendered || []).length;
+    if (n > 0) toast('已重渲 ' + r.rendered.join('、') + '（' + Math.round(performance.now() - t0) + 'ms）');
+    a.src = api.wavUrl(store.project) + '?v=' + Date.now();
+    if (wasPlaying) {
+      a.addEventListener('loadedmetadata', () => {
+        try { a.currentTime = pos; a.play(); } catch (e) { /* 忽略 */ }
+      }, { once: true });
+    }
+  } catch (e) { /* 静默：失败不打扰（下次手动试听会重试） */ }
+}
+
 export function init(opts) {
   opts.playWavBtn.addEventListener('click', playWav);
   opts.stopBtn.addEventListener('click', stopWav);
   opts.playHostBtn.addEventListener('click', playHost);
   opts.renderBtn.addEventListener('click', rerender);
+
+  /* M-V7 D1：命令层落盘（手势/面板参数）→ 松手即听；渲染进度轻提示 */
+  bus.on('batch_applied', () => scheduleFresh());
+  bus.on('render_progress', (ev) => { if (ev && ev.state === 'render') toast('重渲 ' + ev.name + '…'); });
 
   /* SSE：后端播放事件驱动播放头动画 */
   bus.on('playback_start', (d) => {

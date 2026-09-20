@@ -95,6 +95,8 @@ async function openProject(name) {
       lanes.resizeNow();
     });
     toast('已打开工程 ' + name);
+    /* M-V7 D1：打开工程时做一次 stem 缓存 GC（无引用即清 + 清退役 .render-cache） */
+    api.cacheGc(name).catch(() => {});
   } catch (e) { setError(e.message); }
 }
 

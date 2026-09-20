@@ -25,6 +25,7 @@ export const bus = {
 const SSE_TYPES = [
   'agent_turn', 'agent_tool', 'agent_answer', 'agent_error', 'agent_delta',
   'state_updated', 'diff_applied', 'playback_start', 'playback_stop',
+  'render_progress', 'render_done',
 ];
 
 let current = null;   // EventSource

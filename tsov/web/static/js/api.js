@@ -1,6 +1,7 @@
 /* api.js —— REST 封装（docs/05 §三 全部接口；模块间只经本文件访问后端） */
 
 import { noteUserAction } from './state.js';
+import { bus } from './events.js';
 
 async function req(path, opts) {
   let res;
@@ -36,7 +37,11 @@ export const api = {
     return post('/api/projects/' + encodeURIComponent(name) + '/batch',
       { label: label || '', commands, commit_message: commitMessage || null }).then((r) => {
         /* 批B B1-4：成功落盘的用户手动操作 → 缓冲（下条消息回流给 agent） */
-        if (r && r.applied > 0) noteUserAction(desc);
+        if (r && r.applied > 0) {
+          noteUserAction(desc);
+          /* M-V7 D1：手势落盘成功 → 通知播放层「松手即听」（缓存重拼） */
+          bus.dispatch('batch_applied', { name });
+        }
         return r;
       });
   },
@@ -59,6 +64,8 @@ export const api = {
   actionUndo: (name, seq) =>
     post('/api/projects/' + encodeURIComponent(name) + '/agent-actions/' + encodeURIComponent(seq) + '/undo', {}),
   actions: (name) => req('/api/projects/' + encodeURIComponent(name) + '/agent-actions'),
+  /* M-V7 D1（ADR-0018）：stem 缓存 GC（无引用即清 + 清退役 .render-cache） */
+  cacheGc: (name) => post('/api/projects/' + encodeURIComponent(name) + '/cache/gc', {}),
   listSessions: () => req('/api/sessions'),
   loadSession: (project, name) => post('/api/sessions/load', { project, name }),
 
