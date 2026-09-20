@@ -675,6 +675,13 @@ body.chat-folded #rail-chat { display: flex; }
 .fav-item .fav-tag { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--muted); }
 .fav-none { color: var(--faint); font-size: var(--fs-md); }
 
+/* M-V7 D3：收藏来源标注 / 删除；版本留存设置行 */
+.fav-src { flex: none; font-size: var(--fs-xs); color: var(--accent); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; }
+.fav-del { margin-left: auto; border: 0; background: transparent; color: var(--faint); cursor: pointer; padding: 2px 6px; border-radius: 4px; font-size: var(--fs-sm); }
+.fav-del:hover { background: var(--bg-hover); color: #c0392b; }
+.set-row input[type="number"] { width: 64px; }
+.set-row input[type="checkbox"] { flex: none; }
+
 /* ---- dock「通道」页（选中轨 / 项目 profile） ---- */
 .chan { display: flex; align-items: center; gap: 16px; flex: 1; min-width: 0; flex-wrap: wrap; }
 .chan .ch-name { display: flex; align-items: center; gap: 6px; font-size: var(--fs-md); min-width: 0; }

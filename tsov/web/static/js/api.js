@@ -66,6 +66,14 @@ export const api = {
   actions: (name) => req('/api/projects/' + encodeURIComponent(name) + '/agent-actions'),
   /* M-V7 D1（ADR-0018）：stem 缓存 GC（无引用即清 + 清退役 .render-cache） */
   cacheGc: (name) => post('/api/projects/' + encodeURIComponent(name) + '/cache/gc', {}),
+  /* M-V7 D2/D3（ADR-0019）：快照窗口 / 留存设置 / 收藏删除 */
+  getWindow: (name) => req('/api/projects/' + encodeURIComponent(name) + '/window'),
+  windowJump: (name, cursor) => post('/api/projects/' + encodeURIComponent(name) + '/window/jump', { cursor }),
+  deleteFavorite: (name, tag) =>
+    req('/api/projects/' + encodeURIComponent(name) + '/favorites?tag=' + encodeURIComponent(tag), { method: 'DELETE' }),
+  getSettings: (name) => req('/api/projects/' + encodeURIComponent(name) + '/settings'),
+  setSettings: (name, patch) => post('/api/projects/' + encodeURIComponent(name) + '/settings', patch),
+  setGlobalSettings: (patch) => post('/api/settings', patch),
   listSessions: () => req('/api/sessions'),
   loadSession: (project, name) => post('/api/sessions/load', { project, name }),
 

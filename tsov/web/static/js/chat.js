@@ -5,7 +5,7 @@
 
 import { api } from './api.js';
 import { bus } from './events.js';
-import { store, setAgentBusy, clearDiff, toast, setError, clearAnnotations, refTag,
+import { store, setAgentBusy, clearDiff, toast, setError, clearAnnotations, refTag, favSource,
          setSelection, setSingleTrack, addAgentTracks, clearAgentTracks,
          peekUserActions, clearUserActions } from './state.js';
 
@@ -512,14 +512,69 @@ function wireEvents() {
 
 /* ---------------- 历史 / 会话控制 ---------------- */
 
-function refreshRollbackOptions() {
+/* M-V7 D3：回滚下拉两段式（+全部 git 版本折叠段）——#最近窗口（快照） / ★收藏（git） / git log。
+   代际守卫：并发刷新（短时间内多次 state 事件）时丢弃过期帧，防组重复渲染。 */
+let rollbackGen = 0;
+async function refreshRollbackOptions() {
+  const gen = ++rollbackGen;
   rollbackSel.innerHTML = '';
-  store.gitLog.forEach((line, i) => {
-    const opt = document.createElement('option');
-    opt.value = line.split(' ')[0];
-    opt.textContent = line.length > 40 ? line.slice(0, 40) + '…' : line;
-    rollbackSel.appendChild(opt);
-  });
+  if (!store.project) return;
+
+  // 段一：最近窗口（快照）——弱留存，零新版本恢复
+  try {
+    const w = await api.getWindow(store.project);
+    if (gen !== rollbackGen) return;   // 过期帧
+    const entries = w.entries || [];
+    if (entries.length) {
+      const g = document.createElement('optgroup');
+      g.label = '最近窗口（快照）';
+      for (let k = entries.length; k >= 1; k--) {
+        const e = entries[k - 1];
+        const opt = document.createElement('option');
+        opt.value = 'win:' + k;
+        opt.textContent = '#' + k + ' ' + (e.label || e.tool || '编辑')
+          + ((typeof w.cursor === 'number' && k === w.cursor) ? '（当前）' : '')
+          + (e.stale ? ' · 已失效' : '');
+        g.appendChild(opt);
+      }
+      const opt0 = document.createElement('option');
+      opt0.value = 'win:0';
+      opt0.textContent = '#0 窗口起点（保留窗口内最早状态）';
+      g.appendChild(opt0);
+      rollbackSel.appendChild(g);
+    }
+  } catch (e) { /* 窗口不可读不阻塞其余段 */ }
+
+  // 段二：收藏（git）——强留存，来源标注
+  try {
+    const r = await api.favorites(store.project);
+    if (gen !== rollbackGen) return;   // 过期帧
+    const favs = r.favorites || [];
+    if (favs.length) {
+      const g = document.createElement('optgroup');
+      g.label = '收藏（git）';
+      for (const f of favs) {
+        const opt = document.createElement('option');
+        opt.value = 'rev:' + f.tag;
+        opt.textContent = '★ ' + favSource(f.tag) + ' · ' + String(f.tag).replace(/^fav\//, '');
+        g.appendChild(opt);
+      }
+      rollbackSel.appendChild(g);
+    }
+  } catch (e) { /* 忽略 */ }
+
+  // 段三：全部 git 版本（log）——缺省折叠在最后
+  if ((store.gitLog || []).length) {
+    const g = document.createElement('optgroup');
+    g.label = '全部 git 版本';
+    store.gitLog.forEach((line) => {
+      const opt = document.createElement('option');
+      opt.value = 'rev:' + line.split(' ')[0];
+      opt.textContent = line.length > 40 ? line.slice(0, 40) + '…' : line;
+      g.appendChild(opt);
+    });
+    rollbackSel.appendChild(g);
+  }
 }
 
 async function doNewSession() {
@@ -619,18 +674,27 @@ export function init(opts) {
   undoRoundBtn.addEventListener('click', async () => {
     if (!store.project) return;
     try {
-      await api.undo(store.project);
+      await api.undo(store.project);   // M-V7 D2/D3：窗口游标撤销（零 commit）
       clearDiff();
-      toast('已撤销本轮');
+      toast('已撤销一步（快照窗口）');
     } catch (e) { setError(e.message); }
   });
 
   rollbackBtn.addEventListener('click', async () => {
-    if (!store.project || !rollbackSel.value) { setError('先选一个版本'); return; }
+    const v = rollbackSel.value;
+    if (!store.project || !v) { setError('先选一个恢复点'); return; }
     try {
-      await api.rollback(store.project, rollbackSel.value);
-      clearDiff();
-      toast('已回滚到 ' + rollbackSel.value);
+      if (v.startsWith('win:')) {
+        // M-V7 D3：窗口段 = 快照点恢复（零新版本）
+        const k = parseInt(v.slice(4), 10);
+        await api.windowJump(store.project, k);
+        clearDiff();
+        toast('已恢复到快照 #' + k + '（窗口内 · 零新版本）');
+      } else {
+        await api.rollback(store.project, v.slice(4));
+        clearDiff();
+        toast('已回滚到 ' + v.slice(4));
+      }
     } catch (e) { setError(e.message); }
   });
 

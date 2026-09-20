@@ -59,6 +59,14 @@ export function refTag(r) {
   return (s === 0 || s) ? '@#' + s : '';
 }
 
+/* M-V7 D3：收藏 tag → 来源标注（手动 / 自动·迭代 / 自动·定时） */
+export function favSource(tag) {
+  const t = String(tag || '');
+  if (t.endsWith('-auto')) return '自动·迭代';
+  if (t.endsWith('-time')) return '自动·定时';
+  return '手动';
+}
+
 /* 用 GET state / state_updated 事件的数据装载 store（保持选区不闪断） */
 export function setState(s, opts) {
   const keep = (opts && opts.preserveSelection) ? store.selection : null;

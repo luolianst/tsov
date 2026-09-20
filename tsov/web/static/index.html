@@ -57,8 +57,8 @@
   </div>
 
   <div class="group editor-group">
-    <button id="btn-undo" title="撤销一步（快照栈）">↩</button>
-    <button id="btn-redo" title="重做">↪</button>
+    <button id="btn-undo" title="撤销一步（快照窗口 · 零新版本）">↩</button>
+    <button id="btn-redo" title="重做（快照窗口）">↪</button>
     <span class="tb-sep"></span>
     <button id="btn-zoom-out" title="缩小时间轴">−</button>
     <button id="btn-zoom-in" title="放大时间轴">＋</button>
@@ -86,9 +86,18 @@
           </div>
         </div>
         <div class="set-group"><div class="sg-t">版本留存</div>
-          <div class="set-hint">弱留存：用户操作 20 步 · 每轮对话 5 轮（滑动窗口自动清理）</div>
-          <div class="set-hint">强留存：★ 收藏版本（永久）· 长任务完成自动收藏</div>
-          <div class="set-hint muted">（机制重设计中 → docs/待办-机制重设计-2026-09-18.md）</div>
+          <div class="set-row"><label>自动收藏</label>
+            <input id="set-rt-iters" type="number" min="1" max="9999" step="1" title="迭代阈值（轮）">
+            <span class="muted small">轮迭代后自动收藏</span>
+          </div>
+          <div class="set-row"><label>定时档</label>
+            <input id="set-rt-timer" type="checkbox" title="开启定时自动收藏">
+            <input id="set-rt-min" type="number" min="1" max="1440" step="1" title="间隔（分钟）">
+            <span class="muted small">分钟（只收有改动）</span>
+          </div>
+          <div class="set-row"><label>当前计数</label><span class="muted small" id="set-rt-count">-</span></div>
+          <div class="set-hint">弱留存：用户 20 步 / 对话 5 轮滑动窗口 · 强留存：★ 收藏 / 自动收藏（改动即存·本工程）</div>
+          <div class="set-row"><button id="set-rt-apply-all" class="fav-del" style="margin-left:0;border:1px solid var(--border);" title="把当前阈值/定时档写入全局档，对所有工程生效">应用到全部工程…</button></div>
         </div>
         <div class="set-foot">改动即生效 · 无需保存</div>
       </div>
@@ -157,9 +166,9 @@
       <button id="btn-send">发送</button>
     </div>
     <div id="chat-actions">
-      <button id="btn-undo-round" title="撤销最近一轮（快照栈/工程 git）">撤销本轮</button>
-      <select id="rollback-select" title="选择要回滚到的版本"></select>
-      <button id="btn-rollback" title="git 检出选定版本">回滚</button>
+      <button id="btn-undo-round" title="撤销一步（快照窗口；用户 20 步 / 对话 5 轮内，零新版本）">撤销一步</button>
+      <select id="rollback-select" title="选择恢复点：最近窗口（快照）/ 收藏（git）/ 全部 git 版本"></select>
+      <button id="btn-rollback" title="恢复：窗口段=快照恢复（零新版本）；收藏/git 段=检出该版本">恢复/回滚</button>
       <button id="btn-clear-diff" title="清除三色 diff 叠层">清除 diff</button>
     </div>
   </aside>

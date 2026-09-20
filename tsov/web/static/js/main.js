@@ -2,7 +2,7 @@
 
 import { api } from './api.js';
 import { bus, connectEvents } from './events.js';
-import { store, setState, setError, toast, fitView, setView, clearDiff, setAnnotations, clearAnnotations, setSnap, setViewMode, setSingleTrack, fitViewTrack, refTag } from './state.js';
+import { store, setState, setError, toast, fitView, setView, clearDiff, setAnnotations, clearAnnotations, setSnap, setViewMode, setSingleTrack, fitViewTrack, refTag, favSource } from './state.js';
 import * as roll from './roll.js';
 import * as timeline from './timeline.js';
 import * as dock from './dock.js';
@@ -218,7 +218,7 @@ function boot() {
     pop.hidden = !show;
   }
   $('btn-menu-file').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(menuFile); });
-  $('btn-menu-set').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(menuSet); });
+  $('btn-menu-set').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(menuSet); if (!menuSet.hidden) loadRetentionSet(); });
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.menu-pop') && !e.target.closest('.menu-btn')) closeMenus(null);
   });
@@ -230,7 +230,7 @@ function boot() {
   $('mi-export').addEventListener('click', () => { closeMenus(null); openExport(); });
   $('mi-fav').addEventListener('click', () => { closeMenus(null); doFavorite(); });
   $('mi-fav-restore').addEventListener('click', () => { closeMenus(null); openFavDlg(); });
-  $('mi-settings').addEventListener('click', () => { closeMenus(null); menuSet.hidden = false; });
+  $('mi-settings').addEventListener('click', () => { closeMenus(null); menuSet.hidden = false; loadRetentionSet(); });
 
   /* ---- 主题（◐ 与设置菜单同步） ---- */
   $('btn-theme').addEventListener('click', () => { setTheme(themeName() === 'dark' ? 'light' : 'dark'); closeMenus(null); });
@@ -353,12 +353,28 @@ function boot() {
       for (const f of favs) {
         const it = document.createElement('div');
         it.className = 'fav-item';
+        const src = document.createElement('span');
+        src.className = 'fav-src';
+        src.textContent = favSource(f.tag);
         const tg = document.createElement('span');
         tg.className = 'fav-tag';
-        tg.textContent = f.tag;
+        tg.textContent = String(f.tag).replace(/^fav\//, '');
         const inf = document.createElement('span');
         inf.textContent = f.info || '';
-        it.appendChild(tg); it.appendChild(inf);
+        const del = document.createElement('button');
+        del.className = 'fav-del';
+        del.textContent = '✕';
+        del.title = '删除该收藏（只删标签，不影响版本内容）';
+        del.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          if (!confirm('删除收藏 ' + f.tag + ' ？')) return;
+          try {
+            await api.deleteFavorite(store.project, f.tag);
+            toast('已删除 ' + f.tag);
+            openFavDlg();
+          } catch (e) { setError(e.message); }
+        });
+        it.appendChild(src); it.appendChild(tg); it.appendChild(inf); it.appendChild(del);
         it.addEventListener('click', () => {
           favPick = f.tag;
           for (const x of Array.from(list.children)) x.classList.toggle('picked', x === it);
@@ -384,6 +400,45 @@ function boot() {
     } catch (e) { setError(e.message); }
   });
 
+  /* ---- 版本留存设置（M-V7 D3）：⚙设置面板读写 /settings（默认本工程 + 应用到全部工程） ---- */
+  async function loadRetentionSet() {
+    if (!store.project) return;
+    try {
+      const r = await api.getSettings(store.project);
+      const s = r.settings || {};
+      const tf = s.timed_favorite || {};
+      $('set-rt-iters').value = (s.auto_favorite_iters != null) ? s.auto_favorite_iters : 40;
+      $('set-rt-timer').checked = !!tf.enabled;
+      $('set-rt-min').value = (tf.interval_min != null) ? tf.interval_min : 30;
+      $('set-rt-count').textContent = (r.counter || 0) + ' 轮（自上次收藏以来）';
+    } catch (e) { /* 忽略：面板保持旧值 */ }
+  }
+  function retentionPatch() {
+    return {
+      auto_favorite_iters: Math.max(1, parseInt($('set-rt-iters').value || '40', 10)),
+      timed_favorite: {
+        enabled: $('set-rt-timer').checked,
+        interval_min: Math.max(1, parseFloat($('set-rt-min').value || '30')),
+      },
+    };
+  }
+  async function saveRetentionSet() {
+    if (!store.project) { setError('先打开一个工程'); return; }
+    try {
+      await api.setSettings(store.project, retentionPatch());
+      toast('留存设置已保存（本工程）');
+    } catch (e) { setError(e.message); }
+  }
+  for (const id of ['set-rt-iters', 'set-rt-min', 'set-rt-timer']) {
+    $(id).addEventListener('change', saveRetentionSet);
+  }
+  $('set-rt-apply-all').addEventListener('click', async () => {
+    try {
+      await api.setGlobalSettings(retentionPatch());
+      toast('已应用到全部工程（全局档 tsov-settings.json）');
+    } catch (e) { setError(e.message); }
+  });
+
   /* SSE → store（本地直接消费事件负载，契约 §六 数据流） */
   bus.on('state_updated', (s) => setState(s, { preserveSelection: true }));
   bus.on('diff_applied', (d) => {
@@ -395,16 +450,37 @@ function boot() {
     box.textContent = parts.length ? ('本轮 diff ' + parts.join(' ') + (refTag(d) ? ' ' + refTag(d) : '')) : '';
   });
 
-  /* 版本对比（议题 ④）：左槽选历史版本 → 试听；base_rev 由 chat.js 读取 */
-  function refreshCmpBase() {
+  /* 版本对比（议题 ④；M-V7 D3 加收藏段）：左槽选版本 → 试听；base_rev 由 chat.js 读取 */
+  let cmpGen = 0;
+  async function refreshCmpBase() {
+    const gen = ++cmpGen;
     const sel = $('cmp-base');
     sel.innerHTML = '';
+    try {
+      const r = await api.favorites(store.project);
+      if (gen !== cmpGen) return;   // 过期帧
+      if ((r.favorites || []).length) {
+        const g = document.createElement('optgroup');
+        g.label = '收藏版本';
+        for (const f of r.favorites) {
+          const opt = document.createElement('option');
+          opt.value = f.tag;
+          opt.textContent = '★ ' + favSource(f.tag) + ' · ' + String(f.tag).replace(/^fav\//, '');
+          g.appendChild(opt);
+        }
+        sel.appendChild(g);
+      }
+    } catch (e) { /* 忽略 */ }
+    const g2 = document.createElement('optgroup');
+    g2.label = 'git 版本';
     (store.gitLog || []).forEach((line, i) => {
       const opt = document.createElement('option');
       opt.value = line.split(' ')[0];
       opt.textContent = (i === 0 ? '★ HEAD · ' : '') + (line.length > 36 ? line.slice(0, 36) + '…' : line);
-      sel.appendChild(opt);
+      g2.appendChild(opt);
     });
+    if (gen !== cmpGen) return;   // 过期帧
+    if (g2.children.length) sel.appendChild(g2);
     $('cmp-head').textContent = '↔ ' + ((store.gitLog && store.gitLog[0] && store.gitLog[0].split(' ')[0]) || 'HEAD');
   }
   bus.on('state', refreshCmpBase);
