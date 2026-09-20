@@ -66,6 +66,8 @@ class Track:
     mute: bool = False
     solo: bool = False
     automation: dict = field(default_factory=dict)  # {"volume": [[t, 倍率], ...], "pan": [[t, -1..1], ...]}
+    # ---- M-V8 E1：组织层文件夹归属（单层，向后兼容增补；与总线「混音路由」解耦）----
+    folder: str = ""             # 空 = 不在任何文件夹
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -81,6 +83,7 @@ class Track:
             mute=bool(data.get("mute", False)),
             solo=bool(data.get("solo", False)),
             automation=dict(data.get("automation") or {}),
+            folder=str(data.get("folder") or ""),
         )
 
 
@@ -120,6 +123,40 @@ class KeyCandidate:
 
 
 @dataclass
+class Bookmark:
+    """书签（M-V8 E1）：三层作用域的**结构数据**（段轨转正）。
+
+    - scope: "project"（乐段/记号）| "folder"（文件夹层）| "track"（轨道层）
+    - ref: folder/track 作用域的目标名（project 作用域 = 空串）
+    - kind: "section"（区间，end 必填）| "mark"（时间点记号）
+    - start / end: 秒；label: 显示名；color: 可选配色（前端缺省派色）
+    """
+
+    scope: str = "project"
+    ref: str = ""
+    kind: str = "mark"
+    start: float = 0.0
+    end: float | None = None
+    label: str = ""
+    color: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Bookmark":
+        return cls(
+            scope=str(data.get("scope") or "project"),
+            ref=str(data.get("ref") or ""),
+            kind=str(data.get("kind") or "mark"),
+            start=float(data.get("start") or 0.0),
+            end=float(data["end"]) if data.get("end") is not None else None,
+            label=str(data.get("label") or ""),
+            color=str(data.get("color") or ""),
+        )
+
+
+@dataclass
 class Score:
     title: str = ""
     tempo: float = 120.0  # BPM
@@ -130,6 +167,8 @@ class Score:
     # ---- M-V4 混音字段（向后兼容增补）----
     buses: list[Bus] = field(default_factory=list)  # 附加总线（master 隐式存在，不列在这里）
     master: Bus = field(default_factory=lambda: Bus(name="master"))
+    # ---- M-V8 E1 字段（向后兼容增补）----
+    bookmarks: list[Bookmark] = field(default_factory=list)  # 书签（项目/文件夹/轨道三层，段轨转正）
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -145,4 +184,5 @@ class Score:
             meta=data["meta"],
             buses=[Bus.from_dict(b) for b in data.get("buses") or []],
             master=Bus.from_dict(data["master"]) if data.get("master") else Bus(name="master"),
+            bookmarks=[Bookmark.from_dict(b) for b in data.get("bookmarks") or []],
         )

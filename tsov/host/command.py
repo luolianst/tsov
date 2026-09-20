@@ -4,6 +4,8 @@
   （track 级批量 + 单音符精确两种粒度；与 M4「标注精确、LLM 语义、程序校验」同构）
 - UI 批A 增补（2026-09-17）：set_tempo（工程级 tempo/拍号） / set_track_mix（volume/pan/mute/solo/bus）
   / set_instrument（program） / add_effect / remove_effect——参数层 UI 与 agent 工具同出，走同一命令通道
+- M-V8 E1 增补（2026-09-20）：add_bookmark / remove_bookmark / set_bookmark（书签三层：project/folder/track，
+  索引寻址） / set_track_folder（组织层文件夹归属，单层）——段轨转正，UI 手势与外部 agent 同一动作路径
 - 事务协议：EditBatch.apply(score) 在深拷贝上逐条执行——非法命令被拒绝并记录 error，
   合法命令全部生效（部分应用 + 错误清单）；apply 前不脏原 Score。
 - 该命令层 = M-V2 起 agent 工具与 Web UI 共用的编辑通道（docs/05 接口契约）。
@@ -16,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..core.notes import Note
-from ..core.score import Effect, Score
+from ..core.score import Bookmark, Effect, Score
 from ..dsp.pitch import midi_to_hz
 
 
@@ -71,6 +73,13 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
     # ---- 工程级命令（不需要 track）----
     if c.op == "set_tempo":
         return _apply_set_tempo(score, c)
+    # M-V8 E1：书签三层（工程级索引寻址；与音符共用事务/快照窗口）
+    if c.op == "add_bookmark":
+        return _apply_add_bookmark(score, c)
+    if c.op == "remove_bookmark":
+        return _apply_remove_bookmark(score, c)
+    if c.op == "set_bookmark":
+        return _apply_set_bookmark(score, c)
     if not (0 <= c.track < len(score.tracks)):
         return f"{c.op} 越界：track {c.track}（共 {len(score.tracks)} 轨）"
     track = score.tracks[c.track]
@@ -79,6 +88,8 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
     # ---- 轨道级参数命令（UI 批A：参数层与 agent 工具同出）----
     if c.op == "set_track_mix":
         return _apply_set_track_mix(score, track, c)
+    if c.op == "set_track_folder":
+        return _apply_set_track_folder(score, track, c)
     if c.op == "set_instrument":
         return _apply_set_instrument(track, c)
     if c.op == "add_effect":
@@ -300,4 +311,143 @@ def _apply_remove_effect(track, c: EditCommand) -> str | None:
     if not (0 <= idx < len(effects)):
         return f"remove_effect 越界：index {idx}（共 {len(effects)} 个效果）"
     effects.pop(idx)
+    return None
+
+
+# ======================================================================
+# M-V8 E1：书签（三层结构数据）+ 文件夹归属（组织层）
+# ======================================================================
+
+_BOOKMARK_KINDS = ("section", "mark")
+
+
+def _bookmark_scope_ok(score: Score, scope: str, ref: str) -> str | None:
+    """作用域校验：folder/track 的 ref 必须已存在（folder 由轨道归属隐式定义）。"""
+    if scope == "project":
+        return None
+    if scope == "track":
+        if not ref:
+            return "track 书签需要 ref（轨道名）"
+        names = [t.name for t in score.tracks]
+        if ref not in names:
+            return f"未知轨道：{ref!r}（可用：{', '.join(names) or '无'}）"
+        return None
+    if scope == "folder":
+        if not ref:
+            return "folder 书签需要 ref（文件夹名）"
+        folders = sorted({t.folder for t in score.tracks if getattr(t, "folder", "")})
+        if ref not in folders:
+            return f"未知文件夹：{ref!r}（可用：{', '.join(folders) or '无'}）"
+        return None
+    return f"未知 scope：{scope!r}（project / folder / track）"
+
+
+def _apply_add_bookmark(score: Score, c: EditCommand) -> str | None:
+    """value = {scope?, ref?, kind?, start, end?, label?, color?}；kind: mark（点）/ section（区间）。"""
+    v = c.value
+    if not isinstance(v, dict):
+        return "add_bookmark value 需 {scope?, ref?, kind?, start, end?, label?}"
+    scope = str(v.get("scope") or "project")
+    ref = str(v.get("ref") or "")
+    err = _bookmark_scope_ok(score, scope, ref)
+    if err:
+        return err
+    kind = str(v.get("kind") or "mark")
+    if kind not in _BOOKMARK_KINDS:
+        return f"未知 kind：{kind!r}（section / mark）"
+    try:
+        start = float(v.get("start") or 0.0)
+    except (TypeError, ValueError):
+        return f"add_bookmark start 非法：{v.get('start')!r}"
+    if start < 0:
+        return f"add_bookmark start 越界：{start}"
+    end = None
+    if kind == "section":
+        try:
+            end = float(v["end"])
+        except (KeyError, TypeError, ValueError):
+            return "add_bookmark section 需要 end（秒）"
+        if end <= start:
+            return f"add_bookmark start>=end：{start}/{end}"
+    score.bookmarks.append(
+        Bookmark(
+            scope=scope,
+            ref=ref,
+            kind=kind,
+            start=round(start, 6),
+            end=round(end, 6) if end is not None else None,
+            label=str(v.get("label") or ""),
+            color=str(v.get("color") or ""),
+        )
+    )
+    return None
+
+
+def _apply_remove_bookmark(score: Score, c: EditCommand) -> str | None:
+    """index = score.bookmarks 下标。"""
+    idx = c.index if c.index is not None else c.value
+    try:
+        idx = int(idx)
+    except (TypeError, ValueError):
+        return f"remove_bookmark 需要 index：{idx!r}"
+    if not (0 <= idx < len(score.bookmarks)):
+        return f"remove_bookmark 越界：index {idx}（共 {len(score.bookmarks)} 个）"
+    score.bookmarks.pop(idx)
+    return None
+
+
+def _apply_set_bookmark(score: Score, c: EditCommand) -> str | None:
+    """index = 书签下标；value = {scope?, ref?, kind?, start?, end?, label?, color?}（缺省保持原值）。"""
+    idx = c.index
+    if idx is None or not (0 <= idx < len(score.bookmarks)):
+        return f"set_bookmark 越界：index {idx}（共 {len(score.bookmarks)} 个）"
+    v = c.value
+    if not isinstance(v, dict):
+        return "set_bookmark value 需 {scope?, ref?, kind?, start?, end?, label?, color?}"
+    bm = score.bookmarks[idx]
+    scope = str(v.get("scope") or bm.scope)
+    ref = str(v["ref"]) if v.get("ref") is not None else bm.ref
+    err = _bookmark_scope_ok(score, scope, ref)
+    if err:
+        return err
+    kind = str(v.get("kind") or bm.kind)
+    if kind not in _BOOKMARK_KINDS:
+        return f"未知 kind：{kind!r}（section / mark）"
+    try:
+        start = float(v.get("start", bm.start))
+    except (TypeError, ValueError):
+        return f"set_bookmark start 非法：{v.get('start')!r}"
+    if start < 0:
+        return f"set_bookmark start 越界：{start}"
+    end = None
+    if kind == "section":
+        raw_end = v.get("end", bm.end)
+        if raw_end is None:
+            return "set_bookmark section 需要 end（秒）"
+        try:
+            end = float(raw_end)
+        except (TypeError, ValueError):
+            return f"set_bookmark end 非法：{raw_end!r}"
+        if end <= start:
+            return f"set_bookmark start>=end：{start}/{end}"
+    bm.scope, bm.ref, bm.kind = scope, ref, kind
+    bm.start = round(start, 6)
+    bm.end = round(end, 6) if end is not None else None
+    if v.get("label") is not None:
+        bm.label = str(v["label"])
+    if v.get("color") is not None:
+        bm.color = str(v["color"])
+    return None
+
+
+def _apply_set_track_folder(score: Score, track, c: EditCommand) -> str | None:
+    """value = {"folder": 名} 或字符串；空串 = 移出文件夹（单层，不嵌套）。"""
+    v = c.value
+    name = v.get("folder") if isinstance(v, dict) else v
+    if name is None:
+        return "set_track_folder value 需 {folder} 或字符串"
+    name = str(name).strip()
+    if len(name) > 64:
+        return "文件夹名过长（≤64 字符）"
+    track.folder = name
     return None
