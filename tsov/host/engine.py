@@ -82,9 +82,30 @@ class HostEngine:
     # 实时回放
     # ------------------------------------------------------------------
 
-    def play(self, session: HostSession, blocking: bool = True) -> None:
+    def play(self, session: HostSession, blocking: bool = True, start: float = 0.0,
+             loop: tuple[float, float] | None = None, stop_event=None) -> None:
+        """实时回放（预渲染缓冲 + sounddevice；M-V8 E1 增：定位/循环/停止）。
+
+        - `start`：起始秒（播放轴定位）
+        - `loop`：(a, b) 秒区间循环——循环播放阻塞至 `stop_event` 置位（或外部 sd.stop）
+        - `stop_event`：threading.Event（`/play/stop` 置位）
+        """
         audio = mix_graph(session, samplerate=self.samplerate)
-        play_buffer(audio, samplerate=self.samplerate, blocking=blocking)
+        total = audio.shape[0]
+        i0 = max(0, min(total, int(round(float(start or 0.0) * self.samplerate))))
+        if i0 >= total:
+            return
+        if loop:
+            ia = max(0, min(total - 1, int(round(float(loop[0]) * self.samplerate))))
+            ib = max(ia + 1, min(total, int(round(float(loop[1]) * self.samplerate))))
+            seg = audio[ia:ib]
+            try:
+                while stop_event is None or not stop_event.is_set():
+                    play_buffer(seg, samplerate=self.samplerate, blocking=True)
+            except RuntimeError:
+                pass  # sd.stop() 打断（正常停止路径）
+            return
+        play_buffer(audio[i0:], samplerate=self.samplerate, blocking=blocking)
 
     def play_score(self, score_path, blocking: bool = True) -> None:
         session = self.load_score(score_path)
