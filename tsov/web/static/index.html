@@ -45,9 +45,11 @@
   </div>
 
   <div class="group transport">
-    <button id="btn-play-wav" title="浏览器试听（wav 流）">▶<span class="btn-txt">试听</span></button>
-    <button id="btn-play-host" title="后端宿主播放（sounddevice）">🔊<span class="btn-txt">宿主</span></button>
-    <button id="btn-stop" title="停止试听">⏹</button>
+    <button id="btn-play-wav" title="浏览器试听（Space 播放/暂停；从播放轴起播）">▶<span class="btn-txt">试听</span></button>
+    <button id="btn-play-host" title="后端宿主播放（sounddevice；从播放轴起播）">🔊<span class="btn-txt">宿主</span></button>
+    <button id="btn-stop" title="停止（停在原地；Home 回零点）">⏹</button>
+    <button id="btn-loop" title="循环播放（L）：在标尺上拖动划区间；双击区间清除">🔁</button>
+    <button id="btn-metro" title="节拍器（随播放走拍：强拍高音）">🥁</button>
     <button id="btn-render" title="离线渲染试听 wav（导出见「☰ 文件 → 导出…」）">渲染</button>
   </div>
 
@@ -116,6 +118,8 @@
     <div id="segments-info" class="muted small">（无）</div>
     <div class="panel-title">工程</div>
     <div id="meta-info" class="muted small">（未打开）</div>
+    <div class="panel-title">书签<span class="muted small" id="bm-hint">（M 建旗 · Shift+M 项目 · 段道拖建段）</span></div>
+    <div id="bm-list" class="muted small bm-list">（未打开）</div>
   </aside>
   <div id="rail-tracks" class="rail" title="展开轨道面板"><span>轨道 ▶</span></div>
 
@@ -127,6 +131,7 @@
       <span class="sb-hint muted small">单击左侧其他轨 = 灰叠加 ｜ 双击 = 切主轨 ｜ Esc 返回</span>
     </div>
     <canvas id="ruler"></canvas>
+    <canvas id="markers" title="乐段（段道）：拖动空白新建 ｜ 拖动段移动 / 边缘拉伸 ｜ 双击跳转 ｜ 右键菜单"></canvas>
     <div id="stage-body">
       <canvas id="lanes" title="总谱预览：单击选中 / Ctrl 多选 / 双击进入单轨写谱"></canvas>
       <canvas id="roll" hidden></canvas>

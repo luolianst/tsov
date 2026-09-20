@@ -39,6 +39,14 @@ export const store = {
   /* M-V3：标注队列（[{ann:{index,action,value}, label}]，随下条对话发送）+ 写谱吸附比例（0=关/0.5=1/8/0.25=1/16） */
   pendingAnnotations: [],
   snapFrac: 0,
+
+  /* M-V8 E1：定位工具包——循环区间 / 节拍器 / 书签选择 / 文件夹折叠（transport 态，不进谱） */
+  loop: null,                  // {start, end} 秒；null = 无循环
+  loopOn: false,               // 循环开关（🔁 / L）
+  metronome: false,            // 节拍器开关（🥁）
+  selFolder: '',               // 左栏选中文件夹（M 键作用域 + 高亮）
+  collapsedFolders: new Set(), // 折叠的文件夹（lane 列表分组行）
+  selBookmark: -1,             // 选中书签下标（score.bookmarks 索引；-1 = 无）
 };
 
 export function setError(msg) {
@@ -99,6 +107,50 @@ export function setSelection(track, indices) {
 export function setPlayhead(t) { store.playhead = t; bus.dispatch('playhead'); }
 export function setPlaying(p) { store.playing = p; bus.dispatch('playing'); }
 export function setAgentBusy(b) { store.agentBusy = !!b; bus.dispatch('agentbusy'); }
+
+/* ---------------- M-V8 E1：定位 / 循环 / 节拍器 / 书签 / 文件夹 ---------------- */
+
+export function setLoop(l) {
+  const ok = l && Number.isFinite(l.start) && Number.isFinite(l.end) && l.end - l.start > 1e-3;
+  store.loop = ok ? { start: Math.max(0, l.start), end: Math.max(0, l.end) } : null;
+  bus.dispatch('markers');
+}
+
+export function setLoopOn(b) { store.loopOn = !!b; bus.dispatch('markers'); }
+export function setMetronome(b) { store.metronome = !!b; bus.dispatch('markers'); }
+export function setSelFolder(name) { store.selFolder = name || ''; bus.dispatch('markers'); }
+
+export function toggleFolderCollapse(name) {
+  if (!name) return false;
+  if (store.collapsedFolders.has(name)) store.collapsedFolders.delete(name);
+  else store.collapsedFolders.add(name);
+  bus.dispatch('markers');
+  return store.collapsedFolders.has(name);
+}
+
+export function setSelBookmark(i) {
+  store.selBookmark = Number.isInteger(i) ? i : -1;
+  bus.dispatch('markers');
+}
+
+/** 当前谱内书签列表（只读引用；写走命令层）。 */
+export function bookmarks() { return (store.score && store.score.bookmarks) || []; }
+
+/** 文件夹名列表（按轨道出现顺序去重；folder 由轨道归属隐式定义）。 */
+export function folders() {
+  const out = [];
+  for (const t of (store.score && store.score.tracks) || []) {
+    if (t.folder && !out.includes(t.folder)) out.push(t.folder);
+  }
+  return out;
+}
+
+/** 某文件夹下的轨道下标列表。 */
+export function folderTracks(name) {
+  const out = [];
+  ((store.score && store.score.tracks) || []).forEach((t, i) => { if (t.folder === name) out.push(i); });
+  return out;
+}
 
 export function setView(partial) {
   Object.assign(store.view, partial);
@@ -273,6 +325,13 @@ export function snapshot() {
     agentBusy: store.agentBusy,
     playing: store.playing,
     playhead: store.playhead,
+    /* M-V8 E1：定位工具包快照（CDP 断言用） */
+    loop: store.loop ? Object.assign({}, store.loop) : null,
+    loopOn: store.loopOn,
+    metronome: store.metronome,
+    selFolder: store.selFolder,
+    collapsedFolders: Array.from(store.collapsedFolders),
+    selBookmark: store.selBookmark,
     hasDiff: !!store.diff,
     error: store.error,
   };

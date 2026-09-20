@@ -299,7 +299,8 @@ body.chat-folded #rail-chat { display: flex; }
 #roll-wrap {
   position: relative;
   display: grid;
-  grid-template-rows: auto var(--ruler-h) minmax(0, 1fr);
+  /* M-V8 E1：ruler 与 stage-body 之间插入段道行（#markers） */
+  grid-template-rows: auto var(--ruler-h) auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   background: var(--bg);
@@ -307,7 +308,8 @@ body.chat-folded #rail-chat { display: flex; }
 /* 显式排位（隐藏 stage-head 时不影响行分配） */
 #stage-head { grid-row: 1; }
 #ruler { grid-row: 2; }
-#stage-body { grid-row: 3; }
+#markers { grid-row: 3; }
+#stage-body { grid-row: 4; }
 #stage-head {
   display: flex; align-items: center; gap: 10px;
   height: 34px; padding: 0 10px;
@@ -319,9 +321,11 @@ body.chat-folded #rail-chat { display: flex; }
 #stage-head .sb-hint { margin-left: auto; }
 #btn-back-lanes { font-size: var(--fs-md); padding: 2px 10px; }
 #stage-body { position: relative; min-width: 0; min-height: 0; }
-#ruler, #roll, #lanes { display: block; width: 100%; height: 100%; }
+#ruler, #markers, #roll, #lanes { display: block; width: 100%; height: 100%; }
 #roll, #lanes { position: absolute; inset: 0; }
 #ruler { background: var(--bg-panel); border-bottom: 1px solid var(--border); }
+/* M-V8 E1：段道（乐段/记号）——固定在 22px 高，cursor 十字 */
+#markers { height: 22px; background: var(--bg-panel); border-bottom: 1px solid var(--border); cursor: crosshair; }
 #roll { cursor: default; }
 #lanes { cursor: default; }
 
@@ -754,3 +758,48 @@ body.chat-folded #rail-chat { display: flex; }
   #topbar { padding: 8px 16px; }
   .track-body { padding: 6px 10px 7px; }
 }
+
+/* ===== M-V8 E1：定位工具包（循环/节拍器/段道/书签树/文件夹折叠） ===== */
+#btn-loop.on, #btn-metro.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+
+/* 书签树（左栏） */
+.bm-list { display: flex; flex-direction: column; gap: 1px; max-height: 190px; overflow: auto; padding: 0 10px 6px; }
+.bm-group { margin-top: 3px; }
+.bm-group-title { color: var(--muted); font-size: var(--fs-xs, 11px); margin-top: 2px; }
+.bm-item { display: flex; align-items: center; gap: 4px; padding: 1px 3px; border-radius: 3px; cursor: pointer; }
+.bm-item:hover { background: var(--bg-hover); }
+.bm-item.sel { outline: 1px solid var(--accent); }
+.bm-item .bm-pre { flex: 0 0 auto; font-size: var(--fs-xs, 11px); }
+.bm-item .bm-label { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bm-item .bm-time { flex: 0 0 auto; color: var(--muted); font-size: var(--fs-xs, 11px); font-variant-numeric: tabular-nums; }
+.bm-item .bm-x, .bm-item .bm-loop { flex: 0 0 auto; border: none; background: none; cursor: pointer; padding: 0 2px; color: var(--muted); font-size: var(--fs-xs, 11px); }
+.bm-item .bm-x:hover { color: var(--accent); }
+
+/* 段道拖动预览 / 内联命名 / 悬浮提示 / 右键菜单 */
+.mk-preview { position: fixed; display: none; border: 1px dashed var(--accent); background: var(--accent-soft); pointer-events: none; z-index: 30; }
+.mk-rename {
+  position: fixed; z-index: 60; font: inherit; font-size: var(--fs-sm, 12px);
+  padding: 2px 6px; border: 1px solid var(--accent); border-radius: 3px;
+  background: var(--bg-elev); color: inherit; min-width: 170px;
+}
+.bm-tip {
+  position: fixed; display: none; z-index: 61; background: var(--bg-elev);
+  border: 1px solid var(--border); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  padding: 2px 7px; border-radius: 4px; font-size: var(--fs-xs, 11px); pointer-events: none;
+}
+.bm-menu {
+  position: fixed; z-index: 62; background: var(--bg-elev);
+  border: 1px solid var(--border); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
+  border-radius: 4px; padding: 3px 0; min-width: 120px;
+}
+.bm-menu button {
+  display: block; width: 100%; text-align: left; border: none; background: none;
+  padding: 4px 12px; cursor: pointer; color: inherit; font-size: var(--fs-sm, 12px);
+}
+.bm-menu button:hover { background: var(--bg-hover); }
+
+/* 文件夹分组行（轨道列表） */
+.tl-folder { display: flex; align-items: center; gap: 4px; padding: 3px 10px 1px; color: var(--muted); font-size: var(--fs-xs, 11px); font-weight: 600; cursor: pointer; }
+.tl-folder.sel { color: var(--accent); }
+.tl-folder .fold-toggle { border: none; background: none; color: inherit; cursor: pointer; padding: 0 2px; font-size: var(--fs-xs, 11px); }
+.track-item.fold-hidden { display: none; }

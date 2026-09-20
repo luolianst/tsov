@@ -4,8 +4,9 @@
    只读：编辑都在单轨视图（roll.js） */
 
 import { bus } from './events.js';
-import { store, tempo, beatsPerBar, setSelection, toggleOverlay, setView } from './state.js';
+import { store, tempo, beatsPerBar, setSelection, toggleOverlay, setView, bookmarks, setSelBookmark } from './state.js';
 import { pal, trackColors } from './theme.js';
+import { seekTo } from './playback.js';
 
 const KEYS = 56;   // 左侧标签槽（与卷帘 KEYS_W 对齐）
 const FONT_UI = '11px "Microsoft YaHei UI","PingFang SC","MiSans","HarmonyOS Sans SC",system-ui,sans-serif';
@@ -34,6 +35,48 @@ function laneAt(y) {
   const i = Math.floor(y / rowH());
   return (store.score && i >= 0 && i < store.score.tracks.length) ? i : -1;
 }
+
+/* ---- M-V8 E1：书签小旗（轨道/文件夹层）+ 可见性（隐藏/文件夹折叠） ---- */
+
+function trackVisible(ti) {
+  if (store.hiddenTracks.has(ti)) return false;
+  const tr = store.score && store.score.tracks[ti];
+  return !(tr && tr.folder && store.collapsedFolders.has(tr.folder));
+}
+
+/** 命中 lane 顶缘的小旗（±9px）→ {i, b} 或 null。 */
+function flagAt(offX, offY) {
+  const sc = store.score;
+  if (!sc) return null;
+  const rh = rowH();
+  const ti = laneAt(offY);
+  if (ti < 0 || offY > ti * rh + 16) return null;
+  const folderHost = {};
+  sc.tracks.forEach((t, i) => { if (t.folder && folderHost[t.folder] === undefined) folderHost[t.folder] = i; });
+  const list = [];
+  bookmarks().forEach((b, i) => { if (b.scope === 'track' || b.scope === 'folder') list.push({ b, i }); });
+  for (const { b, i } of list) {
+    let host = -1;
+    if (b.scope === 'track') host = sc.tracks.findIndex((t) => t.name === b.ref);
+    else host = (folderHost[b.ref] !== undefined) ? folderHost[b.ref] : -1;
+    if (host !== ti || !trackVisible(ti)) continue;
+    if (Math.abs(offX - xOf(b.start)) <= 9) return { i, b };
+  }
+  return null;
+}
+
+let tipEl = null;
+
+function ensureTip() {
+  if (!tipEl) {
+    tipEl = document.createElement('div');
+    tipEl.className = 'bm-tip';
+    document.body.appendChild(tipEl);
+  }
+  return tipEl;
+}
+
+function hideTip() { if (tipEl) tipEl.style.display = 'none'; }
 
 export function draw() {
   if (!ctx) return;
@@ -71,7 +114,9 @@ export function draw() {
     ctx.fillStyle = p.laneLabel;
     ctx.font = FONT_UI;
     const nm = sc.tracks[ti].name || ('track ' + ti);
-    ctx.fillText(nm.length > 8 ? nm.slice(0, 8) + '…' : nm, 9, y0 + Math.min(rh - 8, rh / 2 + 4));
+    ctx.globalAlpha = trackVisible(ti) ? 1 : 0.4;   // M-V8 E1：隐藏/折叠行减淡
+    ctx.fillText((sc.tracks[ti].folder ? '📁' : '') + (nm.length > 8 ? nm.slice(0, 8) + '…' : nm), 9, y0 + Math.min(rh - 8, rh / 2 + 4));
+    ctx.globalAlpha = 1;
     if (overlay) ctx.fillText('叠加', 9, y0 + rh - 8);
     if (touched) {   /* 批B B1-3：改动标记（标签槽右缘小方块，agent 语义色） */
       ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--agent').trim() || '#141414';
@@ -114,6 +159,7 @@ export function draw() {
   for (let ti = 0; ti < sc.tracks.length; ti++) {
     const y0 = ti * rh;
     if (y0 > H) break;
+    if (!trackVisible(ti)) continue;   // M-V8 E1：隐藏/文件夹折叠 → 不画音符
     const notes = sc.tracks[ti].notes;
     if (!notes.length) continue;
     const overlay = store.overlayTracks.has(ti);
@@ -140,9 +186,47 @@ export function draw() {
     ctx.globalAlpha = 1;
   }
 
+  /* ---- M-V8 E1：循环区间淡色带 ---- */
+  const L = store.loop;
+  if (L) {
+    const xa = Math.max(KEYS, xOf(L.start)), xb = Math.min(W, xOf(L.end));
+    if (xb > xa) {
+      ctx.globalAlpha = store.loopOn ? 0.10 : 0.05;
+      ctx.fillStyle = p.playhead;
+      ctx.fillRect(xa, 0, xb - xa, H);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /* ---- M-V8 E1：书签小旗（轨道层三角旗 / 文件夹层方旗，挂在 lane 顶缘） ---- */
+  {
+    const folderHost = {};
+    sc.tracks.forEach((tr, i) => { if (tr.folder && folderHost[tr.folder] === undefined) folderHost[tr.folder] = i; });
+    for (const b of bookmarks()) {
+      if (b.scope !== 'track' && b.scope !== 'folder') continue;   // 项目层在段道
+      let host = -1;
+      if (b.scope === 'track') host = sc.tracks.findIndex((t) => t.name === b.ref);
+      else host = (folderHost[b.ref] !== undefined) ? folderHost[b.ref] : -1;
+      if (host < 0 || host * rh > H || !trackVisible(host)) continue;
+      const x = Math.round(xOf(b.start));
+      if (x < KEYS - 4 || x > W) continue;
+      const y0 = host * rh;
+      const isFolder = b.scope === 'folder';
+      ctx.fillStyle = isFolder ? p.rulerText : tc[host % tc.length];
+      ctx.fillRect(x, y0 + 2, 1, 10);
+      if (isFolder) {
+        ctx.fillRect(x + 1, y0 + 2, 7, 6);
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(x + 1, y0 + 2); ctx.lineTo(x + 9, y0 + 5); ctx.lineTo(x + 1, y0 + 8);
+        ctx.closePath(); ctx.fill();
+      }
+    }
+  }
+
   /* ---- 播放头 ---- */
   const px = xOf(store.playhead);
-  if (store.playing && px >= KEYS && px <= W) {
+  if (px >= KEYS && px <= W) {
     ctx.strokeStyle = p.playhead;
     ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke();
@@ -171,11 +255,31 @@ export function init(el, opts) {
 
   canvas.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
+    const fl = flagAt(e.offsetX, e.offsetY);   // M-V8 E1：小旗 → 选中 + 跳转
+    if (fl) { setSelBookmark(fl.i); seekTo(fl.b.start); return; }
     const ti = laneAt(e.offsetY);
     if (ti < 0) return;
     if (e.ctrlKey || e.shiftKey || e.metaKey) { toggleOverlay(ti); return; }
     setSelection(ti, []);
   });
+
+  /* M-V8 E1：小旗悬停提示 */
+  canvas.addEventListener('mousemove', (e) => {
+    const fl = flagAt(e.offsetX, e.offsetY);
+    if (fl) {
+      const t = ensureTip();
+      t.textContent = (fl.b.scope === 'folder' ? '📁 ' : '') + (fl.b.label || '（未命名）') +
+        ' @ ' + fl.b.start.toFixed(2) + 's ｜ 单击跳转';
+      t.style.display = 'block';
+      t.style.left = (e.clientX + 12) + 'px';
+      t.style.top = (e.clientY + 14) + 'px';
+      canvas.style.cursor = 'pointer';
+    } else {
+      hideTip();
+      canvas.style.cursor = '';
+    }
+  });
+  canvas.addEventListener('mouseleave', hideTip);
 
   canvas.addEventListener('dblclick', (e) => {
     const ti = laneAt(e.offsetY);
@@ -183,7 +287,7 @@ export function init(el, opts) {
     if (onEnter) onEnter(ti);
   });
 
-  for (const topic of ['state', 'view', 'selection', 'viewmode', 'playhead', 'playing', 'agenttracks']) {
+  for (const topic of ['state', 'view', 'selection', 'viewmode', 'playhead', 'playing', 'agenttracks', 'markers']) {
     bus.on(topic, draw);
   }
 }

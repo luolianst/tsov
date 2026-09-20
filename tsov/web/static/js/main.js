@@ -2,7 +2,7 @@
 
 import { api } from './api.js';
 import { bus, connectEvents } from './events.js';
-import { store, setState, setError, toast, fitView, setView, clearDiff, setAnnotations, clearAnnotations, setSnap, setViewMode, setSingleTrack, fitViewTrack, refTag, favSource } from './state.js';
+import { store, setState, setError, toast, fitView, setView, clearDiff, setAnnotations, clearAnnotations, setSnap, setViewMode, setSingleTrack, fitViewTrack, refTag, favSource, bookmarks, setSelBookmark, setLoopOn } from './state.js';
 import * as roll from './roll.js';
 import * as timeline from './timeline.js';
 import * as dock from './dock.js';
@@ -176,6 +176,7 @@ function boot() {
   roll.init($('roll'));
   lanes.init($('lanes'), { onEnter: enterSingle });
   timeline.init($('ruler'), $('track-list'), $('segments-info'), $('meta-info'), { onEnter: enterSingle });
+  timeline.initMarkers($('markers'));   // M-V8 E1：段道
   /* 修正轮2.1：段轨已删（洛怜：段落/和弦两行可以删；后续以「书签」替代，见 Q46） */
   dock.init($('dock'));
   initDiffBadge($('status-diff'));
@@ -203,6 +204,8 @@ function boot() {
     stopBtn: $('btn-stop'),
     playHostBtn: $('btn-play-host'),
     renderBtn: $('btn-render'),
+    loopBtn: $('btn-loop'),      // M-V8 E1：循环开关
+    metroBtn: $('btn-metro'),    // M-V8 E1：节拍器开关
   });
 
   /* ================= 修正轮2：菜单 / 面板收起 / 视图模式 / 导出 / 收藏 ================= */
@@ -289,12 +292,59 @@ function boot() {
     lanes.resizeNow();
   }
   $('btn-back-lanes').addEventListener('click', backToLanes);
+
+  /* M-V8 E1：M 键建旗（选中文件夹 > 单轨选中 > 项目层；Shift+M 强制项目层） */
+  async function addFlag(forceProject) {
+    if (!store.project || !store.score) { setError('先打开一个工程'); return; }
+    const t = Math.round(Math.max(0, store.playhead) * 1000) / 1000;
+    let scope = 'project', ref = '';
+    if (!forceProject) {
+      if (store.selFolder) { scope = 'folder'; ref = store.selFolder; }
+      else {
+        const ti = (store.viewMode === 'single') ? store.singleTrack : store.selection.track;
+        const tr = (ti >= 0 && store.score.tracks[ti]) ? store.score.tracks[ti] : null;
+        if (tr) { scope = 'track'; ref = tr.name; }
+      }
+    }
+    const len = bookmarks().length;
+    const label = scope === 'project' ? '项目记号' : (scope === 'folder' ? ('文件夹记号 ' + ref) : ('轨道记号 ' + ref));
+    try {
+      const r = await api.postBatch(store.project, '书签', [{ op: 'add_bookmark', track: 0, value: { scope, ref, kind: 'mark', start: t, label: '' } }], null);
+      if (!r.applied) { setError('被拒：' + (r.errors || []).join('；')); return; }
+      toast('已建旗：' + label + ' @ ' + t + 's（回车命名）');
+      const mr = $('markers').getBoundingClientRect();
+      timeline.openRenameAt(len, mr.left + 120, Math.max(40, mr.top - 30));
+    } catch (e) { setError(e.message); }
+  }
+  window.__tsovAddFlag = addFlag;   // CDP 实测用（等价键盘路径）
+
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       closeMenus(null);
       if (!$('dlg-export').hidden) { $('dlg-export').hidden = true; return; }
       if (!$('dlg-fav').hidden) { $('dlg-fav').hidden = true; return; }
       backToLanes();
+      return;
+    }
+    /* M-V8 E1：播放/定位快捷键（输入态与按钮焦点不劫持） */
+    const tgt = e.target || {};
+    const tag = (tgt.tagName || '').toUpperCase();
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON' || tgt.isContentEditable) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!store.project) return;
+    if (e.key === ' ') {
+      e.preventDefault();
+      if (store.playing === 'wav') playback.stopAll();
+      else playback.playWav();
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      playback.rewind();
+    } else if (e.key === 'l' || e.key === 'L') {
+      if (!store.loop) { setError('先在标尺上拖动划循环区间'); return; }
+      setLoopOn(!store.loopOn);
+      toast(store.loopOn ? '循环开' : '循环关');
+    } else if (e.key === 'm' || e.key === 'M') {
+      addFlag(e.shiftKey);
     }
   });
 
@@ -692,6 +742,97 @@ function boot() {
   syncMetro();
 
   bus.on('state', () => { refreshStatusBar(); refreshToolbar(); });
+
+  /* ===== M-V8 E1：书签面板（三层树：项目 / 文件夹 / 轨道） ===== */
+  function bmTime(b) {
+    return b.kind === 'section'
+      ? (b.start.toFixed(1) + '–' + b.end.toFixed(1) + 's')
+      : (b.start.toFixed(2) + 's');
+  }
+
+  function refreshBookmarks() {
+    const el = $('bm-list');
+    if (!store.score) { el.className = 'muted small bm-list'; el.textContent = '（未打开）'; return; }
+    const bms = bookmarks();
+    if (!bms.length) { el.className = 'muted small bm-list'; el.textContent = '（无书签——M 建旗 / 段道拖建段）'; return; }
+    el.className = 'bm-list';
+    el.innerHTML = '';
+
+    const mkItem = (i) => {
+      const b = bms[i];
+      const row = document.createElement('div');
+      row.className = 'bm-item' + (i === store.selBookmark ? ' sel' : '');
+      const pre = document.createElement('span');
+      pre.className = 'bm-pre';
+      pre.textContent = (b.scope === 'folder' ? '📁' : (b.scope === 'track' ? '🎵' : (b.kind === 'section' ? '▭' : '⚑')));
+      const lb = document.createElement('span');
+      lb.className = 'bm-label';
+      lb.textContent = b.label || (b.kind === 'section' ? '（未命名段）' : '（未命名记号）');
+      const tm = document.createElement('span');
+      tm.className = 'bm-time';
+      tm.textContent = bmTime(b);
+      row.appendChild(pre);
+      row.appendChild(lb);
+      row.appendChild(tm);
+      if (b.kind === 'section') {
+        const lp = document.createElement('button');
+        lp.className = 'bm-loop';
+        lp.textContent = '🔁';
+        lp.title = '设循环区间 = 此段';
+        lp.addEventListener('click', (e) => { e.stopPropagation(); timeline.loopFromBookmark(i); });
+        row.appendChild(lp);
+      }
+      const del = document.createElement('button');
+      del.className = 'bm-x';
+      del.textContent = '✕';
+      del.title = '删除书签';
+      del.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!confirm('删除书签「' + (b.label || '（未命名）') + '」？')) return;
+        try {
+          const r = await api.postBatch(store.project, '删除书签', [{ op: 'remove_bookmark', track: 0, index: i }], null);
+          if (!r.applied) setError('被拒：' + (r.errors || []).join('；'));
+          else { setSelBookmark(-1); toast('已删除书签'); }
+        } catch (err) { setError(err.message); }
+      });
+      row.appendChild(del);
+      row.title = '单击：跳转 ｜ 双击：改名';
+      row.addEventListener('click', () => { setSelBookmark(i); playback.seekTo(b.start); });
+      row.addEventListener('dblclick', () => {
+        const r2 = row.getBoundingClientRect();
+        timeline.openRenameAt(i, r2.left + 60, r2.bottom + 4);
+      });
+      return row;
+    };
+
+    const addGroup = (title, idxs) => {
+      if (!idxs.length) return;
+      const g = document.createElement('div');
+      g.className = 'bm-group';
+      const h = document.createElement('div');
+      h.className = 'bm-group-title';
+      h.textContent = title;
+      g.appendChild(h);
+      for (const i of idxs) g.appendChild(mkItem(i));
+      el.appendChild(g);
+    };
+
+    const projIdx = [];
+    const byFolder = {};
+    const byTrack = {};
+    bms.forEach((b, i) => {
+      if (b.scope === 'project') projIdx.push(i);
+      else if (b.scope === 'folder') (byFolder[b.ref] = byFolder[b.ref] || []).push(i);
+      else if (b.scope === 'track') (byTrack[b.ref] = byTrack[b.ref] || []).push(i);
+    });
+    addGroup('项目', projIdx);
+    for (const f of Object.keys(byFolder)) addGroup('📁 ' + f, byFolder[f]);
+    for (const tn of Object.keys(byTrack)) addGroup('🎵 ' + tn, byTrack[tn]);
+  }
+  bus.on('state', refreshBookmarks);
+  bus.on('markers', refreshBookmarks);
+  refreshBookmarks();
+
   bus.on('error', showError);
   bus.on('toast', showToast);
 
