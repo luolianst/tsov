@@ -906,3 +906,39 @@ def test_agent_actions_list_and_undo(env):
     assert c.get("/api/projects/actproj/log").json()["log"] == log0
     # 不存在的动作 → 404
     assert c.post("/api/projects/actproj/agent-actions/99/undo").status_code == 404
+
+
+def test_batch_bookmark_folder_and_state(env):
+    """M-V8 E1：书签 / 文件夹归属走 /batch（命令层）→ /state 读回（UI 与 agent 同一动作路径）。"""
+    name = _make_project(env)
+    c = env["client"]
+    r = c.post(f"/api/projects/{name}/batch", json={"label": "书签", "commands": [
+        {"op": "set_track_folder", "track": 0, "value": {"folder": "band"}},
+        {"op": "add_bookmark", "value": {"scope": "project", "kind": "section", "start": 0.0, "end": 0.6, "label": "段1"}},
+        {"op": "add_bookmark", "value": {"scope": "folder", "ref": "band", "kind": "mark", "start": 0.3, "label": "入点"}},
+    ]})
+    assert r.status_code == 200 and r.json()["applied"] == 3
+    sc = c.get(f"/api/projects/{name}/state").json()["score"]
+    assert sc["tracks"][0]["folder"] == "band"
+    assert [b["label"] for b in sc["bookmarks"]] == ["段1", "入点"]
+
+    r2 = c.post(f"/api/projects/{name}/batch", json={"label": "改名/删除", "commands": [
+        {"op": "set_bookmark", "index": 0, "value": {"label": "前奏"}},
+        {"op": "remove_bookmark", "index": 1},
+    ]})
+    assert r2.json()["applied"] == 2
+    sc2 = c.get(f"/api/projects/{name}/state").json()["score"]
+    assert [b["label"] for b in sc2["bookmarks"]] == ["前奏"]
+
+    r3 = c.post(f"/api/projects/{name}/batch", json={"label": "bad", "commands": [
+        {"op": "add_bookmark", "value": {"scope": "folder", "ref": "nope", "kind": "mark", "start": 1.0}},
+    ]})
+    assert r3.json()["applied"] == 0 and r3.json()["errors"]
+
+
+def test_play_stop_idle(env):
+    """M-V8 E1：/play/stop 空闲态安全返回（无播放 → 置空信号 + sd.stop 兜底）。"""
+    name = _make_project(env)
+    r = env["client"].post(f"/api/projects/{name}/play/stop")
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert env["client"].post("/api/projects/no_such/play/stop").status_code == 404
