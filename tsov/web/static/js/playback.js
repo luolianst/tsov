@@ -9,6 +9,7 @@ import { store, setPlayhead, setPlaying, setLoopOn, setMetronome, toast, setErro
 let audio = null;        // <audio> wav 试听
 let rafId = 0;
 let hostT0 = 0;          // 后端播放起始时刻（playback_start；含 start 偏移）
+let playGen = 0;         // E1 修复：起播代际——停止作废在途起播（加载中点⏹不再事后冒播）
 
 function ensureAudio() {
   if (audio) return audio;
@@ -122,6 +123,7 @@ export function rewind() {
 export async function playWav() {
   if (!store.project) { setError('先打开一个工程'); return; }
   const a = ensureAudio();
+  const gen = ++playGen;            // E1：本次起播代际（stop/新起播会作废）
   let from = Math.max(0, store.playhead || 0);
   const L = store.loop;
   /* E1：循环开启且播放轴在区间外 → 从区间头起播 */
@@ -135,11 +137,13 @@ export async function playWav() {
       a.addEventListener('loadedmetadata', ok);
       a.addEventListener('error', bad);
     });
+    if (gen !== playGen) return;      // 加载期间已按停止/改播 → 不冒播
     if (from > 0) {
       const dur = a.duration;
       a.currentTime = (Number.isFinite(dur) && dur > 0) ? Math.min(from, Math.max(0, dur - 0.05)) : from;
     }
     await a.play();
+    if (gen !== playGen) { try { a.pause(); } catch (e) { /* 忽略 */ } return; }
     setPlaying('wav');
     ensureRaf();
   } catch (e) {
@@ -148,6 +152,7 @@ export async function playWav() {
 }
 
 export function stopWav() {
+  playGen++;                        // 作废在途起播
   if (audio) audio.pause();
   if (store.playing === 'wav') setPlaying(null);
   mNext = 0;

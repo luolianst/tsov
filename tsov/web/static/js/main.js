@@ -326,13 +326,14 @@ function boot() {
       backToLanes();
       return;
     }
-    /* M-V8 E1：播放/定位快捷键（输入态与按钮焦点不劫持） */
+    /* M-V8 E1：播放/定位快捷键（输入态不劫持；按钮焦点仅对 Space 让位原生激活） */
     const tgt = e.target || {};
     const tag = (tgt.tagName || '').toUpperCase();
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON' || tgt.isContentEditable) return;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tgt.isContentEditable) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (!store.project) return;
     if (e.key === ' ') {
+      if (tag === 'BUTTON') return;
       e.preventDefault();
       if (store.playing === 'wav') playback.stopAll();
       else playback.playWav();

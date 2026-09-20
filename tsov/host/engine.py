@@ -105,6 +105,8 @@ class HostEngine:
             except RuntimeError:
                 pass  # sd.stop() 打断（正常停止路径）
             return
+        if stop_event is not None and stop_event.is_set():
+            return  # E1：起播前已按停止（预渲染期间）→ 不冒播
         play_buffer(audio[i0:], samplerate=self.samplerate, blocking=blocking)
 
     def play_score(self, score_path, blocking: bool = True) -> None:
