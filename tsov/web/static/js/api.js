@@ -96,4 +96,13 @@ export const api = {
         '&buckets=' + (buckets || 900)),
   audioUrl: (name, file) =>
     '/api/projects/' + encodeURIComponent(name) + '/audio/file?file=' + encodeURIComponent(file),
+  /* M-V8 E2 段 3：录音（设备枚举 / 起停 / 状态） */
+  recordDevices: () =>
+    req('/api/record/devices'),
+  recordStart: (name, body) =>
+    post('/api/projects/' + encodeURIComponent(name) + '/record/start', body || {}),
+  recordStop: (name, body) =>
+    post('/api/projects/' + encodeURIComponent(name) + '/record/stop', body || {}),
+  recordStatus: (name) =>
+    req('/api/projects/' + encodeURIComponent(name) + '/record/status'),
 };

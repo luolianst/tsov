@@ -7,6 +7,7 @@ import { store, setError, refTag } from './state.js';
 import { themeName, trackColors } from './theme.js';
 
 let dockEl = null, chanPane = null, fxPane = null, srcPane = null, mixPane = null, hintEl = null;
+let recPane = null;
 let meta = { programs: [], effect_kinds: [] };
 let metaLoaded = false;
 
@@ -355,6 +356,90 @@ function renderTabs() {
   if (hintEl) hintEl.textContent = cur ? ((cur.track.name || ('track ' + cur.index)) + ' · 轨道参数') : '';
 }
 
+/* M-V8 E2 段 3：录音面板（设备 / 录制 / 监听 → 录完直进时间线） */
+const recState = { devs: null, recording: false, startedAt: 0, timer: null, busy: false, project: null };
+
+function recFmt(sec) {
+  sec = Math.max(0, sec || 0);
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0') + '.' +
+    String(Math.floor((sec % 1) * 10));
+}
+
+function renderRec() {
+  if (!recPane) return;
+  if (recState.recording) return;   // 录音中不重建（计时器原地更新）
+  if (!store.project) { recPane.innerHTML = '<div class="fx-none">先打开一个工程</div>'; return; }
+  recPane.innerHTML =
+    '<div class="rec-wrap">' +
+      '<div class="rec-row"><label>输入</label><select id="rec-in"></select>' +
+      '<label>输出·监听</label><select id="rec-out"></select></div>' +
+      '<div class="rec-row"><label class="rec-mon"><input type="checkbox" id="rec-monitor">' +
+      ' 监听（软件直通，实测延迟约 30-90ms）</label></div>' +
+      '<div class="rec-row"><button id="rec-btn" class="rec-btn">● 开始录制</button>' +
+      '<span id="rec-timer" class="rec-timer">00:00.0</span>' +
+      '<span class="rec-hint">录完自动入库（44.1k flac）并加入时间线</span></div>' +
+    '</div>';
+  const selIn = recPane.querySelector('#rec-in');
+  const selOut = recPane.querySelector('#rec-out');
+  const btn = recPane.querySelector('#rec-btn');
+  const fill = (sel, list, defIdx) => {
+    sel.innerHTML = list.map((d) =>
+      '<option value="' + d.index + '"' + (d.index === defIdx ? ' selected' : '') + '>' +
+      d.index + ': ' + d.name + '</option>').join('');
+  };
+  (async () => {
+    try {
+      recState.devs = recState.devs || await api.recordDevices();
+      fill(selIn, recState.devs.inputs, recState.devs.default_in);
+      fill(selOut, recState.devs.outputs, recState.devs.default_out);
+    } catch (e) { setError('设备枚举失败：' + e.message); }
+  })();
+  btn.addEventListener('click', () => recToggle(btn, selIn, selOut));
+}
+
+async function recToggle(btn, selIn, selOut) {
+  if (recState.busy) return;
+  recState.busy = true;
+  try {
+    if (!recState.recording) {
+      const monitor = recPane.querySelector('#rec-monitor').checked;
+      recState.project = store.project;   // 记住开始时的工程（stop 用它）
+      await api.recordStart(recState.project, {
+        device: Number(selIn.value),
+        out_device: monitor ? Number(selOut.value) : null,
+        monitor,
+      });
+      recState.recording = true;
+      recState.startedAt = Date.now();
+      btn.textContent = '■ 停止';
+      btn.classList.add('recording');
+      recState.timer = setInterval(() => {
+        const el = recPane.querySelector('#rec-timer');
+        if (el) el.textContent = recFmt((Date.now() - recState.startedAt) / 1000);
+      }, 200);
+      bus.dispatch('toast', monitor ? '开始录制（监听已开）' : '开始录制');
+    } else {
+      btn.disabled = true;
+      const r = await api.recordStop(recState.project, {});
+      clearInterval(recState.timer);
+      recState.timer = null;
+      recState.recording = false;
+      const secs = Number(r.seconds || 0);
+      bus.dispatch('toast', '已录音 ' + secs.toFixed(1) + 's → 时间线' + (r.added ? '（已入轨）' : '（未加轨）'));
+      renderRec();
+    }
+  } catch (e) {
+    if (recState.timer) { clearInterval(recState.timer); recState.timer = null; }
+    recState.recording = false;
+    setError('录音：' + e.message);
+    renderRec();
+  } finally {
+    recState.busy = false;
+  }
+}
+
 export function renderAll() {
   renderChan();
   renderFx();
@@ -377,16 +462,18 @@ export function init(el) {
   fxPane = dockEl.querySelector('#dock-fx');
   srcPane = dockEl.querySelector('#dock-src');
   mixPane = dockEl.querySelector('#dock-mix');
+  recPane = dockEl.querySelector('#dock-rec');
   hintEl = dockEl.querySelector('#dock-hint');
 
   /* tab 切换 */
   const tabs = Array.from(dockEl.querySelectorAll('.dock-tab'));
-  const panes = { chan: chanPane, fx: fxPane, src: srcPane, mix: mixPane };
+  const panes = { chan: chanPane, fx: fxPane, src: srcPane, mix: mixPane, rec: recPane };
   for (const t of tabs) {
     t.addEventListener('click', () => {
       for (const x of tabs) x.classList.toggle('active', x === t);
       const name = t.dataset.pane;
       for (const k of Object.keys(panes)) panes[k].classList.toggle('active', k === name);
+      if (name === 'rec') renderRec();   // E2 段 3：录音面板懒渲染
     });
   }
 

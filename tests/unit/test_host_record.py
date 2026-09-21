@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from tsov.host.record import record_to_wav
+from tsov.host.record import record_to_wav, record_with_monitor
 
 SR = 16000
 
@@ -113,3 +113,77 @@ def test_record_zero_seconds_gives_placeholder_wav():
         assert len(data) == 1  # 1 帧静音占位
     finally:
         shutil.rmtree(out, ignore_errors=True)
+
+
+# ---- M-V8 E2 段 3：record_with_monitor（监听直通路径） ----
+
+
+class _FakeDuplexStream(_FakeStream):
+    """假 duplex 流：read() 同 _FakeStream；monitor 时记录 write 数据。"""
+
+    def __init__(self, samplerate, channels, device, out_device=None, monitor=False, **kw):
+        super().__init__(samplerate, channels, device, **kw)
+        self.out_device = out_device
+        self.monitor = bool(monitor)
+        self.written = []
+
+    def write(self, data):
+        self.written.append(np.asarray(data, dtype=np.float32).copy())
+
+
+def test_monitor_records_and_passes_through():
+    out = _out_dir()
+    try:
+        factory = lambda sr, ch, dev, od, mon: _FakeDuplexStream(sr, ch, dev, od, mon)
+        report = record_with_monitor(out / "rec.wav", seconds=0.25, samplerate=SR,
+                                     monitor=True, out_device=2, stream_factory=factory)
+        assert report["frames"] == SR // 4 and report["monitor"] is True and report["out_device"] == 2
+        data, sr = sf.read(str(out / "rec.wav"))
+        assert np.abs(data).max() > 0.01
+    finally:
+        shutil.rmtree(out, ignore_errors=True)
+
+
+def test_monitor_write_shape():
+    """监听直通：每块 read 后 write 同数据，形状 (n, 1)。"""
+    out = _out_dir()
+    captured = {}
+
+    class _Rec(_FakeDuplexStream):
+        def write(self, data):
+            super().write(data)
+            captured.setdefault("shape", np.asarray(data).shape)
+
+    try:
+        factory = lambda sr, ch, dev, od, mon: _Rec(sr, ch, dev, od, mon)
+        record_with_monitor(out / "rec.wav", seconds=0.2, samplerate=SR,
+                            monitor=True, stream_factory=factory)
+        assert captured["shape"][1] == 1  # (n, 1)
+    finally:
+        shutil.rmtree(out, ignore_errors=True)
+
+
+def test_monitor_off_no_write_and_stop_event():
+    out = _out_dir()
+    seen = {}
+
+    class _Rec(_FakeDuplexStream):
+        def write(self, data):
+            seen["wrote"] = True
+
+    ev = threading.Event()
+    try:
+        factory = lambda sr, ch, dev, od, mon: _Rec(sr, ch, dev, od, mon,
+                                                    stop_event=ev, stop_after=3)
+        report = record_with_monitor(out / "rec.wav", stop_event=ev, samplerate=SR,
+                                     monitor=False, stream_factory=factory)
+        assert report["frames"] == 3 * 1024
+        assert "wrote" not in seen
+        assert report["monitor"] is False
+    finally:
+        shutil.rmtree(out, ignore_errors=True)
+
+
+def test_monitor_requires_stop_condition():
+    with pytest.raises(ValueError):
+        record_with_monitor("output/x.wav", samplerate=SR)
