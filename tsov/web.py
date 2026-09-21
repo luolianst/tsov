@@ -347,9 +347,46 @@ def project_state(proj: Project) -> dict:
     }
 
 
-def score_duration(score: Score) -> float:
+def score_duration(score: Score, root=None) -> float:
+    """工程时长（含 1s 释放尾）：音符尾 + 音频轨 clip 尾。
+
+    音频部分读文件头（soundfile.info）；文件缺失/未给 root 时忽略（渲染/加载时会报错）。
+    """
     ends = [n.end for t in score.tracks for n in t.notes]
+    if root is not None and score.tracks:
+        import soundfile as sf
+
+        base = Path(root)
+        for t in score.tracks:
+            if str(getattr(t, "kind", "midi") or "midi") != "audio":
+                continue
+            rel = str((getattr(t, "audio", None) or {}).get("file") or "")
+            if not rel:
+                continue
+            try:
+                info = sf.info(str(base / rel))
+                off = float((getattr(t, "audio", None) or {}).get("offset") or 0.0)
+                ends.append(off + float(info.frames) / float(info.samplerate))
+            except Exception:  # noqa: BLE001 —— 文件缺失/损坏：时长忽略（load 时报错）
+                continue
     return round(max(ends) + 1.0, 3) if ends else 1.0  # 含 1s 释放尾（与 mix_graph 一致）
+
+
+def _resolve_project_audio(proj, rel: str) -> Path:
+    """工程内音频相对路径解析（E2 护栏：须在 <工程根>/audio/ 内，防穿越）。"""
+    if not rel:
+        raise HTTPException(400, "缺 file 参数")
+    p = Path(str(rel))
+    if p.is_absolute() or ".." in p.parts:
+        raise HTTPException(400, f"非法音频路径：{rel!r}")
+    root = proj.root.resolve()
+    full = (proj.root / p).resolve()
+    audio_dir = (root / "audio").resolve()
+    if full != audio_dir and audio_dir not in full.parents:
+        raise HTTPException(400, f"音频文件必须在工程 audio/ 内：{rel!r}")
+    if not full.is_file():
+        raise HTTPException(404, f"音频文件不存在：{rel!r}")
+    return full
 
 
 def _score_from_dict(data: dict) -> Score:
@@ -914,7 +951,7 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
         def on_progress(ev: dict) -> None:
             bus.publish(name, "render_progress", ev)
 
-        session = engine.load(score)
+        session = engine.load(score, base_dir=proj.root)
         try:
             audio = engine.render(session, out_wav=out_path, stereo=True,
                                   cache=store, stats=stats, on_progress=on_progress)
@@ -977,6 +1014,87 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
 
     # ---------------- stem 缓存 GC（M-V7 D1 / ADR-0018） ----------------
 
+    # ---------------- 音频素材（M-V8 E2：音频轨·第一刀） ----------------
+
+    @app.post("/api/projects/{name}/audio/import")
+    async def audio_import(name: str, request: Request) -> dict:
+        """音频入库（E2）：JSON {path: 本机绝对路径, name?} 或 multipart file 上传。
+
+        - 路径来源：后端直读本机文件（原曲素材场景，仅本机服务）
+        - 上传来源：浏览器 file input / 拖拽 → 落临时文件后同路径入库（ffmpeg 转 44.1k flac）
+        """
+        proj = st().get_project(name)
+        ctype = (request.headers.get("content-type") or "").lower()
+        tmp_path = None
+        try:
+            if "multipart/form-data" in ctype:
+                form = await request.form()
+                up = form.get("file")
+                if up is None or not getattr(up, "filename", ""):
+                    raise HTTPException(400, "multipart 缺 file 字段")
+                up_name = str(form.get("name") or "").strip() or None
+                suffix = Path(str(up.filename)).suffix or ".bin"
+                incoming = proj.root / "audio" / ".incoming"
+                incoming.mkdir(parents=True, exist_ok=True)
+                tmp_path = incoming / f"upload-{uuid.uuid4().hex[:8]}{suffix}"
+                tmp_path.write_bytes(await up.read())
+                info = proj.import_audio(tmp_path, name=up_name)
+            else:
+                body = await request.json()
+                src = str((body or {}).get("path") or "").strip().strip('"').strip("'")
+                if not src:
+                    raise HTTPException(400, "缺 path（本机音频绝对路径）")
+                info = proj.import_audio(src, name=(body or {}).get("name"))
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        finally:
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        return {"project": name, **info}
+
+    @app.get("/api/projects/{name}/audio/peaks")
+    def audio_peaks(name: str, file: str, buckets: int = 800) -> dict:
+        """波形峰值（E2）：mono 降采样 min/max 桶数组 → 前端 canvas 绘制。"""
+        import soundfile as sf
+
+        proj = st().get_project(name)
+        path = _resolve_project_audio(proj, file)
+        buckets = max(8, min(4000, int(buckets)))
+        data, sr = sf.read(str(path), dtype="float32", always_2d=True)
+        mono = data.mean(axis=1) if data.shape[1] > 1 else data[:, 0]
+        n = int(mono.shape[0])
+        per = max(1, n // buckets)
+        m = (n // per) * per
+        if m >= per:
+            blk = mono[:m].reshape(-1, per)
+            mins = blk.min(axis=1)
+            maxs = blk.max(axis=1)
+            if m < n:  # 尾部余量并入末桶
+                mins[-1] = min(float(mins[-1]), float(mono[m:].min()))
+                maxs[-1] = max(float(maxs[-1]), float(mono[m:].max()))
+        else:
+            mins, maxs = mono[:1], mono[:1]
+        return {
+            "file": path.name,
+            "seconds": round(n / int(sr), 4),
+            "buckets": int(len(mins)),
+            "min": [round(float(x), 5) for x in mins],
+            "max": [round(float(x), 5) for x in maxs],
+        }
+
+    @app.get("/api/projects/{name}/audio/file")
+    def audio_file(name: str, file: str):
+        """试听/交付工程内音频文件（FileResponse）。"""
+        from fastapi.responses import FileResponse
+
+        proj = st().get_project(name)
+        path = _resolve_project_audio(proj, file)
+        media = "audio/flac" if path.suffix.lower() == ".flac" else "application/octet-stream"
+        return FileResponse(str(path), media_type=media, filename=path.name)
+
     @app.post("/api/projects/{name}/cache/gc")
     def cache_gc(name: str) -> dict:
         """删除不被 HEAD/收藏版本引用的 stem；顺带清理退役的 `.render-cache/`。"""
@@ -1002,7 +1120,7 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
         proj.save()
         engine = st().engine()
         out_dir = proj.root / "exports" / datetime.now().strftime("%Y%m%d-%H%M%S")
-        session = engine.load(proj.score)
+        session = engine.load(proj.score, base_dir=proj.root)
         try:
             report = engine.export(session, out_dir,
                                    mix=body.mix, buses=body.buses, stems=body.stems,
@@ -1122,7 +1240,7 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
         if not st().play_lock.acquire(blocking=False):
             raise HTTPException(409, "已有播放在进行中")
         bus = st().bus
-        duration = score_duration(proj.score)
+        duration = score_duration(proj.score, proj.root)
         start = float(body.start or 0.0) if body else 0.0
         loop = None
         if body and body.loop is not None:
@@ -1139,7 +1257,7 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
             bus.publish(name, "playback_start", {"duration": duration, "start": start,
                                                  "loop": list(loop) if loop else None})
             engine = st().engine()
-            engine.play(engine.load(proj.score), blocking=True, start=start, loop=loop,
+            engine.play(engine.load(proj.score, base_dir=proj.root), blocking=True, start=start, loop=loop,
                         stop_event=st().play_stop)
             bus.publish(name, "playback_stop", {"duration": duration})
             return {"ok": True, "duration": duration, "start": start,
