@@ -36,14 +36,16 @@ class HostEngine:
     # 加载
     # ------------------------------------------------------------------
 
-    def load(self, score: Score) -> HostSession:
-        return HostSession.from_score(score, soundfont=self.soundfont, samplerate=self.samplerate)
+    def load(self, score: Score, base_dir=None) -> HostSession:
+        """Score → 会话。``base_dir``（工程根）：音频轨（kind=="audio"）解析 audio.file 相对路径用。"""
+        return HostSession.from_score(score, soundfont=self.soundfont, samplerate=self.samplerate, base_dir=base_dir)
 
     def load_score(self, score_path) -> HostSession:
         import json
 
-        score = Score.from_dict(json.loads(Path(score_path).read_text(encoding="utf-8")))
-        return self.load(score)
+        path = Path(score_path)
+        score = Score.from_dict(json.loads(path.read_text(encoding="utf-8")))
+        return self.load(score, base_dir=path.parent)
 
     # ------------------------------------------------------------------
     # 离线渲染

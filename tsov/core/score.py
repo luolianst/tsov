@@ -68,6 +68,9 @@ class Track:
     automation: dict = field(default_factory=dict)  # {"volume": [[t, 倍率], ...], "pan": [[t, -1..1], ...]}
     # ---- M-V8 E1：组织层文件夹归属（单层，向后兼容增补；与总线「混音路由」解耦）----
     folder: str = ""             # 空 = 不在任何文件夹
+    # ---- M-V8 E2：音频轨（additive；kind="midi" 时与旧数据完全同构）----
+    kind: str = "midi"           # "midi" | "audio"
+    audio: dict = field(default_factory=dict)  # 音频轨元数据：{"file": "audio/xxx.flac", "offset": 0.0}（工程内相对路径；第一刀单 clip/轨）
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -84,6 +87,8 @@ class Track:
             solo=bool(data.get("solo", False)),
             automation=dict(data.get("automation") or {}),
             folder=str(data.get("folder") or ""),
+            kind=str(data.get("kind") or "midi"),
+            audio=dict(data.get("audio") or {}),
         )
 
 

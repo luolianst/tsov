@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -22,6 +23,18 @@ from .diff import diff_notes
 from .journal import ActionJournal
 
 SUMMARY_NOTE_CAP = 80  # 摘要里每轨最多列出的音符数
+
+# ---- M-V8 E2：音频入库（import_audio）----
+AUDIO_SAMPLERATE = 44100              # 入库统一采样率（对齐引擎 SR）
+AUDIO_MAX_BYTES = 200 * 1024 * 1024   # 单文件上限（200MB）
+AUDIO_EXTS = {".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".aiff", ".aif"}
+_AUDIO_SLUG_RE = re.compile(r"[^0-9A-Za-z\u4e00-\u9fff._-]+")
+
+
+def _audio_slug(name: str) -> str:
+    """文件名清洗（保留中英文/数字/._-；截断 60 字符）。"""
+    s = _AUDIO_SLUG_RE.sub("-", str(name or "")).strip("-._ ")
+    return s[:60] or "audio"
 
 
 class Project:
@@ -60,6 +73,72 @@ class Project:
         path = self.root / "score.json"
         path.write_text(json.dumps(self.score.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
         return path
+
+    # ------------------------------------------------------------------
+    # 音频素材（M-V8 E2）
+    # ------------------------------------------------------------------
+
+    def import_audio(self, src, *, name: str | None = None) -> dict:
+        """音频入库：转码 44.1kHz stereo FLAC 存工程 ``audio/``（内容哈希去重）。
+
+        - 源：ffmpeg 可读的音频文件（扩展名白名单 + 大小上限 ``AUDIO_MAX_BYTES``）
+        - 输出：``audio/<slug>-<sha256[:8]>.flac``——同内容重复入库 → 去重（deduped=True）
+        - 返回：{file（工程内相对路径，供 track.audio.file）, path, seconds, samplerate,
+          channels, deduped, title, src}
+        """
+        import hashlib
+        import shutil
+        import subprocess as sp
+
+        src = Path(src)
+        if not src.is_file():
+            raise ValueError(f"音频源文件不存在：{src}")
+        ext = src.suffix.lower()
+        if ext not in AUDIO_EXTS:
+            raise ValueError(f"不支持的音频扩展名：{ext!r}（支持 {', '.join(sorted(AUDIO_EXTS))}）")
+        size = src.stat().st_size
+        if size <= 0:
+            raise ValueError(f"音频文件为空：{src}")
+        if size > AUDIO_MAX_BYTES:
+            raise ValueError(f"音频文件过大：{size / 1e6:.1f}MB（上限 {AUDIO_MAX_BYTES / 1e6:.0f}MB）")
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            raise ValueError("未找到 ffmpeg（PATH）——音频入库需要 ffmpeg 转码")
+
+        out_dir = self.root / "audio"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        slug = _audio_slug(name or src.stem)
+        tmp = out_dir / f".tmp-{slug}.flac"
+        cmd = [ffmpeg, "-y", "-v", "error", "-i", str(src),
+               "-ar", str(AUDIO_SAMPLERATE), "-ac", "2", "-c:a", "flac", str(tmp)]
+        proc = sp.run(cmd, capture_output=True, text=True)
+        if proc.returncode != 0 or not tmp.is_file():
+            tmp.unlink(missing_ok=True)
+            raise ValueError(f"ffmpeg 转码失败（rc={proc.returncode}）：{(proc.stderr or '').strip()[:300]}")
+
+        digest = hashlib.sha256(tmp.read_bytes()).hexdigest()[:8]
+        target = out_dir / f"{slug}-{digest}.flac"
+        if target.is_file():
+            tmp.unlink(missing_ok=True)
+            deduped = True
+        else:
+            tmp.replace(target)
+            deduped = False
+
+        import soundfile as sf
+
+        info = sf.info(str(target))
+        rel = target.relative_to(self.root).as_posix()
+        return {
+            "file": rel,
+            "path": str(target),
+            "seconds": round(float(info.frames) / float(info.samplerate), 4),
+            "samplerate": int(info.samplerate),
+            "channels": int(info.channels),
+            "deduped": deduped,
+            "title": name or src.stem,
+            "src": str(src),
+        }
 
     # ------------------------------------------------------------------
     # 编辑事务 + 历史

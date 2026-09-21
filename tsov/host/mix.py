@@ -18,6 +18,7 @@ from __future__ import annotations
 import numpy as np
 
 from ..core.score import Bus
+from .audio_source import AudioClipSource
 from .cache import StemStore
 from .effect import apply_effect_chain, effect_tail_seconds
 from .session import HostSession
@@ -130,7 +131,8 @@ def render_buses(
 
         name = tr.name or f"track-{idx}"
         # 轨内前段（音源+效果）：ADR-0018 缓存路径（命中即读；未命中渲后入库）
-        if cache is not None:
+        # E2：音频轨不走 stem 缓存（文件直读——入库素材不变；轨道级缓存留后续）
+        if cache is not None and not isinstance(ht.source, AudioClipSource):
             key = cache.key_for(tr, samplerate)
             buf = cache.load(key)
             if buf is None:

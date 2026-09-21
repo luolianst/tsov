@@ -9,6 +9,8 @@
 - M-V8 小修包增补（2026-09-21）：scale_time（全谱时间等比缩放＝变速重排，Q47；音符/书签/三层 automation）
   / set_tempo_remap（改 BPM + 按 旧/新 缩放，单命令原子＝「跟速重排」默认入口）
   / remove_track / rename_track——工具与 UI 同一动作路径（工具经 EditBatch）
+- M-V8 E2 增补（2026-09-21）：add_audio_track（追加音频轨；file=工程 audio/ 内相对路径）
+  / set_audio_track（音频轨改 offset/file——只作用于 kind=="audio"）——音频轨一等公民第一刀
 - 事务协议：EditBatch.apply(score) 在深拷贝上逐条执行——非法命令被拒绝并记录 error，
   合法命令全部生效（部分应用 + 错误清单）；apply 前不脏原 Score。
 - 该命令层 = M-V2 起 agent 工具与 Web UI 共用的编辑通道（docs/05 接口契约）。
@@ -17,11 +19,13 @@
 from __future__ import annotations
 
 import copy
+import re
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import Any
 
 from ..core.notes import Note
-from ..core.score import Bookmark, Effect, Score
+from ..core.score import Bookmark, Effect, Score, Track
 from ..dsp.pitch import midi_to_hz
 
 
@@ -88,6 +92,9 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
         return _apply_remove_bookmark(score, c)
     if c.op == "set_bookmark":
         return _apply_set_bookmark(score, c)
+    # M-V8 E2：音频轨——add 不依赖 track 索引（改轨内字段见 set_audio_track）
+    if c.op == "add_audio_track":
+        return _apply_add_audio_track(score, c)
     if not (0 <= c.track < len(score.tracks)):
         return f"{c.op} 越界：track {c.track}（共 {len(score.tracks)} 轨）"
     track = score.tracks[c.track]
@@ -98,6 +105,9 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
         return _apply_remove_track(score, c)
     if c.op == "rename_track":
         return _apply_rename_track(score, track, c)
+    # M-V8 E2：音频轨字段（offset/file；只作用于音频轨）
+    if c.op == "set_audio_track":
+        return _apply_set_audio_track(score, track, c)
     if c.op == "set_track_mix":
         return _apply_set_track_mix(score, track, c)
     if c.op == "set_track_folder":
@@ -593,4 +603,90 @@ def _apply_rename_track(score: Score, track, c: EditCommand) -> str | None:
     for bm in score.bookmarks:
         if bm.scope == "track" and bm.ref == old:
             bm.ref = name
+    return None
+
+
+# ---------------------------------------------------------------------------
+# M-V8 E2：音频轨（audio track · 第一刀）
+# ---------------------------------------------------------------------------
+
+
+def _audio_track_path_guard(rel: str) -> str | None:
+    """音频相对路径护栏：非空 / 非绝对 / 无穿越 / 须在 audio/ 下。返回错误文本或 None。"""
+    if not rel:
+        return "音频路径为空"
+    p = PurePosixPath(rel)
+    if p.is_absolute() or ".." in p.parts or (p.parts and p.parts[0] != "audio"):
+        return f"须为工程 audio/ 内相对路径：{rel!r}"
+    return None
+
+
+def _audio_default_name(rel: str) -> str:
+    """从 file 生成缺省轨名：``audio/原曲-1a2b3c4d.flac`` → ``原曲``（去 8 位哈希后缀）。"""
+    stem = PurePosixPath(rel).stem
+    parts = stem.rsplit("-", 1)
+    if len(parts) == 2 and re.fullmatch(r"[0-9a-f]{8}", parts[1]):
+        stem = parts[0]
+    return (stem or "音频")[:64]
+
+
+def _apply_add_audio_track(score: Score, c: EditCommand) -> str | None:
+    """value = {file, offset?, name?}；追加一条音频轨（kind="audio"）。
+
+    - file：工程内相对路径（须在 audio/ 下、不得穿越）——**文件存在性由宿主层运行时校验**
+    - name 缺省 = file 去哈希后缀；与现有轨重名 → 自动加序号（2, 3, …）
+    """
+    v = c.value
+    if not isinstance(v, dict):
+        return "add_audio_track value 需 {file, offset?, name?}"
+    rel = str(v.get("file") or "").strip().replace("\\", "/")
+    err = _audio_track_path_guard(rel)
+    if err:
+        return f"add_audio_track {err}"
+    try:
+        offset = float(v.get("offset") or 0.0)
+    except (TypeError, ValueError):
+        return f"add_audio_track offset 非法：{v.get('offset')!r}"
+    if offset < 0:
+        return f"add_audio_track offset 不能为负：{offset}"
+    name = str(v.get("name") or "").strip() or _audio_default_name(rel)
+    if len(name) > 64:
+        return "add_audio_track 名称过长（≤64 字符）"
+    existing = {t.name for t in score.tracks}
+    base, i = name, 2
+    while name in existing:
+        name = f"{base} {i}"
+        i += 1
+    score.tracks.append(Track(name=name, kind="audio", audio={"file": rel, "offset": round(offset, 6)}))
+    return None
+
+
+def _apply_set_audio_track(score: Score, track, c: EditCommand) -> str | None:
+    """track = 索引；value = {offset?, file?}——只作用于音频轨（kind=="audio"）。"""
+    if str(getattr(track, "kind", "midi") or "midi") != "audio":
+        return f"set_audio_track 只作用于音频轨（track {c.track} 是 MIDI 轨）"
+    v = c.value
+    if not isinstance(v, dict):
+        return "set_audio_track value 需 {offset?, file?}"
+    audio = dict(getattr(track, "audio", None) or {})
+    changed = False
+    if "offset" in v:
+        try:
+            off = float(v["offset"])
+        except (TypeError, ValueError):
+            return f"set_audio_track offset 非法：{v['offset']!r}"
+        if off < 0:
+            return f"set_audio_track offset 不能为负：{off}"
+        audio["offset"] = round(off, 6)
+        changed = True
+    if "file" in v:
+        rel = str(v.get("file") or "").strip().replace("\\", "/")
+        err = _audio_track_path_guard(rel)
+        if err:
+            return f"set_audio_track {err}"
+        audio["file"] = rel
+        changed = True
+    if not changed:
+        return "set_audio_track 无可改字段（offset / file）"
+    track.audio = audio
     return None
