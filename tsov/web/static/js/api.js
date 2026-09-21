@@ -82,4 +82,18 @@ export const api = {
   wavUrl: (name) => '/api/projects/' + encodeURIComponent(name) + '/wav',
   wavUrlRev: (name, rev) => '/api/projects/' + encodeURIComponent(name) + '/wav?rev=' + encodeURIComponent(rev || 'HEAD'),
   eventsUrl: (name) => '/api/projects/' + encodeURIComponent(name) + '/events',
+  /* M-V8 E2：音频素材（导入双来源 / 波形峰值 / 原文件 URL） */
+  importAudioPath: (name, path, label) =>
+    post('/api/projects/' + encodeURIComponent(name) + '/audio/import', { path, name: label || null }),
+  importAudioUpload: (name, file) => {
+    const fd = new FormData();
+    fd.append('file', file, file.name);
+    fd.append('name', String(file.name || '').replace(/\.[^.]+$/, ''));   // 用原文件名（非临时名）
+    return req('/api/projects/' + encodeURIComponent(name) + '/audio/import', { method: 'POST', body: fd });
+  },
+  fetchPeaks: (name, file, buckets) =>
+    req('/api/projects/' + encodeURIComponent(name) + '/audio/peaks?file=' + encodeURIComponent(file) +
+        '&buckets=' + (buckets || 900)),
+  audioUrl: (name, file) =>
+    '/api/projects/' + encodeURIComponent(name) + '/audio/file?file=' + encodeURIComponent(file),
 };

@@ -169,12 +169,49 @@ async function renameProject() {
   } catch (e) { setError(e.message); }
 }
 
+/* ---------------- M-V8 E2：音频素材导入（本机路径 / 浏览器文件 / 拖拽） ---------------- */
+
+function openAudioImport() {
+  if (!store.project) { setError('先打开一个工程'); return; }
+  const p = prompt('本机音频路径（留空则打开文件选择框；支持 wav/mp3/flac/m4a/ogg…）：', '');
+  if (p === null) return;
+  if (p.trim()) { importAudioByPath(p.trim()); return; }
+  const inp = $('audio-file-input');
+  if (inp) inp.click();
+}
+
+async function importAudioByPath(path) {
+  if (!store.project) { setError('先打开一个工程'); return; }
+  try {
+    const info = await api.importAudioPath(store.project, path);
+    await attachAudio(info, String(path).split(/[\\/]/).pop());
+  } catch (e) { setError('导入失败：' + e.message); }
+}
+
+async function importAudioFile(file) {
+  if (!store.project) { setError('先打开一个工程'); return; }
+  try {
+    const info = await api.importAudioUpload(store.project, file);
+    await attachAudio(info, file.name);
+  } catch (e) { setError('导入失败：' + e.message); }
+}
+
+/** 入库成功后接命令层：add_audio_track 追加音频轨（与 agent 同一动作路径）。 */
+async function attachAudio(info, fallbackName) {
+  const nm = String(info.title || fallbackName || '').replace(/\.[^.]+$/, '');
+  const r = await api.postBatch(store.project, '导入音频',
+    [{ op: 'add_audio_track', value: { file: info.file, name: nm || null } }], '素材：' + info.file);
+  if (!r.applied) { setError('被拒：' + (r.errors || []).join('；')); return; }
+  bus.dispatch('toast', '已导入素材「' + (nm || info.file) + '」' +
+    (info.deduped ? '（复用已有文件）' : '') + ' · ' + Number(info.seconds).toFixed(2) + 's');
+}
+
 /* ---------------- 启动 ---------------- */
 
 function boot() {
   initTheme();   // UI 批A：浅色默认（?theme= / localStorage 可覆盖）
   roll.init($('roll'));
-  lanes.init($('lanes'), { onEnter: enterSingle });
+  lanes.init($('lanes'), { onEnter: enterSingle, onDropAudio: importAudioFile });
   timeline.init($('ruler'), $('track-list'), $('segments-info'), $('meta-info'), { onEnter: enterSingle });
   timeline.initMarkers($('markers'));   // M-V8 E1：段道
   /* 修正轮2.1：段轨已删（洛怜：段落/和弦两行可以删；后续以「书签」替代，见 Q46） */
@@ -229,6 +266,13 @@ function boot() {
   $('mi-new').addEventListener('click', () => { closeMenus(null); newProject(); });
   $('mi-rename').addEventListener('click', () => { closeMenus(null); renameProject(); });
   $('mi-import').addEventListener('click', (e) => { e.stopPropagation(); showImportRow(); });
+  $('mi-import-audio').addEventListener('click', () => { closeMenus(null); openAudioImport(); });
+  const audioInp = $('audio-file-input');
+  if (audioInp) audioInp.addEventListener('change', () => {
+    const f = audioInp.files && audioInp.files[0];
+    audioInp.value = '';
+    if (f) importAudioFile(f);
+  });
   $('mi-refresh').addEventListener('click', () => { closeMenus(null); loadProjects(true); });
   $('mi-export').addEventListener('click', () => { closeMenus(null); openExport(); });
   $('mi-fav').addEventListener('click', () => { closeMenus(null); doFavorite(); });

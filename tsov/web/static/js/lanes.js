@@ -4,15 +4,17 @@
    只读：编辑都在单轨视图（roll.js） */
 
 import { bus } from './events.js';
-import { store, tempo, beatsPerBar, setSelection, toggleOverlay, setView, bookmarks, setSelBookmark } from './state.js';
+import { store, tempo, beatsPerBar, setSelection, toggleOverlay, setView, bookmarks, setSelBookmark, setError } from './state.js';
 import { pal, trackColors } from './theme.js';
 import { seekTo } from './playback.js';
+import { api } from './api.js';
 
 const KEYS = 56;   // 左侧标签槽（与卷帘 KEYS_W 对齐）
 const FONT_UI = '11px "Microsoft YaHei UI","PingFang SC","MiSans","HarmonyOS Sans SC",system-ui,sans-serif';
 
 let canvas, ctx, W = 0, H = 0, dpr = 1;
 let onEnter = null;   // 双击回调（main.js 注入）
+let onDropAudio = null;   // M-V8 E2：文件拖入回调（main.js 注入）
 
 function rowH() {
   const v = getComputedStyle(document.documentElement).getPropertyValue('--row-h');
@@ -34,6 +36,55 @@ function tOf(x) { return store.view.scrollSec + (x - KEYS) / store.view.pxPerSec
 function laneAt(y) {
   const i = Math.floor(y / rowH());
   return (store.score && i >= 0 && i < store.score.tracks.length) ? i : -1;
+}
+
+/* ---- M-V8 E2：音频素材（波形块 / 拖动 / 试听） ---- */
+
+const peaksCache = new Map();   // `${project}|${rel}` → {seconds,min,max}（内容寻址文件名 = 天然失效键）
+const peaksPending = new Set();
+let drag = null;                // {ti, startX, baseOffset, curOffset, moved}
+let preview = null;             // 试听 Audio 单例
+
+/** 波形峰值缓存；未就绪时触发一次拉取并返回 null（拉回后重绘）。 */
+function peaksGet(rel) {
+  if (!rel || !store.project) return null;
+  const key = store.project + '|' + rel;
+  const hit = peaksCache.get(key);
+  if (hit) return hit;
+  if (!peaksPending.has(key)) {
+    peaksPending.add(key);
+    api.fetchPeaks(store.project, rel, 900)
+      .then((d) => { if (d && d.max && d.max.length) { peaksCache.set(key, d); draw(); } })
+      .catch(() => { /* 拿不到波形 → 画占位框 */ })
+      .finally(() => peaksPending.delete(key));
+  }
+  return null;
+}
+
+function round3(x) { return Math.round(Number(x) * 1000) / 1000; }
+
+function previewAudio(trk) {
+  const rel = trk.audio && trk.audio.file;
+  if (!rel || !store.project) return;
+  if (preview) { preview.pause(); preview = null; }
+  preview = new Audio(api.audioUrl(store.project, rel));
+  preview.play()
+    .then(() => bus.dispatch('toast', '试听素材：' + (trk.name || rel)))
+    .catch((e) => setError('试听失败：' + (e && e.message ? e.message : e)));
+}
+
+function commitAudioDrag() {
+  const d = drag;
+  drag = null;
+  if (!d || !d.moved || !store.project) { draw(); return; }
+  const off = round3(d.curOffset);
+  api.postBatch(store.project, '移动音频素材', [{ op: 'set_audio_track', track: d.ti, value: { offset: off } }], null)
+    .then((r) => {
+      if (r.applied) bus.dispatch('toast', '素材已移动 → ' + off.toFixed(2) + 's');
+      else setError('被拒：' + (r.errors || []).join('；'));
+    })
+    .catch((e) => setError(e.message));
+  draw();
 }
 
 /* ---- M-V8 E1：书签小旗（轨道/文件夹层）+ 可见性（隐藏/文件夹折叠） ---- */
@@ -160,7 +211,52 @@ export function draw() {
     const y0 = ti * rh;
     if (y0 > H) break;
     if (!trackVisible(ti)) continue;   // M-V8 E1：隐藏/文件夹折叠 → 不画音符
-    const notes = sc.tracks[ti].notes;
+    const trk = sc.tracks[ti];
+    if (trk.kind === 'audio') {   /* M-V8 E2：音频轨 → 波形块（拖块改 offset，双击试听） */
+      const off = (drag && drag.ti === ti) ? drag.curOffset : ((trk.audio && trk.audio.offset) || 0);
+      const pv = peaksGet(trk.audio && trk.audio.file);
+      const secs = pv ? pv.seconds : 0;
+      const x0 = xOf(off);
+      const w = Math.max(2, secs * v.pxPerSec);
+      if (x0 + w < KEYS || x0 > W) continue;
+      const yTop = y0 + pad;
+      const hh = inner;
+      const col = tc[ti % tc.length];
+      ctx.fillStyle = col;
+      ctx.globalAlpha = (drag && drag.ti === ti) ? 0.30 : 0.16;
+      ctx.fillRect(x0, yTop, w, hh);
+      ctx.globalAlpha = 1;
+      if (pv && pv.max && pv.max.length) {
+        /* 波形：min/max 竖线（按像素抽样） */
+        const mid = yTop + hh / 2;
+        const amp = hh / 2 - 1.5;
+        const nB = pv.max.length;
+        const px = Math.max(1, Math.floor(w));
+        ctx.strokeStyle = col;
+        ctx.beginPath();
+        for (let i = 0; i < px; i++) {
+          const b = Math.min(nB - 1, Math.floor((i / px) * nB));
+          const xa = Math.round(x0 + i) + 0.5;
+          ctx.moveTo(xa, mid - pv.max[b] * amp);
+          ctx.lineTo(xa, mid - pv.min[b] * amp);
+        }
+        ctx.stroke();
+      } else {
+        ctx.strokeStyle = p.laneLabel;   /* 波形未就绪：虚线占位 */
+        ctx.setLineDash([3, 3]);
+        ctx.strokeRect(x0 + 0.5, yTop + 0.5, Math.max(2, w) - 1, hh - 1);
+        ctx.setLineDash([]);
+      }
+      ctx.strokeStyle = p.keySep;
+      ctx.strokeRect(x0 + 0.5, yTop + 0.5, Math.max(2, w) - 1, hh - 1);
+      if (w > 64) {
+        ctx.fillStyle = p.laneLabel;
+        ctx.font = FONT_UI;
+        ctx.fillText('🎵 ' + (trk.name || '素材'), x0 + 5, yTop + 12);
+      }
+      continue;
+    }
+    const notes = trk.notes;
     if (!notes.length) continue;
     const overlay = store.overlayTracks.has(ti);
     const selected = store.selection.track === ti;
@@ -237,6 +333,7 @@ export function draw() {
 export function init(el, opts) {
   canvas = el;
   onEnter = (opts && opts.onEnter) || null;
+  onDropAudio = (opts && opts.onDropAudio) || null;
   ctx = canvas.getContext('2d');
   resize();
   new ResizeObserver(() => { resize(); draw(); }).observe(canvas);
@@ -255,16 +352,37 @@ export function init(el, opts) {
 
   canvas.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
+    if (drag) return;   // 拖动中不重入
     const fl = flagAt(e.offsetX, e.offsetY);   // M-V8 E1：小旗 → 选中 + 跳转
     if (fl) { setSelBookmark(fl.i); seekTo(fl.b.start); return; }
     const ti = laneAt(e.offsetY);
     if (ti < 0) return;
+    const trk = store.score && store.score.tracks[ti];
+    if (trk && trk.kind === 'audio') {   /* M-V8 E2：块内按下 = 拖动改 offset；块外 = 选中 */
+      const pv = peaksGet(trk.audio && trk.audio.file);
+      const off = (trk.audio && trk.audio.offset) || 0;
+      const secs = pv ? pv.seconds : 0;
+      if (e.offsetX >= xOf(off) - 2 && e.offsetX <= xOf(off + secs) + 2) {
+        drag = { ti, startX: e.clientX, baseOffset: off, curOffset: off, moved: false };
+        canvas.style.cursor = 'grabbing';
+        return;
+      }
+      setSelection(ti, []);
+      return;
+    }
     if (e.ctrlKey || e.shiftKey || e.metaKey) { toggleOverlay(ti); return; }
     setSelection(ti, []);
   });
 
   /* M-V8 E1：小旗悬停提示 */
   canvas.addEventListener('mousemove', (e) => {
+    if (drag) {   /* M-V8 E2：拖动音频块（预览跟手，松手提交） */
+      const dt = (e.clientX - drag.startX) / store.view.pxPerSec;
+      drag.curOffset = Math.max(0, drag.baseOffset + dt);
+      if (Math.abs(dt) > 0.002) drag.moved = true;
+      draw();
+      return;
+    }
     const fl = flagAt(e.offsetX, e.offsetY);
     if (fl) {
       const t = ensureTip();
@@ -284,7 +402,18 @@ export function init(el, opts) {
   canvas.addEventListener('dblclick', (e) => {
     const ti = laneAt(e.offsetY);
     if (ti < 0) return;
+    const trk = store.score && store.score.tracks[ti];
+    if (trk && trk.kind === 'audio') { previewAudio(trk); return; }   /* M-V8 E2：双击试听素材 */
     if (onEnter) onEnter(ti);
+  });
+
+  /* M-V8 E2：音频拖拽（松手提交）+ 文件拖入导入 */
+  window.addEventListener('mouseup', () => { if (drag) commitAudioDrag(); });
+  canvas.addEventListener('dragover', (e) => { e.preventDefault(); });
+  canvas.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f && onDropAudio) onDropAudio(f);
   });
 
   for (const topic of ['state', 'view', 'selection', 'viewmode', 'playhead', 'playing', 'agenttracks', 'markers']) {
