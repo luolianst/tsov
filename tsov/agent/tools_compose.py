@@ -248,6 +248,47 @@ def tool_set_track_mix(args: dict) -> str:
     return f"track[{ti}] {tr.name}：{'、'.join(parts)} ｜ 写回：{out}"
 
 
+def tool_remove_track(args: dict) -> str:
+    """删除轨道（track = 轨索引或轨名，必填）；该轨书签引用同步清理（经命令层 remove_track）。"""
+    from ..host.command import EditBatch
+
+    score = _load(args["score_path"])
+    if args.get("track") is None:
+        raise ValueError("track 必填（轨索引或轨名）——删哪条轨必须明确")
+    ti = _resolve_track(score, args.get("track"))
+    name = score.tracks[ti].name
+    n_before = len(score.tracks)
+    batch = EditBatch(label="remove_track")
+    batch.add("remove_track", track=ti)
+    new_score, result = batch.apply(score)
+    if not result.ok:
+        raise ValueError("；".join(result.errors))
+    out = _save(new_score, _out_path(args, args["score_path"]))
+    return (f"已删除 track[{ti}] {name!r}（{n_before} 轨 → {len(new_score.tracks)} 轨；书签引用已同步清理）"
+            f" ｜ 写回：{out} ｜ 现有：{_track_line(new_score)}")
+
+
+def tool_rename_track(args: dict) -> str:
+    """重命名轨道（track = 轨索引或轨名；name = 新名）；重名拒绝，该轨书签引用同步更新（经命令层 rename_track）。"""
+    from ..host.command import EditBatch
+
+    score = _load(args["score_path"])
+    if args.get("track") is None:
+        raise ValueError("track 必填（轨索引或轨名）")
+    new_name = str(args.get("name") or "").strip()
+    if not new_name:
+        raise ValueError("需要 name（新轨道名）")
+    ti = _resolve_track(score, args.get("track"))
+    old_name = score.tracks[ti].name
+    batch = EditBatch(label="rename_track")
+    batch.add("rename_track", track=ti, value={"name": new_name})
+    new_score, result = batch.apply(score)
+    if not result.ok:
+        raise ValueError("；".join(result.errors))
+    out = _save(new_score, _out_path(args, args["score_path"]))
+    return f"轨道已改名：{old_name!r} → {new_name!r}（书签引用已同步）｜ 写回：{out}"
+
+
 def tool_apply_effect(args: dict) -> str:
     """给轨应用效果预设（混响等；同一轨整体替换为该预设链）。track 必填（防误落到 track[0]）。"""
     from ..presets import apply_effect_preset, load_library
@@ -509,6 +550,27 @@ def register_compose_tools(registry: ToolRegistry) -> None:
             "pan": {"type": "number"},
         }, "required": ["score_path"]},
         handler=tool_set_track_mix))
+
+    registry.register(ToolSpec(
+        name="remove_track",
+        description="删除轨道（track = 轨索引或轨名，必填）；该轨的 track 层书签引用同步清理（文件夹变空时连 folder 书签）",
+        parameters={"type": "object", "properties": {
+            "score_path": {"type": "string"},
+            "track": {"description": "轨索引或轨名（必填）"},
+            "output": {"type": "string"},
+        }, "required": ["score_path", "track"]},
+        handler=tool_remove_track))
+
+    registry.register(ToolSpec(
+        name="rename_track",
+        description="重命名轨道（track = 轨索引或轨名；name = 新名）；重名拒绝，该轨书签引用同步更新",
+        parameters={"type": "object", "properties": {
+            "score_path": {"type": "string"},
+            "track": {"description": "轨索引或轨名（必填）"},
+            "name": {"type": "string", "description": "新轨道名"},
+            "output": {"type": "string"},
+        }, "required": ["score_path", "track", "name"]},
+        handler=tool_rename_track))
 
     registry.register(ToolSpec(
         name="apply_effect",

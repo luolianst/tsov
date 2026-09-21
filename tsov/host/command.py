@@ -6,6 +6,9 @@
   / set_instrument（program） / add_effect / remove_effect——参数层 UI 与 agent 工具同出，走同一命令通道
 - M-V8 E1 增补（2026-09-20）：add_bookmark / remove_bookmark / set_bookmark（书签三层：project/folder/track，
   索引寻址） / set_track_folder（组织层文件夹归属，单层）——段轨转正，UI 手势与外部 agent 同一动作路径
+- M-V8 小修包增补（2026-09-21）：scale_time（全谱时间等比缩放＝变速重排，Q47；音符/书签/三层 automation）
+  / set_tempo_remap（改 BPM + 按 旧/新 缩放，单命令原子＝「跟速重排」默认入口）
+  / remove_track / rename_track——工具与 UI 同一动作路径（工具经 EditBatch）
 - 事务协议：EditBatch.apply(score) 在深拷贝上逐条执行——非法命令被拒绝并记录 error，
   合法命令全部生效（部分应用 + 错误清单）；apply 前不脏原 Score。
 - 该命令层 = M-V2 起 agent 工具与 Web UI 共用的编辑通道（docs/05 接口契约）。
@@ -73,6 +76,11 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
     # ---- 工程级命令（不需要 track）----
     if c.op == "set_tempo":
         return _apply_set_tempo(score, c)
+    # M-V8 小修包 Q47：变速重排（全谱时间缩放；set_tempo_remap = 改 BPM+缩放单命令原子）
+    if c.op == "scale_time":
+        return _apply_scale_time(score, c)
+    if c.op == "set_tempo_remap":
+        return _apply_set_tempo_remap(score, c)
     # M-V8 E1：书签三层（工程级索引寻址；与音符共用事务/快照窗口）
     if c.op == "add_bookmark":
         return _apply_add_bookmark(score, c)
@@ -86,6 +94,10 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
     notes = track.notes
 
     # ---- 轨道级参数命令（UI 批A：参数层与 agent 工具同出）----
+    if c.op == "remove_track":
+        return _apply_remove_track(score, c)
+    if c.op == "rename_track":
+        return _apply_rename_track(score, track, c)
     if c.op == "set_track_mix":
         return _apply_set_track_mix(score, track, c)
     if c.op == "set_track_folder":
@@ -450,4 +462,135 @@ def _apply_set_track_folder(score: Score, track, c: EditCommand) -> str | None:
     if len(name) > 64:
         return "文件夹名过长（≤64 字符）"
     track.folder = name
+    return None
+
+
+# ======================================================================
+# M-V8 小修包（2026-09-21）：变速重排（Q47） + 轨道管理（G5 遗留）
+# ======================================================================
+
+
+def _scale_automation(automation: dict, factor: float) -> int:
+    """automation {key: [[t, v], ...]} → t 等比缩放；返回缩放点数。"""
+    count = 0
+    for pts in (automation or {}).values():
+        for p in pts:
+            p[0] = round(float(p[0]) * factor, 6)
+            count += 1
+    return count
+
+
+def scale_score_times(score: Score, factor: float) -> dict:
+    """全谱时间等比缩放（Q47 变速重排）：音符 + 书签 + 三层 automation（track/bus/master）。
+
+    新时间 = 旧时间 × factor（factor = 旧tempo ÷ 新tempo；>1 变慢、<1 变快）。
+    等比缩放下音符与网格的相对关系不变（旧对齐 = 新对齐，仅整体时间轴缩放）。
+    返回统计 {"notes", "bookmarks", "automation_points"}。
+    """
+    stats = {"notes": 0, "bookmarks": 0, "automation_points": 0}
+    for track in score.tracks:
+        for n in track.notes:
+            n.start = round(n.start * factor, 6)
+            n.end = round(n.end * factor, 6)
+            stats["notes"] += 1
+        stats["automation_points"] += _scale_automation(track.automation, factor)
+    for bus in getattr(score, "buses", []) or []:
+        stats["automation_points"] += _scale_automation(bus.automation, factor)
+    master = getattr(score, "master", None)
+    if master is not None:
+        stats["automation_points"] += _scale_automation(master.automation, factor)
+    for bm in score.bookmarks:
+        bm.start = round(bm.start * factor, 6)
+        if bm.end is not None:
+            bm.end = round(bm.end * factor, 6)
+        stats["bookmarks"] += 1
+    return stats
+
+
+def _apply_scale_time(score: Score, c: EditCommand) -> str | None:
+    """value = {"factor": >0}（也接受裸数字）；全谱时间 × factor。"""
+    v = c.value
+    raw = v.get("factor") if isinstance(v, dict) else v
+    if raw is None:
+        return "scale_time value 需 {factor}（>0；新时长=旧×factor）"
+    try:
+        factor = float(raw)
+    except (TypeError, ValueError):
+        return f"scale_time factor 非法：{raw!r}"
+    if not (0.01 <= factor <= 100.0):
+        return f"scale_time factor 越界：{factor}（0.01~100）"
+    scale_score_times(score, factor)
+    return None
+
+
+def _apply_set_tempo_remap(score: Score, c: EditCommand) -> str | None:
+    """value = {"tempo": x, "time_signature"?: "n/d"}；改 BPM 并按 旧/新 全谱等比缩放（Q47 变速重排）。
+
+    单命令原子：任一部分校验不通过 → 整体拒绝，不会出现「缩放了但 tempo 没改」的分裂状态。
+    """
+    v = c.value
+    if not isinstance(v, dict) or v.get("tempo") is None:
+        return "set_tempo_remap value 需 {tempo, time_signature?}"
+    # 1) 全部校验（不动 score）
+    try:
+        t = float(v["tempo"])
+    except (TypeError, ValueError):
+        return f"set_tempo_remap tempo 非法：{v['tempo']!r}"
+    if not (20.0 <= t <= 400.0):
+        return f"set_tempo_remap tempo 越界：{t}（20~400）"
+    ts_norm = None
+    if v.get("time_signature") is not None:
+        from ..core.score import parse_time_signature
+
+        raw = str(v["time_signature"]).strip()
+        num, den = parse_time_signature(raw)
+        if f"{num}/{den}" != raw:
+            return f"set_tempo_remap time_signature 非法（形如 6/8 / 3/4）：{v['time_signature']!r}"
+        ts_norm = f"{num}/{den}"
+    # 2) 校验通过 → 一次性执行（tempo + 拍号 + 缩放）
+    old = float(score.tempo or 120.0)
+    score.tempo = round(t, 3)
+    if ts_norm is not None:
+        score.time_signature = ts_norm
+    if abs(t - old) > 1e-9:
+        scale_score_times(score, old / t)
+    return None
+
+
+def _apply_remove_track(score: Score, c: EditCommand) -> str | None:
+    """track = 索引；删轨并同步清理引用（该轨 track 层书签；文件夹变空时连 folder 书签）。"""
+    track = score.tracks[c.track]
+    name = track.name
+    folder = getattr(track, "folder", "") or ""
+    score.tracks.pop(c.track)
+    if score.bookmarks:
+        folders_after = {t.folder for t in score.tracks if getattr(t, "folder", "")}
+        score.bookmarks = [
+            bm for bm in score.bookmarks
+            if not (bm.scope == "track" and bm.ref == name)
+            and not (bm.scope == "folder" and folder and bm.ref == folder and folder not in folders_after)
+        ]
+    return None
+
+
+def _apply_rename_track(score: Score, track, c: EditCommand) -> str | None:
+    """value = {"name": str} 或字符串；重名拒绝；同步更新该轨 track 层书签 ref。"""
+    v = c.value
+    name = v.get("name") if isinstance(v, dict) else v
+    if name is None:
+        return "rename_track value 需 {name} 或字符串"
+    name = str(name).strip()
+    if not name:
+        return "rename_track 名称不能为空"
+    if len(name) > 64:
+        return "rename_track 名称过长（≤64 字符）"
+    if name == track.name:
+        return None
+    if any(t is not track and t.name == name for t in score.tracks):
+        return f"rename_track 名称已存在：{name!r}"
+    old = track.name
+    track.name = name
+    for bm in score.bookmarks:
+        if bm.scope == "track" and bm.ref == old:
+            bm.ref = name
     return None

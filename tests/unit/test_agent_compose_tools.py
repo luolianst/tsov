@@ -20,7 +20,8 @@ SF2 = ROOT / "vendor" / "soundfonts" / "FluidR3_GM.sf2"
 
 NEW_TOOLS = {
     "voice_to_score", "detect_key", "create_track", "write_notes", "duplicate_bars",
-    "set_track_mix", "apply_effect", "apply_pattern", "analyze_levels", "export_audio", "export_midi",
+    "set_track_mix", "remove_track", "rename_track", "apply_effect", "apply_pattern",
+    "analyze_levels", "export_audio", "export_midi",
     "read_text",
 }
 
@@ -149,6 +150,26 @@ def test_set_track_mix_and_effect(tmp_path):
     assert effects and "reverb" in {e["type"] for e in effects}
     with pytest.raises(ValueError):
         tc.tool_apply_effect({"score_path": str(sp), "output": str(sp), "track": 0, "preset": "no-such-preset"})
+
+
+def test_remove_rename_track_tools(tmp_path):
+    sp = _save_score(tmp_path / "score.json", _base([_melody(), _drums()]))
+    # 重命名（轨名寻址）
+    msg = tc.tool_rename_track({"score_path": str(sp), "output": str(sp), "track": "drums", "name": "drums2"})
+    assert "drums2" in msg
+    assert [t["name"] for t in _load(sp)["tracks"]] == ["melody", "drums2"]
+    with pytest.raises(ValueError):
+        tc.tool_rename_track({"score_path": str(sp), "output": str(sp), "track": "drums2", "name": "melody"})  # 重名
+    with pytest.raises(ValueError):
+        tc.tool_rename_track({"score_path": str(sp), "output": str(sp), "name": "x"})  # track 必填
+    # 删除（轨名寻址）
+    msg2 = tc.tool_remove_track({"score_path": str(sp), "output": str(sp), "track": "drums2"})
+    assert "已删除" in msg2 and "2 轨 → 1 轨" in msg2
+    assert [t["name"] for t in _load(sp)["tracks"]] == ["melody"]
+    with pytest.raises(ValueError):
+        tc.tool_remove_track({"score_path": str(sp), "output": str(sp)})  # track 必填
+    with pytest.raises(ValueError):
+        tc.tool_remove_track({"score_path": str(sp), "output": str(sp), "track": "nope"})  # 未知轨名
 
 
 def test_apply_pattern(tmp_path):

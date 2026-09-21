@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from tsov.agent.tools import build_default_registry, tool_set_tempo
+from tsov.agent.tools import build_default_registry, tool_load_score, tool_set_tempo
 from tsov.core.score import Score, parse_time_signature
 from tsov.midi.export import score_to_midi
 
@@ -96,6 +96,52 @@ def test_set_tempo_tool_rejects_bad_values():
                 tool_set_tempo({"score_path": str(src), **bad})
         with pytest.raises(ValueError):
             tool_set_tempo({"score_path": str(src)})   # 两个都没给 → 报错
+    finally:
+        _cleanup(d)
+
+
+def test_set_tempo_tool_remaps_notes_by_default():
+    """Q47：工具默认 remap=True → 改 BPM 同步缩放音符（跟速重排）；写 agent-edited-score.json。"""
+    d = _ws()
+    try:
+        src = d / "score.json"
+        src.write_text(json.dumps(_score_payload()), encoding="utf-8")   # 1 音 0.0–0.3 @120
+        out = tool_set_tempo({"score_path": str(src), "tempo": 240})
+        assert "跟速重排" in out
+        edited = json.loads((d / "agent-edited-score.json").read_text(encoding="utf-8"))
+        assert edited["tempo"] == 240.0
+        n = edited["tracks"][0]["notes"][0]
+        assert n["start"] == 0.0 and abs(n["end"] - 0.15) < 1e-6         # factor=120/240=0.5
+        assert json.loads(src.read_text(encoding="utf-8"))["tracks"][0]["notes"][0]["end"] == 0.3  # 原文件不动
+    finally:
+        _cleanup(d)
+
+
+def test_set_tempo_tool_remap_false_keeps_notes():
+    d = _ws()
+    try:
+        src = d / "score.json"
+        src.write_text(json.dumps(_score_payload()), encoding="utf-8")
+        out = tool_set_tempo({"score_path": str(src), "tempo": 240, "remap": False})
+        assert "跟速重排" not in out
+        edited = json.loads((d / "agent-edited-score.json").read_text(encoding="utf-8"))
+        assert edited["tempo"] == 240.0
+        assert edited["tracks"][0]["notes"][0]["end"] == 0.3             # 音符不动
+    finally:
+        _cleanup(d)
+
+
+def test_load_score_accepts_both_keys():
+    """键名修正：score_path（主）与 path（兼容别名）都能读；都不给 → 明确报错（G5 遗留；原 KeyError: 'path'）。"""
+    d = _ws()
+    try:
+        src = d / "score.json"
+        src.write_text(json.dumps(_score_payload()), encoding="utf-8")
+        a = tool_load_score({"score_path": str(src)})
+        b = tool_load_score({"path": str(src)})
+        assert "melody" in a and a == b
+        with pytest.raises(ValueError):
+            tool_load_score({})
     finally:
         _cleanup(d)
 

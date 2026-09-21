@@ -33,8 +33,10 @@ def _score_from_path(score_path: str):
 
 
 def tool_load_score(args: dict) -> str:
-    """读 Score JSON → 紧凑摘要（标题/调性/各轨音符表）。"""
-    path = args["path"]
+    """读 Score JSON → 紧凑摘要（标题/调性/各轨音符表）。键名兼容 score_path / path（2026-09-21 修正）。"""
+    path = args.get("score_path") or args.get("path")
+    if not path:
+        raise ValueError("load_score 需要 score_path（兼容别名 path）：score json 路径")
     if not os.path.isfile(path):
         raise FileNotFoundError(path)
     try:
@@ -87,40 +89,62 @@ def tool_edit_score(args: dict) -> str:
 
 
 def tool_set_tempo(args: dict) -> str:
-    """设置速度/拍号（M-V6 时间参数）：写回新 score JSON（同 edit_score 约定，Web 端采纳 = 一个 commit）。"""
+    """设置速度/拍号。remap=True（默认）时改 BPM 同步等比缩放全谱时间（Q47 变速重排：
+    音符/书签/automation 一起动＝DAW 习惯）；remap=False 仅改谱面属性。
+    写回新 score JSON（同 edit_score 约定，Web 端采纳 = 一个 commit）。"""
     score_path = args["score_path"]
     out_path = args.get("output") or str(Path(score_path).parent / "agent-edited-score.json")
     score = _score_from_path(score_path)
     tempo = args.get("tempo")
     sig = args.get("time_signature")
+    remap = bool(args.get("remap", True))
     if tempo is None and sig is None:
         raise ValueError("set_tempo 至少需要 tempo 或 time_signature 之一")
 
     from ..core.score import parse_time_signature
+    from ..host.command import EditBatch
 
+    batch = EditBatch(label="set_tempo")
     changes: list[str] = []
+    remapped = False
     if tempo is not None:
-        t = float(tempo)
-        if not (20.0 <= t <= 400.0):
-            raise ValueError(f"tempo 越界（20-400 BPM）：{t}")
-        score.tempo = round(t, 3)
-        changes.append(f"tempo={score.tempo}")
+        try:
+            t = float(tempo)
+        except (TypeError, ValueError):
+            raise ValueError(f"tempo 非法：{tempo!r}") from None
+        old = float(score.tempo or 120.0)
+        changes.append(f"tempo={round(t, 3)}")
+        if remap and abs(t - old) > 1e-9:
+            # 单命令原子（set_tempo_remap）：BPM 与音符缩放同生共死，不出现「缩放了但 tempo 没改」
+            val = {"tempo": t}
+            if sig is not None:
+                val["time_signature"] = str(sig)
+                changes.append(f"time_signature={str(sig).strip()}")
+                sig = None
+            batch.add("set_tempo_remap", value=val)
+            changes.append(f"跟速重排（×{old / t:.6f}）")
+            remapped = True
+        else:
+            batch.add("set_tempo", value={"tempo": t})
     if sig is not None:
-        num, den = parse_time_signature(str(sig))
-        if f"{num}/{den}" != str(sig).strip():
-            raise ValueError(f"time_signature 非法（形如 6/8）：{sig!r}")
-        score.time_signature = f"{num}/{den}"
-        changes.append(f"time_signature={score.time_signature}")
+        batch.add("set_tempo", value={"time_signature": str(sig)})
+        changes.append(f"time_signature={str(sig).strip()}")
+
+    new_score, result = batch.apply(score)
+    if not result.ok:
+        raise ValueError("；".join(result.errors))
 
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(score.to_dict(), f, ensure_ascii=False, indent=2)
+        json.dump(new_score.to_dict(), f, ensure_ascii=False, indent=2)
 
-    ts_num, ts_den = parse_time_signature(score.time_signature)
-    bar_sec = (60.0 / float(score.tempo or 120.0)) * (4.0 * ts_num / ts_den)
-    ends = [n.end for tr in score.tracks for n in tr.notes]
+    ts_num, ts_den = parse_time_signature(new_score.time_signature)
+    bar_sec = (60.0 / float(new_score.tempo or 120.0)) * (4.0 * ts_num / ts_den)
+    ends = [n.end for tr in new_score.tracks for n in tr.notes]
     t_end = max(ends) if ends else 0.0
     bars = math.ceil(t_end / bar_sec) if bar_sec > 0 else 0
-    return (f"已写回：{out_path}（{', '.join(changes)}；"
+    note_count = sum(len(tr.notes) for tr in new_score.tracks)
+    remap_note = f"；已重排 {note_count} 音（含书签/automation）" if remapped else ""
+    return (f"已写回：{out_path}（{', '.join(changes)}{remap_note}；"
             f"每小节≈{bar_sec:.3f}s，现有内容≈{bars} 小节，末尾 {t_end:.2f}s）")
 
 
@@ -200,8 +224,11 @@ def build_default_registry(skills: SkillLibrary | None = None) -> ToolRegistry:
             description="读取 tsov 的 Score JSON（如 output/.../stage-04-score.json），返回标题/调性/音符表摘要",
             parameters={
                 "type": "object",
-                "properties": {"path": {"type": "string", "description": "score json 路径"}},
-                "required": ["path"],
+                "properties": {
+                    "score_path": {"type": "string", "description": "score json 路径（与 edit_score/render_wav 键名一致）"},
+                    "path": {"type": "string", "description": "score json 路径（兼容别名，与 score_path 二选一）"},
+                },
+                "required": ["score_path"],
             },
             handler=tool_load_score,
         )
@@ -227,13 +254,17 @@ def build_default_registry(skills: SkillLibrary | None = None) -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="set_tempo",
-            description="设置工程时间参数：速度（BPM）与拍号（如 6/8）。写回 score JSON（同 edit_score 落盘约定）",
+            description=("设置工程时间参数：速度（BPM）与拍号（如 6/8）。改 BPM 默认「跟速重排」——"
+                         "音符/书签/automation 等比缩放（音乐真的变快/变慢，Q47）；remap=false 仅改谱面属性。"
+                         "写回 score JSON（同 edit_score 落盘约定）"),
             parameters={
                 "type": "object",
                 "properties": {
                     "score_path": {"type": "string"},
                     "tempo": {"type": "number", "description": "BPM（20-400）"},
                     "time_signature": {"type": "string", "description": "拍号，形如 6/8 / 3/4（可选）"},
+                    "remap": {"type": "boolean",
+                              "description": "改 BPM 时是否等比缩放全谱时间（默认 true＝跟速重排；false＝只改谱面属性，音符不动）"},
                     "output": {"type": "string", "description": "输出路径，缺省同目录 agent-edited-score.json"},
                 },
                 "required": ["score_path"],
