@@ -20,6 +20,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import tsov.agent
+import tsov.web
 from tsov.web import create_app
 
 from unit._cleanup import rmtree_force
@@ -28,10 +29,13 @@ _HAS_SF = Path("vendor/soundfonts/FluidR3_GM.sf2").is_file()
 
 
 @pytest.fixture()
-def env():
-    """独立 output 目录 + app + client（每用例隔离）。"""
+def env(monkeypatch):
+    """独立 output 目录 + app + client（每用例隔离）。
+    agent 会话落盘同样隔离到 <d>/agent-sessions——不再污染仓库 output/agent-sessions/（2026-09-21）。
+    """
     d = Path("output") / f"webtest-{uuid.uuid4().hex[:10]}"
     d.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(tsov.web, "AGENT_SESSION_DIR", str(d / "agent-sessions"))
     app = create_app(output_dir=d)
     client = TestClient(app)
     try:
@@ -384,7 +388,7 @@ def test_chat_multiturn_same_session(env, monkeypatch):
     assert _wait_agent_done(env, name)
 
     import json as _json
-    lines = (proj_root.parent.parent / "agent-sessions" / (r1["session_id"] + ".jsonl")).read_text(encoding="utf-8").splitlines()
+    lines = (env["dir"] / "agent-sessions" / (r1["session_id"] + ".jsonl")).read_text(encoding="utf-8").splitlines()
     assert len(lines) >= 6, "两次会话应追加到同一 JSONL"
 
     # 上下文增长：第二轮首调看到的消息数 > 第一轮首调
@@ -716,7 +720,7 @@ def test_chat_annotations_invalid_rejected(env, monkeypatch):
     assert state["score"]["tracks"][0]["notes"][0]["pitch_midi"] == 60
     log = env["client"].get(f"/api/projects/{name}/log").json()["log"]
     assert not any("人工标注" in ln for ln in log)
-    assert not (Path("output") / "agent-sessions" / f"{sid}.jsonl").exists()
+    assert not (env["dir"] / "agent-sessions" / f"{sid}.jsonl").exists()
     assert "messages" not in seen, "拒绝路径不应进入 LLM"
 
 
@@ -735,7 +739,7 @@ def test_chat_annotations_clear_all_guard(env, monkeypatch):
     assert len(state["score"]["tracks"][0]["notes"]) == 3
     log = env["client"].get(f"/api/projects/{name}/log").json()["log"]
     assert not any("人工标注" in ln for ln in log)
-    assert not (Path("output") / "agent-sessions" / f"{r['session_id']}.jsonl").exists()
+    assert not (env["dir"] / "agent-sessions" / f"{r['session_id']}.jsonl").exists()
 
 
 # ---------------------------------------------------------------------------
