@@ -2,7 +2,7 @@
 
 import { bus } from './events.js';
 import { api } from './api.js';
-import { KEYS_W, store, tempo, beatsPerBar, segments, scoreBounds, setSelection, setError, toggleOverlay, refTag, bookmarks, folderTracks, setLoop, setLoopOn, setSelBookmark, setSelFolder, toggleFolderCollapse } from './state.js';
+import { KEYS_W, store, tempo, beatsPerBar, segments, scoreBounds, setSelection, setError, toggleOverlay, refTag, bookmarks, folderTracks, setLoop, setLoopOn, setSelBookmark, setSelFolder, toggleFolderCollapse, setSingleTrack } from './state.js';
 import { pal, trackColors } from './theme.js';
 import { seekTo } from './playback.js';
 
@@ -227,7 +227,7 @@ function renderTracks(el) {
     /* 窄档小字行会隐藏（CSS）→ 信息并进 tooltip */
     item.title = (tr.name || ('track ' + ti)) + ' · ' + sub.textContent +
       (isMain ? ' ｜ 主轨（单轨写谱中）' : '') + (isOverlay ? ' ｜ 灰叠加' : '') +
-      ' ｜ 双击：' + (single ? '切换主轨' : '进入单轨写谱') + ' ｜ 右键：文件夹归属';
+      ' ｜ 双击：' + (single ? '切换主轨' : '进入单轨写谱') + ' ｜ 右键：轨道菜单';
 
     body.appendChild(top);
     body.appendChild(sub);
@@ -246,21 +246,68 @@ function renderTracks(el) {
       if (e.target.closest('button')) return;
       if (onEnter) onEnter(ti);   // 进入单轨 / 切换主轨（main.js 处理）
     });
-    /* M-V8 E1：右键 = 文件夹归属（命令层 set_track_folder；空 = 移出） */
+    /* M-V8 E1：右键 = 轨道操作菜单（文件夹归属；小修包加：重命名 / 删除轨道；全部走命令层） */
     item.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       if (!store.project) return;
       const cur = tr.folder || '';
-      const name = prompt('归入文件夹（留空 = 移出；单层，不嵌套）：', cur);
-      if (name === null) return;
-      const v = name.trim();
-      if (v === cur) return;
-      api.postBatch(store.project, '文件夹归属', [{ op: 'set_track_folder', track: ti, value: { folder: v } }], null)
-        .then((r) => {
-          if (r.applied) bus.dispatch('toast', '「' + (tr.name || ('track ' + ti)) + '」→ ' + (v || '（无文件夹）'));
-          else setError('被拒：' + (r.errors || []).join('；'));
-        })
-        .catch((err) => setError(err.message));
+      const tname = tr.name || ('track ' + ti);
+      const nTracks = store.score ? store.score.tracks.length : 0;
+      openBmMenu(e.clientX, e.clientY, [
+        {
+          label: '文件夹归属…',
+          fn: () => {
+            const v0 = prompt('归入文件夹（留空 = 移出；单层，不嵌套）：', cur);
+            if (v0 === null) return;
+            const v = v0.trim();
+            if (v === cur) return;
+            api.postBatch(store.project, '文件夹归属', [{ op: 'set_track_folder', track: ti, value: { folder: v } }], null)
+              .then((r) => {
+                if (r.applied) bus.dispatch('toast', '「' + tname + '」→ ' + (v || '（无文件夹）'));
+                else setError('被拒：' + (r.errors || []).join('；'));
+              })
+              .catch((err) => setError(err.message));
+          },
+        },
+        {
+          label: '重命名…',
+          fn: () => {
+            const v0 = prompt('新轨道名：', tr.name || '');
+            if (v0 === null) return;
+            const v = v0.trim();
+            if (!v || v === tr.name) return;
+            api.postBatch(store.project, '重命名轨道', [{ op: 'rename_track', track: ti, value: { name: v } }], null)
+              .then((r) => {
+                if (r.applied) bus.dispatch('toast', '轨道已改名：' + tname + ' → ' + v);
+                else setError('被拒：' + (r.errors || []).join('；'));
+              })
+              .catch((err) => setError(err.message));
+          },
+        },
+        {
+          label: '删除轨道',
+          fn: () => {
+            if (!confirm('删除轨道「' + tname + '」？' + (nTracks <= 1 ? '（最后一条音轨，工程将变空！）' : '') +
+                         '（书签引用一并清理；可 Ctrl+Z 撤销）')) return;
+            api.postBatch(store.project, '删除轨道', [{ op: 'remove_track', track: ti }], null)
+              .then((r) => {
+                if (!r.applied) { setError('被拒：' + (r.errors || []).join('；')); return; }
+                bus.dispatch('toast', '已删除「' + tname + '」（可 Ctrl+Z 撤销）');
+                /* 索引校正：删除后原 ti+1 起前移；主轨/选中轨按删位更新（防脏索引渲染） */
+                const newCount = Math.max(0, nTracks - 1);
+                const fix = (i) => (i === ti ? Math.min(ti, Math.max(0, newCount - 1)) : (i > ti ? i - 1 : i));
+                const sti = fix(store.singleTrack);
+                if (sti !== store.singleTrack) setSingleTrack(sti);
+                const st = store.selection && typeof store.selection.track === 'number' ? store.selection.track : null;
+                if (st !== null) {
+                  const ns = fix(st);
+                  if (ns !== st) setSelection(ns, []);
+                }
+              })
+              .catch((err) => setError(err.message));
+          },
+        },
+      ]);
     });
     el.appendChild(item);
   });

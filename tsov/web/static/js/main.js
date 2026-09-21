@@ -710,10 +710,21 @@ function boot() {
   });
 
   /* UI 批A：速度 / 拍号（命令层 set_tempo；只在此处编辑——段轨与顶栏不重复） */
-  async function postTempo(value, label) {
+  /* M-V8 小修包（Q47）：改速度默认「跟速重排」——同事务追加 scale_time（全谱时间等比缩放）；复选可关（记忆） */
+  const rescaleChk = $('tempo-rescale');
+  try {
+    const saved = localStorage.getItem('tsov.tempoRescale');
+    if (saved !== null) rescaleChk.checked = (saved === '1');
+  } catch (e) { /* localStorage 不可用：保持默认勾选 */ }
+  rescaleChk.addEventListener('change', () => {
+    try { localStorage.setItem('tsov.tempoRescale', rescaleChk.checked ? '1' : '0'); } catch (e) { /* ignore */ }
+    toast(rescaleChk.checked ? '改速度 = 跟速重排（音符随动）' : '改速度 = 仅改谱面（音符不动）');
+  });
+
+  async function postTempo(cmds, label) {
     if (!store.project) { setError('先打开一个工程'); return; }
     try {
-      const r = await api.postBatch(store.project, label, [{ op: 'set_tempo', track: 0, value }], '参数：' + label);
+      const r = await api.postBatch(store.project, label, cmds, '参数：' + label);
       if (r.applied) toast('已更新 ' + label + ' ' + refTag(r));
       else setError('被拒：' + (r.errors || []).join('；'));
     } catch (e) { setError(e.message); }
@@ -728,15 +739,23 @@ function boot() {
   tempoIn.addEventListener('change', () => {
     const t = Number(tempoIn.value);
     if (!t || t < 20 || t > 400) { syncMetro(); return; }
-    if (store.score && Math.abs(t - store.score.tempo) < 1e-6) return;
-    postTempo({ tempo: t }, '速度 ♩=' + t);
+    const old = store.score ? Number(store.score.tempo) : null;
+    if (store.score && Math.abs(t - old) < 1e-6) return;
+    if (rescaleChk.checked && old && Math.abs(t - old) > 1e-9) {
+      /* 单命令原子：set_tempo_remap（BPM + 缩放同生共死） */
+      const nNotes = (store.score.tracks || []).reduce((a, tr) => a + ((tr.notes || []).length), 0);
+      const label = '速度 ♩=' + t + ' · 跟速重排' + (nNotes ? '（' + nNotes + ' 音）' : '');
+      postTempo([{ op: 'set_tempo_remap', track: 0, value: { tempo: t } }], label);
+    } else {
+      postTempo([{ op: 'set_tempo', track: 0, value: { tempo: t } }], '速度 ♩=' + t);
+    }
   });
   tempoIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { tempoIn.blur(); } });
   sigIn.addEventListener('change', () => {
     const v = (sigIn.value || '').trim();
     const cur = (store.score && store.score.time_signature) || '4/4';
     if (!v || v === cur) return;
-    postTempo({ time_signature: v }, '拍号 ' + v);
+    postTempo([{ op: 'set_tempo', track: 0, value: { time_signature: v } }], '拍号 ' + v);
   });
   sigIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { sigIn.blur(); } });
   bus.on('state', syncMetro);
