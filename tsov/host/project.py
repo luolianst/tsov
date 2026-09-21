@@ -224,9 +224,18 @@ class Project:
             errors="replace",
         )
 
+    def _has_git(self) -> bool:
+        """本目录是否有**有效**的 git 仓库（`.git/HEAD` 存在为准）。
+
+        2026-09-21 实测坑：删工程目录失败会残留**空 `.git/` 目录**——`(root/'.git').exists()`
+        会被穿透：既跳过 init，又让 git 命令向上找到父仓库（log 显示仓库根历史、commit 指错仓库）。
+        空目录时 git 自己也会忽略并向上找，所以判定必须比「目录存在」更严。
+        """
+        return (self.root / ".git" / "HEAD").exists()
+
     def _ensure_git(self) -> None:
-        if not (self.root / ".git").exists():
-            self._git("init", "-q")
+        if not self._has_git():
+            self._git("init", "-q")   # 对已存在的空 .git 目录：git init 会补全结构（重初始化）
         gitignore = self.root / ".gitignore"
         if not gitignore.exists():
             gitignore.write_text(
@@ -237,7 +246,7 @@ class Project:
 
     def commit(self, message: str) -> str | None:
         """git add -A + commit；返回短 hash（失败返回 None）。"""
-        if not (self.root / ".git").exists():
+        if not self._has_git():
             return None
         self._git("add", "-A")
         proc = self._git("commit", "-m", message)
@@ -248,7 +257,7 @@ class Project:
         return None
 
     def log(self, n: int = 20) -> list[str]:
-        if not (self.root / ".git").exists():
+        if not self._has_git():
             return []
         proc = self._git("log", "--oneline", f"-{int(n)}")
         return [ln for ln in proc.stdout.strip().splitlines() if ln]
@@ -259,7 +268,7 @@ class Project:
         用于 A/B 对比试听（议题 ④）：版本树左槽只读参考，禁止旧版分叉编辑。
         版本不存在/损坏 → 返回 None。
         """
-        if not (self.root / ".git").exists():
+        if not self._has_git():
             return None
         proc = self._git("show", f"{rev}:score.json")
         if proc.returncode != 0 or not proc.stdout.strip():
@@ -271,7 +280,7 @@ class Project:
 
     def rollback(self, rev: str = "HEAD~1") -> bool:
         """回滚到指定版本（只动 score.json；M-V7 D2：记快照窗口条目，零 commit）。"""
-        if not (self.root / ".git").exists() or not self.log():
+        if not self._has_git() or not self.log():
             return False
         pre_dict = self.score.to_dict()
         proc = self._git("checkout", rev, "--", "score.json")
@@ -304,7 +313,7 @@ class Project:
 
     def delete_favorite(self, tag: str) -> bool:
         """删除收藏 tag（只删标签，不动提交；M-V7 D3）。"""
-        if not (self.root / ".git").exists() or not str(tag).startswith("fav/"):
+        if not self._has_git() or not str(tag).startswith("fav/"):
             return False
         proc = self._git("tag", "-d", str(tag))
         return proc.returncode == 0
@@ -322,7 +331,7 @@ class Project:
 
         tag 形式：`fav/<时间戳>[-auto | -time | -标签]`。
         """
-        if not (self.root / ".git").exists():
+        if not self._has_git():
             return {"ok": False, "error": "工程无 git 仓库"}
         label = "".join(ch for ch in str(name or "") if (ch.isalnum() or ch in "-_"))[:32]
         if auto:
@@ -345,14 +354,14 @@ class Project:
 
     def is_dirty(self) -> bool:
         """工作区是否有未提交改动（收藏/自动收藏"防空收"判据）。"""
-        if not (self.root / ".git").exists():
+        if not self._has_git():
             return False
         proc = self._git("status", "--porcelain")
         return bool(proc.stdout.strip())
 
     def head_hash(self) -> str | None:
         """HEAD 短 hash（计数器对齐"上次 git 点"用）。"""
-        if not (self.root / ".git").exists():
+        if not self._has_git():
             return None
         proc = self._git("rev-parse", "--short", "HEAD")
         if proc.returncode != 0:
@@ -361,7 +370,7 @@ class Project:
 
     def favorites(self) -> list[dict]:
         """收藏列表（fav/* tag + 指向 commit 的缩略信息；新→旧）。"""
-        if not (self.root / ".git").exists():
+        if not self._has_git():
             return []
         proc = self._git("tag", "--list", "fav/*")
         tags = [t.strip() for t in (proc.stdout or "").splitlines() if t.strip()]

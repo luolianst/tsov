@@ -213,6 +213,22 @@ def test_project_git_sparse_commits_and_rollback(ws):
 
 
 @pytest.mark.skipif(not _HAS_GIT, reason="git 不可用")
+def test_project_recovers_from_empty_git_residue(ws):
+    """空 .git 目录残留（删目录失败场景）→ 重建仓库 + 基线提交，不向上穿透父仓库。
+
+    2026-09-21 实测坑：`(root/'.git').exists()` 判定会被空目录穿透——init 被跳过、
+    log 显示父仓库历史、commit 指错仓库；现以 `.git/HEAD` 判定。
+    """
+    root = ws / "proj"
+    root.mkdir()
+    (root / ".git").mkdir()                      # 模拟：删工程残留的空 .git 目录
+    p = Project(score=_score([_note(0.0, 0.5, 60)]), root=root, name="proj")
+    assert (root / ".git" / "HEAD").exists()     # 已重建为有效仓库
+    entries = p.log(5)
+    assert entries and entries[0].endswith("init: proj")   # 基线提交落在本工程
+
+
+@pytest.mark.skipif(not _HAS_GIT, reason="git 不可用")
 def test_project_ignore_wav(ws):
     p = Project.create("p4", _score([_note(0.0, 0.5, 60)]), parent=ws)
     (p.root / "song.wav").write_bytes(b"RIFFxxxx")
