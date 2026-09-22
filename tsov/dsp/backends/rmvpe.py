@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 
 from ...core.notes import Note, Voice
-from ..pitch import hz_to_deviation_cents, hz_to_midi, midi_to_hz
+from ...core.units import hz_to_deviation_cents, hz_to_midi, midi_to_hz
 from . import TranscribeBackend
 
 _ROOT = Path(__file__).resolve().parents[3]

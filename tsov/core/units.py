@@ -1,4 +1,7 @@
-"""音高换算工具：Hz ↔ MIDI ↔ 半音偏移（DSP / eval 共用）。
+"""音高换算工具：Hz ↔ MIDI ↔ 音分（纯数学、无状态；DSP / 分析 / 宿主共用）。
+
+2026-09-22 架构治理（F1）：自 tsov/dsp/pitch.py 下沉——纯工具归 core 底部，
+消除 host → dsp 反向依赖（原文件随之删除）。
 
 - hz_to_midi / midi_to_hz：十二平均律换算
 - hz_to_deviation_cents：某频率相对最近 MIDI 音的偏差（音分）

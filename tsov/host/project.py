@@ -15,8 +15,8 @@ import subprocess
 import time
 from pathlib import Path
 
-from ..analysis.dataset import midi_to_note_name
-from ..analysis.key import detect_key  # M-V2.4：命令层编辑后调性同步（与 edit_score 共用实现）
+from ..core.names import midi_to_note_name
+from ..core.key import detect_key  # 2026-09-22 F1：下沉 core（命令层编辑后调性同步）
 from ..core.score import Score
 from .command import EditBatch
 from .diff import diff_notes

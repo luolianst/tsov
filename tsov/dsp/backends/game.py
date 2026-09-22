@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 
 from ...core.notes import Note, Voice
-from ..pitch import midi_to_hz
+from ...core.units import midi_to_hz
 from . import TranscribeBackend
 
 # 项目内 GAME 安装位置（vendor/ 不入库，换机需重新安装）

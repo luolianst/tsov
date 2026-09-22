@@ -1,6 +1,6 @@
 """M8 单轨旋律修复单元测试：重叠裁剪 / 碎段合并 / 调性重算 / 力度真实化。"""
 
-from tsov.analysis.key import detect_key  # M-V2.4：由 analysis.edit 上移
+from tsov.core.key import detect_key  # 2026-09-22 F1：自 analysis 下沉 core（M-V2.4 由来）
 from tsov.core.notes import Note
 from tsov.dsp.segment import split_into_segments
 from tsov.dsp.transcribe import _fix_overlaps

@@ -26,7 +26,7 @@ from typing import Any
 
 from ..core.notes import Note
 from ..core.score import Bookmark, Effect, Score, Track
-from ..dsp.pitch import midi_to_hz
+from ..core.units import midi_to_hz
 
 
 @dataclass

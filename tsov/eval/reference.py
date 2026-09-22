@@ -15,7 +15,7 @@ from typing import Sequence
 
 from ..core.notes import Note, Voice
 from ..core.score import Score
-from ..dsp.pitch import midi_to_hz
+from ..core.units import midi_to_hz
 
 
 @dataclass

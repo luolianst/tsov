@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..core.notes import Note
-from ..dsp.pitch import midi_to_hz
+from ..core.units import midi_to_hz
 
 # 调式 → 音阶 pitch class（相对根音）
 SCALES = {

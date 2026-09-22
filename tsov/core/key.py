@@ -1,5 +1,8 @@
 """调性检测（scale-fit）——key_candidates 重算的共用实现。
 
+2026-09-22 架构治理（F1）：自 tsov/analysis/key.py 下沉——纯工具（依赖仅 core）归底部，
+消除 host → analysis 反向依赖（原文件随之删除）。
+
 来源：M8 缺口 6（edit_score 改谱后调性同步），实现原在 analysis/edit.py 的 `_detect_key`。
 M-V2.4（审计修复）：上移为独立模块——命令层（host/project.apply_batch）与编辑层
 （analysis/edit.edit_score）共用同一实现，避免两条路径调性标签不同步
@@ -12,8 +15,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..core.notes import Note
-from ..core.score import KeyCandidate
+from .notes import Note
+from .score import KeyCandidate
 
 # 调式音阶（相对根音 pitch class）
 KEY_SCALES = {

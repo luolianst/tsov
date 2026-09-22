@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from ..core.notes import Note
-from .pitch import hz_to_deviation_cents
+from ..core.units import hz_to_deviation_cents
 
 
 def quantize_notes(notes: list[Note], bpm: float = 120.0, grid: int = 16, **params) -> list[Note]:

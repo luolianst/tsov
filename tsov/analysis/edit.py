@@ -21,9 +21,9 @@ import requests
 
 from ..core.notes import Note
 from ..core.score import Instrument, Score, Track
-from ..dsp.pitch import midi_to_hz
-from .dataset import midi_to_note_name
-from .key import detect_key  # M-V2.4：调性检测上移独立模块（编辑层/命令层共用）
+from ..core.units import midi_to_hz
+from ..core.names import midi_to_note_name
+from ..core.key import detect_key  # 2026-09-22 F1：下沉 core（编辑层/命令层共用）
 
 from .llm import LLM_ENDPOINT, LLM_MODEL, resolve_api_key  # noqa: E402  与 analysis/llm.py 共用端点/模型（去重）
 
@@ -465,7 +465,7 @@ def _count_changes(orig: list[Note], new: list[Note]) -> int:
     return n
 
 
-# （调性重算 detect_key 已上移 tsov/analysis/key.py —— 编辑层与命令层共用，M-V2.4）
+# （调性重算 detect_key 已下沉 tsov/core/key.py —— 编辑层与命令层共用；2026-09-22 F1 自 analysis 迁出）
 
 
 # ---------------------------------------------------------------------------

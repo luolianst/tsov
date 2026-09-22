@@ -9,7 +9,7 @@ import pytest
 
 from tsov.analysis.edit import (EditResult, _execute_actions, apply_annotations,
                                   build_diff_summary, edit_score, _validate_llm_notes)
-from tsov.analysis.key import detect_key
+from tsov.core.key import detect_key
 from tsov.core.notes import Note
 from tsov.core.score import Instrument, Score, Track
 
@@ -28,7 +28,7 @@ def _score():
 # ---- 人工标注 ----
 
 def test_annotation_pitch():
-    from tsov.dsp.pitch import midi_to_hz
+    from tsov.core.units import midi_to_hz
 
     notes, err = apply_annotations(_score().tracks[0].notes, [{"index": 0, "action": "pitch", "value": 64}])
     assert err == ""
@@ -203,7 +203,7 @@ def test_edit_score_from_scratch_no_tracks(monkeypatch):
 
 def test_edit_score_transpose_syncs_key(monkeypatch):
     """审计回归：动作路径 transpose 后 key_candidates 必须重算（别名比较曾让此判断恒等跳过）。"""
-    from tsov.dsp.pitch import midi_to_hz
+    from tsov.core.units import midi_to_hz
 
     def fake_llm(notes, feedback, suspicious, allow_empty=False, **params):
         acts = [{"action": "transpose", "value": 2}]

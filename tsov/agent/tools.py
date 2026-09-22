@@ -13,7 +13,7 @@ import math
 import os
 from pathlib import Path
 
-from ..analysis.dataset import midi_to_note_name
+from ..core.names import midi_to_note_name
 from .registry import ToolRegistry, ToolSpec
 from .skills import SkillLibrary, tool_use_skill
 

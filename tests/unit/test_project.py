@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from tsov.analysis.key import detect_key
+from tsov.core.key import detect_key
 from tsov.core.notes import Note
 from tsov.core.score import Instrument, KeyCandidate, Score, Track
 from tsov.host import EditBatch, Project, diff_notes

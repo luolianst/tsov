@@ -8,7 +8,7 @@
 import numpy as np
 
 from tsov.dsp.backends.rmvpe import DEFAULTS, _split_on_drift
-from tsov.dsp.pitch import hz_to_midi, midi_to_hz
+from tsov.core.units import hz_to_midi, midi_to_hz
 
 
 def _smooth_levels(levels, hold=12, glide=4, step_s=0.01):

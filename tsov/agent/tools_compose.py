@@ -22,7 +22,7 @@ from pathlib import Path
 
 from ..core.notes import Note, Voice
 from ..core.score import Instrument, Score, Track, parse_time_signature
-from ..dsp.pitch import midi_to_hz
+from ..core.units import midi_to_hz
 from .registry import ToolRegistry, ToolSpec
 
 _NOTE_BASE = {"c": 0, "d": 2, "e": 4, "f": 5, "g": 7, "a": 9, "b": 11}
@@ -130,7 +130,7 @@ def tool_voice_to_score(args: dict) -> str:
 
 def tool_detect_key(args: dict) -> str:
     """重算调性候选（scale-fit；基于音高分布 + 主音权重）。"""
-    from ..analysis.key import detect_key
+    from ..core.key import detect_key
 
     score = _load(args["score_path"])
     ti = _resolve_track(score, args.get("track"))

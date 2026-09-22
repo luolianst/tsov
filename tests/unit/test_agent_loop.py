@@ -17,7 +17,7 @@ import pytest
 from tsov.agent import AgentLoop
 from tsov.core.notes import Note
 from tsov.core.score import Instrument, Score, Track
-from tsov.dsp.pitch import midi_to_hz
+from tsov.core.units import midi_to_hz
 from tsov.render.fluidsynth_backend import default_soundfont
 
 from unit._cleanup import rmtree_force

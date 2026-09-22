@@ -10,24 +10,14 @@ from typing import Any
 
 import numpy as np
 
+from ..core.names import midi_to_note_name
 from ..core.notes import Voice
-
-# 音名表：MIDI 音高 → 音名（midi % 12），八度 = midi // 12 - 1（midi 60 = C4）
-NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
 CONFIDENCE_LABELS = {
     "high": "高（可靠）",
     "medium": "中（存疑）",
     "low": "低（不可靠）",
 }
-
-
-def midi_to_note_name(pitch_midi: int) -> str:
-    """MIDI 音高 → 音名 + 八度（如 60 → C4，69 → A4）。"""
-    pitch_midi = int(pitch_midi)
-    name = NOTE_NAMES[pitch_midi % 12]
-    octave = pitch_midi // 12 - 1
-    return f"{name}{octave}"
 
 
 def confidence_label(confidence: float, high: float = 0.7, medium: float = 0.4) -> str:
