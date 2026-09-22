@@ -457,7 +457,7 @@ def _stream_chat(bus: EventBus, project: str, session_id: str, messages: list[di
     import requests
 
     from .agent.llm import _json_decision
-    from .analysis.llm import LLM_ENDPOINT, LLM_MODEL, resolve_api_key
+    from .llm_client import LLM_ENDPOINT, LLM_MODEL, resolve_api_key  # F4：常量迁 llm_client
 
     api_key = resolve_api_key()
     if not api_key:

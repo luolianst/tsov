@@ -455,9 +455,9 @@ def _cmd_host_play_file(args: argparse.Namespace) -> int:
 
 
 def _cmd_host_export(args: argparse.Namespace) -> int:
-    from .host.export import export_score_file
+    from .host.engine import HostEngine
 
-    report = export_score_file(
+    report = HostEngine().export_score_file(
         args.score_json, args.out_dir,
         stereo=not args.mono,
         stems=not args.no_stems,

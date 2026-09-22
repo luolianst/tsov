@@ -80,6 +80,21 @@ class HostEngine:
             session.close()
         return str(out_wav)
 
+    def export_score_file(self, score_path, out_dir, **opts) -> dict:
+        """Score JSON → 导出矩阵（一步式，CLI 用）。
+
+        F2（2026-09-22）：自 host/export.py 迁入——解 engine↔export 双向引用，
+        统一单方向（engine → export）。
+        """
+        import json
+
+        score = Score.from_dict(json.loads(Path(score_path).read_text(encoding="utf-8")))
+        session = self.load(score)
+        try:
+            return self.export(session, out_dir, **opts)
+        finally:
+            session.close()
+
     # ------------------------------------------------------------------
     # 实时回放
     # ------------------------------------------------------------------

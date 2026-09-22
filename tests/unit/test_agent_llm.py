@@ -1,6 +1,7 @@
 """agent LLM 调用单元测试（ADR-0012）：原生 tool_calls 解析 + JSON 决策兜底。"""
 
 import tsov.agent.llm as al
+import tsov.llm_client as lc
 
 
 class _FakeResp:
@@ -15,7 +16,8 @@ class _FakeResp:
 
 
 def _patch_post(monkeypatch, message):
-    monkeypatch.setattr(al.requests, "post", lambda *a, **k: _FakeResp(message))
+    # F4：HTTP POST 已收口 llm_client——打桩目标随之迁移（语义等价）
+    monkeypatch.setattr(lc.requests, "post", lambda *a, **k: _FakeResp(message))
 
 
 def test_native_tool_calls_parsed(monkeypatch):

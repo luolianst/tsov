@@ -1,6 +1,6 @@
 """agent LLM 调用（ADR-0012）：OpenAI 兼容 chat + 工具调用。
 
-- 端点/模型/key：沿用 `TSOV_LLM_ENDPOINT` / `TSOV_LLM_MODEL` / `OPENCODE_GO_API_KEY`（与 analysis/llm.py 同款）
+- 端点/模型/key：`tsov.llm_client`（F4 收口，2026-09-22；原经 analysis.llm 借用）
 - **原生 function calling 优先**；内容 JSON 决策兜底（`{"tool","arguments"}` / `{"answer"}`），
   兼容网关不支持 tools 参数/返回纯文本的场景
 - 失败抛 RuntimeError（loop 层终止并给出可读错误，不静默）
@@ -9,13 +9,16 @@
 from __future__ import annotations
 
 import json
-import re
 
-import requests
-
-from ..analysis.llm import LLM_ENDPOINT, LLM_MODEL, resolve_api_key
-
-LLM_TIMEOUT_SEC = 240.0
+from ..llm_client import (
+    LLM_ENDPOINT,
+    LLM_MODEL,
+    LLM_TIMEOUT_SEC,
+    LlmRequestError,
+    chat_post_json,
+    extract_json_object,
+    resolve_api_key,
+)
 
 
 def _parse_args(raw: str) -> dict:
@@ -28,19 +31,8 @@ def _parse_args(raw: str) -> dict:
 
 def _json_decision(content: str) -> dict:
     """内容里若有 JSON 决策体 {"tool","arguments"} / {"answer"} → 返回；否则返回 {}。"""
-    text = (content or "").strip()
-    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE)
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        start, end = text.find("{"), text.rfind("}")
-        if start == -1 or end <= start:
-            return {}
-        try:
-            data = json.loads(text[start : end + 1])
-        except json.JSONDecodeError:
-            return {}
-    if isinstance(data, dict) and ("tool" in data or "answer" in data):
+    data = extract_json_object(content)
+    if "tool" in data or "answer" in data:
         return data
     return {}
 
@@ -61,14 +53,13 @@ def chat(messages: list[dict], tools: list[dict] | None = None, **params) -> dic
     payload: dict = {"model": model, "messages": messages, "temperature": 0.2}
     if tools:
         payload["tools"] = tools
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     try:
-        resp = requests.post(endpoint, json=payload, headers=headers, timeout=timeout)
-        resp.raise_for_status()
-        body = resp.json()
+        body = chat_post_json(payload, api_key=api_key, endpoint=endpoint, timeout=timeout)
         message = body["choices"][0]["message"]
-    except Exception as e:  # noqa: BLE001 网络/协议失败 → 明确报错
+    except LlmRequestError as e:  # noqa: BLE001 网络/协议失败 → 明确报错
+        raise RuntimeError(f"agent LLM 调用失败：{e}") from e
+    except Exception as e:  # noqa: BLE001 响应结构异常（如缺 choices）→ 明确报错
         raise RuntimeError(f"agent LLM 调用失败：{type(e).__name__}: {e}") from e
 
     content = message.get("content") or message.get("reasoning_content") or ""

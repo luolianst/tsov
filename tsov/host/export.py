@@ -106,18 +106,3 @@ def export_matrix(
             report["files"].append(path)
 
     return report
-
-
-def export_score_file(score_path, out_dir, *, soundfont: str | None = None, samplerate: int = 44100, **opts) -> dict:
-    """Score JSON → 导出矩阵（一步式，CLI 用）。"""
-    import json
-
-    from .engine import HostEngine
-
-    score = Score.from_dict(json.loads(Path(score_path).read_text(encoding="utf-8")))
-    engine = HostEngine(soundfont=soundfont, samplerate=samplerate)
-    session = engine.load(score)
-    try:
-        return export_matrix(session, out_dir, samplerate=samplerate, **opts)
-    finally:
-        session.close()

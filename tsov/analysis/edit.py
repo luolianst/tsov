@@ -17,15 +17,13 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-import requests
-
 from ..core.notes import Note
 from ..core.score import Instrument, Score, Track
 from ..core.units import midi_to_hz
 from ..core.names import midi_to_note_name
 from ..core.key import detect_key  # 2026-09-22 F1：下沉 core（编辑层/命令层共用）
 
-from .llm import LLM_ENDPOINT, LLM_MODEL, resolve_api_key  # noqa: E402  与 analysis/llm.py 共用端点/模型（去重）
+from ..llm_client import LLM_MODEL, LlmRequestError, chat_post_json, resolve_api_key  # noqa: E402  F4 收口（原经 analysis.llm）
 
 LLM_TIMEOUT_SEC = 120.0  # 编辑调用超时（比分析层 240s 短）
 
@@ -382,15 +380,12 @@ def _call_edit_llm(notes: list[Note], feedback: str, suspicious: list[dict] | No
         "temperature": params.get("temperature", 0.2),
         "response_format": {"type": "json_object"},
     }
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     timeout = float(params.get("timeout", LLM_TIMEOUT_SEC))
     retries = int(params.get("retries", 2))
     last_error = ""
     for _ in range(retries + 1):
         try:
-            resp = requests.post(LLM_ENDPOINT, json=payload, headers=headers, timeout=timeout)
-            resp.raise_for_status()
-            body = resp.json()
+            body = chat_post_json(payload, api_key=api_key, timeout=timeout)
             message = body["choices"][0]["message"]
             content = message.get("content") or message.get("reasoning_content") or ""
             if not content.strip():
@@ -408,6 +403,9 @@ def _call_edit_llm(notes: list[Note], feedback: str, suspicious: list[dict] | No
                     raise ValueError(f"动作执行失败：{err}")
                 return new, actions, ""
             return _validate_llm_notes(raw, allow_empty), None, ""
+        except LlmRequestError as e:  # noqa: BLE001 网络层失败（已统一包装）→ 重试
+            last_error = str(e)
+            continue
         except Exception as e:  # noqa: BLE001 重试/拒绝
             last_error = f"{type(e).__name__}: {e}"
             continue
