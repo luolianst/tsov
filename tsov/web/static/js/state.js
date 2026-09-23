@@ -47,6 +47,13 @@ export const store = {
   selFolder: '',               // 左栏选中文件夹（M 键作用域 + 高亮）
   collapsedFolders: new Set(), // 折叠的文件夹（lane 列表分组行）
   selBookmark: -1,             // 选中书签下标（score.bookmarks 索引；-1 = 无）
+
+  /* M-V8 E5：编辑工具集（工具态 / 剪贴板 / 时间区间） */
+  tool: 'smart',               // smart 智能指针 | range 范围 | scissors 剪刀 | glue 胶水 | eraser 橡皮
+  clipboard: [],               // 音符剪贴板：[{pitch_midi,start,end,velocity,confidence}]（保留原绝对时间，粘贴按锚点平移）
+  clipAnchor: 0,               // 剪贴板锚点（最小 start，秒）
+  clipTrack: 0,                // 剪贴板来源轨（粘贴缺省目标参考）
+  range: null,                 // {start, end} 秒：标尺区间 / 范围框选联动（供 E6 选段导出）
 };
 
 export function setError(msg) {
@@ -131,6 +138,33 @@ export function toggleFolderCollapse(name) {
 export function setSelBookmark(i) {
   store.selBookmark = Number.isInteger(i) ? i : -1;
   bus.dispatch('markers');
+}
+
+/* ---------------- M-V8 E5：编辑工具集（工具 / 剪贴板 / 时间区间） ---------------- */
+
+export const TOOL_NAMES = ['smart', 'range', 'scissors', 'glue', 'eraser'];
+
+export function setTool(t) {
+  store.tool = TOOL_NAMES.includes(t) ? t : 'smart';
+  bus.dispatch('tool');
+}
+
+export function setClipboard(items, anchor, track) {
+  const ok = Array.isArray(items) && items.length > 0;
+  store.clipboard = ok ? items.map((n) => ({
+    pitch_midi: n.pitch_midi, start: n.start, end: n.end,
+    velocity: n.velocity != null ? n.velocity : 0.8,
+    confidence: n.confidence != null ? n.confidence : 0.8,
+  })) : [];
+  store.clipAnchor = ok ? (Number(anchor) || 0) : 0;
+  store.clipTrack = Number.isInteger(track) ? track : 0;
+  bus.dispatch('clipboard');
+}
+
+export function setRange(r) {
+  const ok = r && Number.isFinite(r.start) && Number.isFinite(r.end) && r.end - r.start > 1e-3;
+  store.range = ok ? { start: Math.max(0, r.start), end: Math.max(0, r.end) } : null;
+  bus.dispatch('tool');
 }
 
 /** 当前谱内书签列表（只读引用；写走命令层）。 */
@@ -332,6 +366,11 @@ export function snapshot() {
     selFolder: store.selFolder,
     collapsedFolders: Array.from(store.collapsedFolders),
     selBookmark: store.selBookmark,
+    /* M-V8 E5：编辑工具集快照（CDP 断言用） */
+    tool: store.tool,
+    clipboard: store.clipboard.length,
+    clipTrack: store.clipTrack,
+    range: store.range ? Object.assign({}, store.range) : null,
     hasDiff: !!store.diff,
     error: store.error,
   };

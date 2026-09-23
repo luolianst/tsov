@@ -11,6 +11,7 @@ import { initTheme, setTheme, themeName, trackColors } from './theme.js';
 import { initDiffBadge } from './diff.js';
 import * as chat from './chat.js';
 import * as playback from './playback.js';
+import * as tools from './tools.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -244,6 +245,15 @@ function boot() {
     loopBtn: $('btn-loop'),      // M-V8 E1：循环开关
     metroBtn: $('btn-metro'),    // M-V8 E1：节拍器开关
   });
+  /* M-V8 E5：编辑工具集（工具条 / 快捷键 / 剪贴板 / 状态栏 chips） */
+  tools.init({
+    bar: $('tools-bar'),
+    snap: $('tl-snap'),
+    grid: $('tl-grid'),
+    swing: $('tl-swing'),
+    quant: $('tl-quant'),
+    chips: $('status-chips'),
+  });
 
   /* ================= 修正轮2：菜单 / 面板收起 / 视图模式 / 导出 / 收藏 ================= */
 
@@ -318,6 +328,7 @@ function boot() {
     setViewMode('single', ti);
     setSingleTrack(ti);
     $('stage-head').hidden = false;
+    $('tools-bar').hidden = false;
     $('lanes').hidden = true;
     $('roll').hidden = false;
     const h = $('stage-body').getBoundingClientRect().height;
@@ -329,6 +340,7 @@ function boot() {
     if (store.viewMode !== 'single') return;
     setViewMode('lanes');
     $('stage-head').hidden = true;
+    $('tools-bar').hidden = true;
     $('lanes').hidden = false;
     $('roll').hidden = true;
     const rc = $('stage-body').getBoundingClientRect();
@@ -367,6 +379,7 @@ function boot() {
       closeMenus(null);
       if (!$('dlg-export').hidden) { $('dlg-export').hidden = true; return; }
       if (!$('dlg-fav').hidden) { $('dlg-fav').hidden = true; return; }
+      if (tools.cancelTool()) return;   // M-V8 E5：工具非智能指针 → 先回智能指针
       backToLanes();
       return;
     }

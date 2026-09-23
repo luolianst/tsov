@@ -2,7 +2,7 @@
 
 import { bus } from './events.js';
 import { api } from './api.js';
-import { KEYS_W, store, scoreBounds, tempo, beatsPerBar, setSelection, setView, refTag } from './state.js';
+import { KEYS_W, store, scoreBounds, tempo, beatsPerBar, setSelection, setView, refTag, setRange } from './state.js';
 import { diffLayers } from './diff.js';
 import { pal, trackColors } from './theme.js';
 
@@ -167,6 +167,35 @@ export function draw() {
     });
   }
 
+  /* ---- M-V8 E5：范围框选 / 橡皮拖刷 视觉 ---- */
+  if (rangeDrag) {
+    const x0 = Math.min(rangeDrag.x0, rangeDrag.x1), x1 = Math.max(rangeDrag.x0, rangeDrag.x1);
+    const y0 = Math.min(rangeDrag.y0, rangeDrag.y1), y1 = Math.max(rangeDrag.y0, rangeDrag.y1);
+    ctx.fillStyle = p.selStroke;
+    ctx.globalAlpha = 0.08;
+    ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = p.selStroke;
+    ctx.setLineDash([4, 3]);
+    ctx.strokeRect(x0 + 0.5, y0 + 0.5, x1 - x0, y1 - y0);
+    ctx.setLineDash([]);
+  }
+  if (eraserDrag && eraserDrag.set.size && store.score) {
+    const etr = store.score.tracks[eraserDrag.track];
+    if (etr) {
+      for (const i of eraserDrag.set) {
+        const n = etr.notes[i];
+        if (!n) continue;
+        const x = xOf(n.start), y = yOf(n.pitch_midi);
+        const w = Math.max(2, (n.end - n.start) * v.pxPerSec), h = v.pxPerSemi - 1;
+        ctx.fillStyle = p.diffDelFill;
+        ctx.fillRect(x, y + 0.5, w, h);
+        ctx.strokeStyle = p.diffDelStroke;
+        ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+      }
+    }
+  }
+
   /* ---- 播放头 ---- */
   const px = xOf(store.playhead);
   if (store.playing && px >= KEYS_W && px <= W) {
@@ -209,6 +238,10 @@ const EDGE_PX = 6;          // 两端热区宽（px）
 const MIN_DUR = 0.08;       // 最小音符时长（秒）
 let drag = null;            // {mode, track, index, orig, ghost:{start,end,pitch}}
 let mouseInCanvas = false;
+/* M-V8 E5：工具手势态 */
+let rangeDrag = null;       // 范围工具：{x0,y0,x1,y1}（画布坐标）
+let eraserDrag = null;      // 橡皮：{track, set:Set<noteIndex>}
+const TOOL_CURSORS = { range: 'crosshair', scissors: 'col-resize', glue: 'pointer', eraser: 'cell' };
 
 /* ---- 命中测试（逆序=后画的优先；edge=左右端热区） ---- */
 function hitNote(mx, my) {
@@ -369,6 +402,101 @@ function openNoteMenu(hit, cx, cy) {
   document.body.appendChild(noteMenu);
 }
 
+/* ---- M-V8 E5：编辑工具（范围框选 / 剪刀切分 / 胶水合并 / 橡皮拖删） ---- */
+
+function onToolDown(e, tool) {
+  if (!store.project || !store.score) return;
+  if (tool === 'scissors') {
+    const hit = hitNote(e.offsetX, e.offsetY);
+    if (hit) splitAt(hit, e.offsetX);
+    return;
+  }
+  if (tool === 'glue') {
+    const hit = hitNote(e.offsetX, e.offsetY);
+    if (hit) glueAt(hit);
+    return;
+  }
+  if (tool === 'eraser') {
+    eraserDrag = { track: store.singleTrack, set: new Set() };
+    markEraser(e);
+    draw();
+    return;
+  }
+  if (tool === 'range') {
+    rangeDrag = { x0: e.offsetX, y0: e.offsetY, x1: e.offsetX, y1: e.offsetY };
+    draw();
+  }
+}
+
+/* 剪刀：点击音符内 → split_note（切点先吸附；吸附越出音符则用原始位置；护栏在服务端） */
+async function splitAt(hit, px) {
+  const n = store.score.tracks[hit.track].notes[hit.index];
+  let at = Math.round(snapT(tOf(px)) * 1000) / 1000;
+  if (at <= n.start + 1e-3 || at >= n.end - 1e-3) at = Math.round(tOf(px) * 1000) / 1000;
+  try {
+    const r = await api.postBatch(store.project, '剪刀切分',
+      [{ op: 'split_note', track: hit.track, index: hit.index, value: { at } }], '剪刀：切分 @ ' + at + 's');
+    if (r.applied) showStatus('已切分 ' + midiName(n.pitch_midi) + ' @ ' + at.toFixed(3) + 's ' + refTag(r));
+    else showStatus('被拒：' + (r.errors || []).join('；'), true);
+  } catch (err) { showStatus(err.message, true); }
+}
+
+/* 胶水：点音符 → 与后邻同音高合并（gap ≤ 0.5s；服务端校验） */
+async function glueAt(hit) {
+  try {
+    const r = await api.postBatch(store.project, '胶水合并',
+      [{ op: 'merge_notes', track: hit.track, index: hit.index }], '胶水：合并相邻音');
+    if (r.applied) showStatus('已合并 ' + refTag(r));
+    else showStatus('被拒：' + (r.errors || []).join('；'), true);
+  } catch (err) { showStatus(err.message, true); }
+}
+
+function markEraser(e) {
+  if (!eraserDrag) return;
+  const hit = hitNote(e.offsetX, e.offsetY);
+  if (hit && hit.track === eraserDrag.track) eraserDrag.set.add(hit.index);
+}
+
+async function commitErase() {
+  const ed = eraserDrag;
+  eraserDrag = null;
+  if (!ed || !ed.set.size) { draw(); return; }
+  const idxs = Array.from(ed.set).sort((a, b) => b - a);   // 降序：索引不漂移
+  try {
+    const r = await api.postBatch(store.project, '橡皮删除 ' + idxs.length + ' 音',
+      idxs.map((i) => ({ op: 'remove', track: ed.track, index: i })), '橡皮：删除 ' + idxs.length + ' 音');
+    if (r.applied) showStatus('已删除 ' + idxs.length + ' 音 ' + refTag(r));
+    else showStatus('被拒：' + (r.errors || []).join('；'), true);
+  } catch (err) { showStatus(err.message, true); }
+  draw();
+}
+
+function commitRange() {
+  const rd = rangeDrag;
+  rangeDrag = null;
+  if (rd && store.score) {
+    const x0 = Math.min(rd.x0, rd.x1), x1 = Math.max(rd.x0, rd.x1);
+    const y0 = Math.min(rd.y0, rd.y1), y1 = Math.max(rd.y0, rd.y1);
+    const t0 = tOf(x0), t1 = tOf(x1);
+    const ti = store.viewMode === 'single' ? store.singleTrack : store.selection.track;
+    const tr = store.score.tracks[ti];
+    if (tr) {
+      const idxs = [];
+      const pxh = store.view.pxPerSemi;
+      tr.notes.forEach((n, i) => {
+        if (n.end < t0 || n.start > t1) return;
+        const y = yOf(n.pitch_midi);
+        if (y + pxh < y0 || y > y1) return;
+        idxs.push(i);
+      });
+      setSelection(ti, idxs);
+      if (t1 - t0 > 1e-3) setRange({ start: Math.max(0, t0), end: Math.max(0, t1) });
+      if (idxs.length) showStatus('框选 ' + idxs.length + ' 音');
+    }
+  }
+  draw();
+}
+
 export function init(rollCanvas) {
   canvas = rollCanvas;
   ctx = canvas.getContext('2d');
@@ -394,6 +522,11 @@ export function init(rollCanvas) {
 
   canvas.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;          // 仅左键
+    /* M-V8 E5：工具手势分发（仅单轨卷帘视图；智能指针走原逻辑） */
+    if (store.viewMode === 'single' && (store.tool || 'smart') !== 'smart') {
+      onToolDown(e, store.tool);
+      return;
+    }
     const hit = hitNote(e.offsetX, e.offsetY);
     const v = store.view;
 
@@ -452,6 +585,18 @@ export function init(rollCanvas) {
 
   canvas.addEventListener('mousemove', (e) => {
     mouseInCanvas = true;
+    /* M-V8 E5：工具拖拽（范围框选 / 橡皮拖刷） */
+    if (rangeDrag) {
+      rangeDrag.x1 = e.offsetX;
+      rangeDrag.y1 = e.offsetY;
+      draw();
+      return;
+    }
+    if (eraserDrag) {
+      markEraser(e);
+      draw();
+      return;
+    }
     if (drag) {
       const v = store.view;
       if (drag.mode === 'move') {
@@ -484,6 +629,10 @@ export function init(rollCanvas) {
       draw();
       return;
     }
+    if (store.viewMode === 'single' && (store.tool || 'smart') !== 'smart') {
+      canvas.style.cursor = TOOL_CURSORS[store.tool] || 'default';
+      return;
+    }
     const hit = hitNote(e.offsetX, e.offsetY);
     if (hit) {
       canvas.style.cursor = hit.edge === 'body' ? 'move' : 'ew-resize';
@@ -495,6 +644,8 @@ export function init(rollCanvas) {
   canvas.addEventListener('mouseleave', () => { mouseInCanvas = false; });
   document.addEventListener('mouseup', (e) => {
     if (drag) submitDrag();
+    if (rangeDrag) commitRange();
+    if (eraserDrag) commitErase();
   });
 
   /* M-V3：双击删除音符（命令层即时，一个 commit） */
@@ -516,7 +667,7 @@ export function init(rollCanvas) {
     if (noteMenu && !noteMenu.contains(e.target)) closeNoteMenu();
   });
 
-  for (const topic of ['state', 'view', 'selection', 'diff', 'playhead', 'playing']) {
+  for (const topic of ['state', 'view', 'selection', 'diff', 'playhead', 'playing', 'tool']) {
     bus.on(topic, draw);
   }
   bus.on('viewmode', draw);   // 修正轮2：总谱 ↔ 单轨切换重绘

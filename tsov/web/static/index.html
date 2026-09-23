@@ -133,6 +133,23 @@
       <span class="muted small" id="single-info"></span>
       <span class="sb-hint muted small">单击左侧其他轨 = 灰叠加 ｜ 双击 = 切主轨 ｜ Esc 返回</span>
     </div>
+    <div id="tools-bar" hidden>
+      <button class="tool-btn" data-tool="smart" title="智能指针：选择 / 拖动 / 手绘">🖱 智能</button>
+      <button class="tool-btn" data-tool="range" title="范围：框选音符；标尺拖区间联动循环">▭ 范围</button>
+      <button class="tool-btn" data-tool="scissors" title="剪刀：点击音符切分（按住 Alt 临时切换）">✂ 剪刀</button>
+      <button class="tool-btn" data-tool="glue" title="胶水：与后邻同音高合并（gap ≤ 0.5s）">🩹 胶水</button>
+      <button class="tool-btn" data-tool="eraser" title="橡皮：拖刷删除（划过即删，可撤销）">🧽 橡皮</button>
+      <span class="tl-sep"></span>
+      <label class="tl-ck" title="写谱吸附：新建 / 移动 / 微推按网格对齐"><input type="checkbox" id="tl-snap"> 吸附</label>
+      <select id="tl-grid" title="网格：吸附 / 微推步进 / 量化共用（1/4 · 1/8 · 1/16）">
+        <option value="4">1/4</option>
+        <option value="8">1/8</option>
+        <option value="16" selected>1/16</option>
+      </select>
+      <label class="tl-ck" title="Swing：量化到后半格的音符再顺延 0~100% 半格">Swing <input id="tl-swing" type="number" min="0" max="100" step="5" value="0">%</label>
+      <button id="tl-quant" title="量化：选区（无选中 = 整轨）对齐网格 + Swing">量化选区</button>
+      <span class="sb-hint muted small">1-5 工具 · Esc 回智能 · ←/→ 微推一格 · Shift+←/→ 一小节 · Ctrl+C/X/V/D 剪贴板</span>
+    </div>
     <canvas id="ruler"></canvas>
     <canvas id="markers" title="乐段（段道）：拖动空白新建 ｜ 拖动段移动 / 边缘拉伸 ｜ 双击跳转 ｜ 右键菜单"></canvas>
     <div id="stage-body">
@@ -254,6 +271,7 @@
   <span id="status-summary" class="muted">未打开工程</span>
   <span id="status-diff"></span>
   <span id="status-error" class="error"></span>
+  <span id="status-chips" class="muted small"></span>
 </footer>
 
 <script type="module" src="js/main.js"></script>
