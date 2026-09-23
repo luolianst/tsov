@@ -92,7 +92,8 @@ def is_drum_track(program: str) -> bool:
 def score_to_midi(score: Score, output_path: str) -> str:
     """Score → MIDI 文件，返回产物路径。
 
-    - 遍历全部 tracks：每轨一个 Instrument（GM program 映射；drums → is_drum=True）
+    - 遍历全部 tracks：每轨一个 Instrument（GM program 映射；drums → is_drum=True；轨名写入
+      instrument name——回环导入保名）
     - tempo 用 score.tempo；key signature 用第一个调性候选；拍号用 score.time_signature
     """
     midi = pretty_midi.PrettyMIDI(initial_tempo=float(score.tempo or 120.0))
@@ -100,7 +101,8 @@ def score_to_midi(score: Score, output_path: str) -> str:
     for track in score.tracks:
         is_drum = is_drum_track(track.instrument.program)
         prog = 0 if is_drum else program_number(track.instrument.program)
-        inst = pretty_midi.Instrument(program=prog, is_drum=is_drum)
+        inst = pretty_midi.Instrument(program=prog, is_drum=is_drum,
+                                      name=str(track.name or ""))
         for n in sorted(track.notes, key=lambda n: n.start):
             velocity = max(1, min(127, int(round(float(n.velocity) * 127.0))))
             inst.notes.append(

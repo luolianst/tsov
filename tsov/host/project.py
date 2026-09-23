@@ -30,6 +30,10 @@ AUDIO_MAX_BYTES = 200 * 1024 * 1024   # 单文件上限（200MB）
 AUDIO_EXTS = {".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".aiff", ".aif"}
 _AUDIO_SLUG_RE = re.compile(r"[^0-9A-Za-z\u4e00-\u9fff._-]+")
 
+# ---- M-V8 E5：MIDI 导入（import_midi）----
+MIDI_MAX_BYTES = 8 * 1024 * 1024    # 单文件上限（8MB——MIDI 体量够用）
+MIDI_EXTS = {".mid", ".midi"}
+
 
 def _audio_slug(name: str) -> str:
     """文件名清洗（保留中英文/数字/._-；截断 60 字符）。"""
@@ -138,6 +142,59 @@ class Project:
             "deduped": deduped,
             "title": name or src.stem,
             "src": str(src),
+        }
+
+    def import_midi(self, src, *, name: str | None = None) -> dict:
+        """MIDI 导入（E5）：读 .mid/.midi → 追加全轨（跳过空轨）；空工程采纳文件元数据。
+
+        - 源：pretty_midi 可读的 MIDI 文件（扩展名白名单 + 大小上限 MIDI_MAX_BYTES）
+        - 追加：每个非空 instrument 一轨（GM 名反查/未收录 piano/is_drum → drums）
+        - 空工程（全部轨无音符）：tempo/拍号/调号取文件首值；否则保持工程现值
+        - 落定：经 apply_score（整谱替换入口，进快照窗口、可撤销）
+        - 返回：{ok, applied, added, skipped, tracks, notes, tempo, time_signature, adopted, src}
+        """
+        from importlib import import_module
+
+        src = Path(src)
+        if not src.is_file():
+            raise ValueError(f"MIDI 源文件不存在：{src}")
+        ext = src.suffix.lower()
+        if ext not in MIDI_EXTS:
+            raise ValueError(f"不支持的 MIDI 扩展名：{ext!r}（支持 {', '.join(sorted(MIDI_EXTS))}）")
+        size = src.stat().st_size
+        if size <= 0:
+            raise ValueError(f"MIDI 文件为空：{src}")
+        if size > MIDI_MAX_BYTES:
+            raise ValueError(f"MIDI 文件过大：{size / 1e6:.1f}MB（上限 {MIDI_MAX_BYTES / 1e6:.0f}MB）")
+
+        # 关键字模块名（tsov/midi/import.py）无法常规 import —— 走 importlib
+        midi_to_score = import_module("tsov.midi.import").midi_to_score
+        parsed = midi_to_score(src, title=name or src.stem)
+        kept = [t for t in parsed.tracks if t.notes]
+        if not kept:
+            raise ValueError("MIDI 不含任何音符（全部轨为空）")
+
+        new_score = copy.deepcopy(self.score)
+        adopted = not any(t.notes for t in new_score.tracks)
+        if adopted:
+            new_score.tempo = parsed.tempo
+            new_score.time_signature = parsed.time_signature
+            if parsed.key_candidates:
+                new_score.key_candidates = parsed.key_candidates
+        for i, t in enumerate(kept, start=len(new_score.tracks) + 1):
+            if not t.name.strip() or t.name.strip().lower().startswith("track "):
+                t.name = f"track {i}"
+            new_score.tracks.append(t)
+        note_total = sum(len(t.notes) for t in kept)
+        r = self.apply_score(new_score, f"导入 MIDI：{src.name}（+{len(kept)} 轨 / {note_total} 音）")
+        if not r.get("ok"):
+            raise ValueError("导入无效：" + "；".join(r.get("errors") or ["新谱与现值一致"]))
+        return {
+            "ok": True, "applied": int(r.get("applied") or 0),
+            "added": len(kept), "skipped": len(parsed.tracks) - len(kept),
+            "tracks": [t.name for t in kept], "notes": note_total,
+            "tempo": new_score.tempo, "time_signature": new_score.time_signature,
+            "adopted": adopted, "src": str(src),
         }
 
     # ------------------------------------------------------------------

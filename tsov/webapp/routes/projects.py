@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import copy
 import json
+import uuid
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 
 from ...core.score import Instrument, Score, Track
 from ...host import EditBatch, Project
@@ -70,6 +72,46 @@ def register(app: FastAPI) -> None:
             state.projects[name] = proj
         rel = src.resolve().relative_to(state.output_dir.resolve()).as_posix()
         return {"ok": True, "name": name, "source": rel}
+
+    @app.post("/api/projects/{name}/midi/import")
+    async def midi_import(name: str, request: Request) -> dict:
+        """MIDI 导入（E5）：JSON {path: 本机绝对路径, name?} 或 multipart file 上传（.mid/.midi）。
+
+        - 路径来源：后端直读本机文件；上传来源：落临时文件后同路径导入（与音频入库同模式）
+        - 导入语义：host/Project.import_midi（追加非空轨；空工程采纳文件元数据）
+        """
+        proj = st().get_project(name)
+        ctype = (request.headers.get("content-type") or "").lower()
+        tmp_path = None
+        try:
+            if "multipart/form-data" in ctype:
+                form = await request.form()
+                up = form.get("file")
+                if up is None or not getattr(up, "filename", ""):
+                    raise HTTPException(400, "multipart 缺 file 字段")
+                up_name = str(form.get("name") or "").strip() or None
+                suffix = Path(str(up.filename)).suffix or ".mid"
+                incoming = proj.root / "midi" / ".incoming"
+                incoming.mkdir(parents=True, exist_ok=True)
+                tmp_path = incoming / f"upload-{uuid.uuid4().hex[:8]}{suffix}"
+                tmp_path.write_bytes(await up.read())
+                info = proj.import_midi(tmp_path, name=up_name)
+            else:
+                body = await request.json()
+                src = str((body or {}).get("path") or "").strip().strip('"').strip("'")
+                if not src:
+                    raise HTTPException(400, "缺 path（本机 MIDI 绝对路径）")
+                info = proj.import_midi(src, name=(body or {}).get("name"))
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        finally:
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        st().bus.publish(name, "state_updated", project_state(proj))
+        return {"project": name, **info}
 
     @app.get("/api/projects/{name}/state")
     def get_state(name: str) -> dict:
