@@ -11,6 +11,9 @@
   / remove_track / rename_track——工具与 UI 同一动作路径（工具经 EditBatch）
 - M-V8 E2 增补（2026-09-21）：add_audio_track（追加音频轨；file=工程 audio/ 内相对路径）
   / set_audio_track（音频轨改 offset/file——只作用于 kind=="audio"）——音频轨一等公民第一刀
+- M-V8 E5 增补（2026-09-24）：split_note（剪刀：at 处切分）/ merge_notes（胶水：与后邻同音高合并，gap≤max_gap）
+  / shift_notes（微推：indices 选区或整轨批量时间平移，原子）/ quantize_time 扩展（value 升 {grid, swing?, indices?}，
+  swing=后半格顺延比例；裸 grid 数向后兼容）——编辑工具集第一刀
 - 事务协议：EditBatch.apply(score) 在深拷贝上逐条执行——非法命令被拒绝并记录 error，
   合法命令全部生效（部分应用 + 错误清单）；apply 前不脏原 Score。
 - 该命令层 = M-V2 起 agent 工具与 Web UI 共用的编辑通道（docs/05 接口契约）。
@@ -31,7 +34,7 @@ from ..core.units import midi_to_hz
 
 @dataclass
 class EditCommand:
-    op: str  # add / remove / set_pitch / set_velocity / set_time / transpose / quantize_time
+    op: str  # add / remove / set_pitch / set_velocity / set_time / transpose / quantize_time / split_note / merge_notes / shift_notes
     track: int = 0
     index: int | None = None  # 单音符命令的目标下标（add 缺省=末尾追加）
     value: Any = None
@@ -73,6 +76,23 @@ class EditBatch:
             else:
                 applied += 1
         return out, BatchResult(ok=not errors, applied=applied, errors=errors)
+
+
+def _parse_note_indices(raw: Any, count: int) -> tuple[list[int] | None, str | None]:
+    """indices 参数解析（E5 选区批量操作共用）：非空数组、整数、在界内、去重保序。"""
+    if not isinstance(raw, (list, tuple)) or len(raw) == 0:
+        return None, "indices 需为非空数组（省略=整轨）"
+    out: list[int] = []
+    for item in raw:
+        try:
+            j = int(item)
+        except (TypeError, ValueError):
+            return None, f"indices 含非法下标：{item!r}"
+        if not (0 <= j < count):
+            return None, f"indices 越界：{j}（共 {count} 音）"
+        if j not in out:
+            out.append(j)
+    return out, None
 
 
 def _apply_one(score: Score, c: EditCommand) -> str | None:
@@ -147,7 +167,7 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
         return None
 
     # 单音符命令需要 index；transpose / quantize_time 是轨级批量，不需要
-    if c.op in ("remove", "set_pitch", "set_velocity", "set_time"):
+    if c.op in ("remove", "set_pitch", "set_velocity", "set_time", "split_note", "merge_notes"):
         if c.index is None or not (0 <= c.index < len(notes)):
             return f"{c.op} 越界：index {c.index}（共 {len(notes)} 音）"
     i = c.index
@@ -188,6 +208,52 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
         n.start = round(start, 6)
         n.end = round(end, 6)
         return None
+    # M-V8 E5：剪刀——在 at 处切分（切点两侧各留 ≥1ms；尾段继承全部属性）
+    if c.op == "split_note":
+        raw = c.value.get("at") if isinstance(c.value, dict) else c.value
+        try:
+            at = float(raw)
+        except (TypeError, ValueError):
+            return f"split_note 需要 at（秒）：{raw!r}"
+        n = notes[i]
+        if not (n.start + 1e-3 <= at <= n.end - 1e-3):
+            return f"split_note 切点越界：{at}（音符 {n.start}~{n.end}，须留 ≥1ms）"
+        tail = Note(
+            start=round(at, 6),
+            end=n.end,
+            pitch_midi=n.pitch_midi,
+            pitch_hz=n.pitch_hz,
+            velocity=n.velocity,
+            confidence=n.confidence,
+            deviation_cents=n.deviation_cents,
+            is_ornament=n.is_ornament,
+        )
+        n.end = round(at, 6)
+        notes.insert(i + 1, tail)
+        return None
+    # M-V8 E5：胶水——与后邻同音高音符合并（gap ≤ max_gap，默认 0.5s；重叠按并集）
+    if c.op == "merge_notes":
+        max_gap = 0.5
+        if isinstance(c.value, dict) and c.value.get("max_gap") is not None:
+            try:
+                max_gap = float(c.value["max_gap"])
+            except (TypeError, ValueError):
+                return f"merge_notes max_gap 非法：{c.value['max_gap']!r}"
+            if max_gap < 0:
+                return f"merge_notes max_gap 越界：{max_gap}"
+        n = notes[i]
+        best = None
+        for j, m in enumerate(notes):
+            if j == i or m.pitch_midi != n.pitch_midi:
+                continue
+            if n.start <= m.start <= n.end + max_gap + 1e-9 and (best is None or m.start < best[1]):
+                best = (j, m.start)
+        if best is None:
+            return f"merge_notes 无相邻同音高音符（gap ≤ {max_gap}s）"
+        m = notes[best[0]]
+        n.end = round(max(n.end, m.end), 6)
+        notes.pop(best[0])
+        return None
     if c.op == "transpose":
         try:
             st = int(c.value)
@@ -201,19 +267,71 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
             n.pitch_hz = midi_to_hz(n.pitch_midi)
         return None
     if c.op == "quantize_time":
-        try:
-            grid = int(c.value or 16)
-        except (TypeError, ValueError):
-            return f"quantize_time 非法：{c.value!r}"
+        # M-V8 E5 扩展：value 可为 {grid, swing?, indices?}；裸 grid 数=旧行为（向后兼容）
+        v = c.value
+        swing = 0.0
+        indices = None
+        if isinstance(v, dict):
+            try:
+                grid = int(v.get("grid", 16))
+            except (TypeError, ValueError):
+                return f"quantize_time 非法 grid：{v.get('grid')!r}"
+            if v.get("swing") is not None:
+                try:
+                    swing = float(v["swing"])
+                except (TypeError, ValueError):
+                    return f"quantize_time swing 非法：{v['swing']!r}"
+                if not (0.0 <= swing <= 1.0):
+                    return f"quantize_time swing 越界：{swing}（0~1）"
+            if v.get("indices") is not None:
+                indices, err = _parse_note_indices(v["indices"], len(notes))
+                if err:
+                    return err
+        else:
+            try:
+                grid = int(v or 16)
+            except (TypeError, ValueError):
+                return f"quantize_time 非法：{c.value!r}"
         if grid <= 0:
             return f"quantize_time 非法 grid：{grid}"
         beat_s = 60.0 / (score.tempo or 120.0)
         cell_s = beat_s / grid
-        for n in notes:
-            n.start = round(round(n.start / cell_s) * cell_s, 6)
+        targets = notes if indices is None else [notes[j] for j in indices]
+        for n in targets:
+            k = round(n.start / cell_s)
+            new_start = k * cell_s
+            if swing > 0 and k % 2 == 1:  # 奇格位（后半格）→ 顺延 swing×半格
+                new_start += swing * (cell_s / 2.0)
+            n.start = round(new_start, 6)
             n.end = round(round(n.end / cell_s) * cell_s, 6)
             if n.end <= n.start:
                 n.end = round(n.start + cell_s, 6)
+        return None
+    # M-V8 E5：微推——批量时间平移（原子：任一出界整批拒绝；indices 缺省=整轨）
+    if c.op == "shift_notes":
+        v = c.value
+        if not isinstance(v, dict) or v.get("dtime") is None:
+            return "shift_notes value 需 {dtime, indices?}"
+        try:
+            dtime = float(v["dtime"])
+        except (TypeError, ValueError):
+            return f"shift_notes dtime 非法：{v['dtime']!r}"
+        if dtime != dtime or dtime in (float("inf"), float("-inf")):
+            return f"shift_notes dtime 非法：{v['dtime']!r}"
+        indices = None
+        if v.get("indices") is not None:
+            indices, err = _parse_note_indices(v["indices"], len(notes))
+            if err:
+                return err
+        targets = notes if indices is None else [notes[j] for j in indices]
+        for n in targets:
+            if n.start + dtime < -1e-9:
+                return f"shift_notes 越界：{n.start} + {dtime} < 0"
+        if abs(dtime) < 1e-9:
+            return None
+        for n in targets:
+            n.start = round(n.start + dtime, 6)
+            n.end = round(n.end + dtime, 6)
         return None
     return f"未知 op：{c.op}"
 
