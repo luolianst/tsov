@@ -5,7 +5,7 @@
 
 import { bus } from './events.js';
 import { api } from './api.js';
-import { store, setTool, setClipboard, setSnap, setError, refTag, toast, tempo, beatsPerBar, scoreBounds, timeSig } from './state.js';
+import { store, setTool, setClipboard, setSnap, setError, refTag, toast, tempo, beatsPerBar, scoreBounds, timeSig, setAutoLane } from './state.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -19,6 +19,7 @@ export const TOOLS = [
 ];
 
 let bar = null, snapChk = null, gridSel = null, swingIn = null, quantBtn = null, chipsEl = null;
+let autoChk = null, autoSel = null;   // M-V8 E5 段2：自动化 lane 开关/参数
 let altTemp = false;          // 按住 Alt = 临时剪刀
 let prevTool = 'smart';
 
@@ -55,6 +56,13 @@ export function init(els) {
   gridSel.addEventListener('change', setSnapFromBar);
   quantBtn.addEventListener('click', () => { doQuantize(); });
 
+  /* M-V8 E5 段2：自动化 lane（开关 / 参数切换；数据提交在 autoroll.js） */
+  autoChk = bar.querySelector('#tl-auto');
+  autoSel = bar.querySelector('#tl-auto-param');
+  if (autoChk) autoChk.addEventListener('change', () => setAutoLane({ open: autoChk.checked }));
+  if (autoSel) autoSel.addEventListener('change', () => setAutoLane({ param: autoSel.value }));
+  bus.on('auto', renderBar);
+
   document.addEventListener('keydown', onKeydown);
   document.addEventListener('keyup', (e) => {
     if (e.key === 'Alt' && altTemp) { altTemp = false; setTool(prevTool || 'smart'); }
@@ -81,6 +89,8 @@ export function renderBar() {
     if (btn) btn.classList.toggle('on', store.tool === id);
   }
   if (snapChk) snapChk.checked = !!store.snapFrac;
+  if (autoChk) autoChk.checked = !!store.autoLane.open;
+  if (autoSel) autoSel.value = store.autoLane.param;
 }
 
 /* ---- 状态栏 chips：44.1kHz · 16-bit · 拍号 · 调号 · 时长 ---- */

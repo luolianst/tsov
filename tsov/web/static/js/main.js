@@ -12,6 +12,7 @@ import { initDiffBadge } from './diff.js';
 import * as chat from './chat.js';
 import * as playback from './playback.js';
 import * as tools from './tools.js';
+import * as autoroll from './autoroll.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -254,6 +255,7 @@ function boot() {
     quant: $('tl-quant'),
     chips: $('status-chips'),
   });
+  autoroll.init($('autoroll'));   // M-V8 E5 段2：自动化 lane（单轨视图底部子道）
 
   /* ================= 修正轮2：菜单 / 面板收起 / 视图模式 / 导出 / 收藏 ================= */
 

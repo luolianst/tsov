@@ -10,6 +10,8 @@ let dockEl = null, chanPane = null, fxPane = null, srcPane = null, mixPane = nul
 let recPane = null;
 let meta = { programs: [], effect_kinds: [] };
 let metaLoaded = false;
+/* M-V8 E5 段2：效果目标（当前轨 / 各总线 / master） */
+let fxTarget = { mode: 'track', ref: '' };
 
 function selectedTrack() {
   const i = (store.selection && store.selection.track) || 0;
@@ -34,7 +36,7 @@ async function loadMeta() {
     metaLoaded = true;
   } catch (e) { /* 端点缺失时用兜底列表 */ }
   if (!meta.effect_kinds.length) {
-    meta.effect_kinds = ['reverb', 'delay', 'compressor', 'chorus', 'distortion', 'gain', 'highpass', 'lowpass', 'limiter', 'brickwall', 'phaser'];
+    meta.effect_kinds = ['reverb', 'delay', 'compressor', 'chorus', 'distortion', 'gain', 'highpass', 'lowpass', 'limiter', 'brickwall', 'phaser', 'vst3'];
   }
 }
 
@@ -47,7 +49,19 @@ function renderFx() {
     fxPane.innerHTML = '<div class="fx-none">（先选一条轨道）</div>';
     return;
   }
-  const chain = (cur.track.instrument && cur.track.instrument.effects) || [];
+  /* E5 段2：目标解析——当前轨 / 各总线 / master */
+  const busList = (store.score && store.score.buses) || [];
+  if (fxTarget.mode === 'bus' && !busList.some((b) => b.name === fxTarget.ref)) fxTarget = { mode: 'track', ref: '' };
+  const targetBus = fxTarget.mode === 'bus' ? busList.find((b) => b.name === fxTarget.ref) : null;
+  const isTrackTarget = fxTarget.mode === 'track';
+  const chain = isTrackTarget
+    ? ((cur.track.instrument && cur.track.instrument.effects) || [])
+    : (fxTarget.mode === 'master'
+      ? ((store.score.master && store.score.master.effects) || [])
+      : ((targetBus && targetBus.effects) || []));
+  const tbase = isTrackTarget
+    ? { target: 'track' }
+    : (fxTarget.mode === 'master' ? { target: 'master' } : { target: 'bus', ref: fxTarget.ref });
   const wrap = document.createElement('div');
   wrap.className = 'fx-chain';
   chain.forEach((fx, i) => {
@@ -70,7 +84,7 @@ function renderFx() {
     x.className = 'fx-x';
     x.textContent = '✕';
     x.title = '移除该效果（一个 commit，可撤销）';
-    x.onclick = () => post('移除效果 ' + fx.type, [{ op: 'remove_effect', track: cur.index, index: i }]);
+    x.onclick = () => post('移除效果 ' + fx.type, [{ op: 'remove_effect', track: cur.index, index: i, value: Object.assign({}, tbase) }]);
     slot.appendChild(hd);
     slot.appendChild(sub);
     slot.appendChild(x);
@@ -82,6 +96,25 @@ function renderFx() {
       wrap.appendChild(ar);
     }
   });
+  const tgtSel = document.createElement('select');
+  tgtSel.className = 'fx-kind';
+  tgtSel.title = '效果目标：当前轨 / 总线 / master（E5）';
+  {
+    const ot = document.createElement('option');
+    ot.value = 'track'; ot.textContent = '当前轨'; tgtSel.appendChild(ot);
+    for (const b of busList) {
+      const ob = document.createElement('option');
+      ob.value = 'bus:' + b.name; ob.textContent = '总线 ' + b.name; tgtSel.appendChild(ob);
+    }
+    const om = document.createElement('option');
+    om.value = 'master'; om.textContent = 'master'; tgtSel.appendChild(om);
+    tgtSel.value = isTrackTarget ? 'track' : (fxTarget.mode === 'master' ? 'master' : 'bus:' + fxTarget.ref);
+    tgtSel.onchange = () => {
+      const v = tgtSel.value;
+      fxTarget = v.indexOf('bus:') === 0 ? { mode: 'bus', ref: v.slice(4) } : { mode: v, ref: '' };
+      renderFx();
+    };
+  }
   const kindSel = document.createElement('select');
   kindSel.className = 'fx-kind';
   kindSel.title = '选择效果类型后点「＋」加入链尾';
@@ -95,8 +128,16 @@ function renderFx() {
   add.textContent = '＋';
   add.title = '添加效果（默认参数，可在检查器/预设里再调）';
   add.onclick = async () => {
-    await post('添加效果 ' + kindSel.value, [{ op: 'add_effect', track: cur.index, value: { type: kindSel.value } }]);
+    const v = Object.assign({}, tbase, { type: kindSel.value });
+    if (kindSel.value === 'vst3') {
+      const p = window.prompt('vst3 效果：内层二进制路径（相对仓库或绝对路径）',
+        'vendor/vst3/TAL-Chorus-LX.vst3/Contents/x86_64-win/TAL-Chorus-LX.vst3');
+      if (!p || !p.trim()) return;
+      v.params = { path: p.trim() };
+    }
+    await post('添加效果 ' + kindSel.value, [{ op: 'add_effect', track: cur.index, value: v }]);
   };
+  wrap.appendChild(tgtSel);
   wrap.appendChild(kindSel);
   wrap.appendChild(add);
   fxPane.appendChild(wrap);
@@ -346,6 +387,61 @@ function renderMix() {
     cell.appendChild(rg);
     cell.appendChild(vv);
     cell.appendChild(ms);
+
+    /* M-V8 E5 段2：Send 支路（post-fader → 目标总线；✕ = 移除） */
+    const busNames = ((store.score && store.score.buses) || []).map((b) => b.name);
+    const sends = tr.sends || {};
+    const sendCell = document.createElement('div');
+    sendCell.className = 'f-send';
+    for (const sname of Object.keys(sends)) {
+      const row = document.createElement('div');
+      row.className = 'fs-row';
+      const nmx = document.createElement('span');
+      nmx.className = 'fs-nm';
+      nmx.textContent = '→' + sname;
+      nmx.title = 'Send 支路：post-fader → 总线 ' + sname;
+      const rng = document.createElement('input');
+      rng.type = 'range'; rng.min = '0'; rng.max = '100';
+      rng.value = String(Math.round(Number(sends[sname]) * 100));
+      rng.title = 'Send 量（%）：改动一个 commit、可撤销';
+      rng.addEventListener('change', () => {
+        const next = Object.assign({}, sends);
+        next[sname] = Number(rng.value) / 100;
+        post('Send ' + sname + ' ' + rng.value + '%', [{ op: 'set_track_mix', track: ti, value: { sends: next } }]);
+      });
+      const x = document.createElement('button');
+      x.className = 'fs-x';
+      x.textContent = '✕';
+      x.title = '移除该 Send 支路';
+      x.onclick = () => {
+        const next = Object.assign({}, sends);
+        delete next[sname];
+        post('移除 Send ' + sname, [{ op: 'set_track_mix', track: ti, value: { sends: next } }]);
+      };
+      row.appendChild(nmx); row.appendChild(rng); row.appendChild(x);
+      sendCell.appendChild(row);
+    }
+    if (busNames.some((bn) => sends[bn] == null)) {
+      const addSel = document.createElement('select');
+      addSel.title = '添加 Send：选目标总线（默认量 50%）';
+      const o0 = document.createElement('option');
+      o0.value = ''; o0.textContent = '＋ Send →';
+      addSel.appendChild(o0);
+      for (const bn of busNames) {
+        if (sends[bn] != null) continue;
+        const ob = document.createElement('option');
+        ob.value = bn; ob.textContent = bn;
+        addSel.appendChild(ob);
+      }
+      addSel.onchange = () => {
+        if (!addSel.value) return;
+        const next = Object.assign({}, sends);
+        next[addSel.value] = 0.5;
+        post('新增 Send ' + addSel.value, [{ op: 'set_track_mix', track: ti, value: { sends: next } }]);
+      };
+      sendCell.appendChild(addSel);
+    }
+    cell.appendChild(sendCell);
     wrap.appendChild(cell);
   });
   mixPane.appendChild(wrap);

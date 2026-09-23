@@ -54,6 +54,10 @@ export const store = {
   clipAnchor: 0,               // 剪贴板锚点（最小 start，秒）
   clipTrack: 0,                // 剪贴板来源轨（粘贴缺省目标参考）
   range: null,                 // {start, end} 秒：标尺区间 / 范围框选联动（供 E6 选段导出）
+
+  /* M-V8 E5 段2：自动化 lane（单轨视图底部子道）与电平表 */
+  autoLane: { open: false, param: 'volume' },   // param: volume | pan（目标恒为单轨视图当前轨）
+  meter: { l: 0, r: 0, hold_l: 0, hold_r: 0, clip: false },   // 试听通路实时电平（CDP 断言口）
 };
 
 export function setError(msg) {
@@ -165,6 +169,18 @@ export function setRange(r) {
   const ok = r && Number.isFinite(r.start) && Number.isFinite(r.end) && r.end - r.start > 1e-3;
   store.range = ok ? { start: Math.max(0, r.start), end: Math.max(0, r.end) } : null;
   bus.dispatch('tool');
+}
+
+/* M-V8 E5 段2：自动化 lane 开关/参数（视图态，不进谱；数据写走命令层 set_automation） */
+export function setAutoLane(partial) {
+  Object.assign(store.autoLane, partial || {});
+  if (store.autoLane.param !== 'pan') store.autoLane.param = 'volume';
+  bus.dispatch('auto');
+}
+
+/* 高频直写（每帧；不 dispatch——UI 由 playback.js 直接刷 DOM，快照供 CDP 断言） */
+export function setMeter(m) {
+  store.meter = m;
 }
 
 /** 当前谱内书签列表（只读引用；写走命令层）。 */
@@ -371,6 +387,9 @@ export function snapshot() {
     clipboard: store.clipboard.length,
     clipTrack: store.clipTrack,
     range: store.range ? Object.assign({}, store.range) : null,
+    /* M-V8 E5 段2：自动化 lane / 电平表快照（CDP 断言用） */
+    automation: { open: store.autoLane.open, param: store.autoLane.param },
+    meter: Object.assign({}, store.meter),
     hasDiff: !!store.diff,
     error: store.error,
   };

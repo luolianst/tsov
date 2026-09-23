@@ -148,6 +148,12 @@
       </select>
       <label class="tl-ck" title="Swing：量化到后半格的音符再顺延 0~100% 半格">Swing <input id="tl-swing" type="number" min="0" max="100" step="5" value="0">%</label>
       <button id="tl-quant" title="量化：选区（无选中 = 整轨）对齐网格 + Swing">量化选区</button>
+      <span class="tl-sep"></span>
+      <label class="tl-ck" title="自动化 lane（单轨视图底部子道）：点=加点 ｜ 拖=移动 ｜ 双击/右键点=删除"><input type="checkbox" id="tl-auto"> 自动化</label>
+      <select id="tl-auto-param" title="自动化参数：音量（0~200%）/ 声像（L~R）">
+        <option value="volume" selected>音量</option>
+        <option value="pan">声像</option>
+      </select>
       <span class="sb-hint muted small">1-5 工具 · Esc 回智能 · ←/→ 微推一格 · Shift+←/→ 一小节 · Ctrl+C/X/V/D 剪贴板</span>
     </div>
     <canvas id="ruler"></canvas>
@@ -155,6 +161,7 @@
     <div id="stage-body">
       <canvas id="lanes" title="总谱预览：单击选中 / Ctrl 多选 / 双击进入单轨写谱"></canvas>
       <canvas id="roll" hidden></canvas>
+      <canvas id="autoroll" hidden title="自动化 lane：点=加点 ｜ 拖=移动 ｜ 双击/右键点=删除（每笔一个命令、可撤销）"></canvas>
     </div>
   </section>
 
@@ -271,6 +278,11 @@
   <span id="status-summary" class="muted">未打开工程</span>
   <span id="status-diff"></span>
   <span id="status-error" class="error"></span>
+  <span id="meter" class="meter" title="试听电平（wav 通路）：L/R 峰值 + 峰值保持 + CLIP">
+    <span class="mt"><i id="mt-l"></i><b id="mt-lh"></b></span>
+    <span class="mt"><i id="mt-r"></i><b id="mt-rh"></b></span>
+    <span id="mt-clip" class="mclip" hidden>CLIP</span>
+  </span>
   <span id="status-chips" class="muted small"></span>
 </footer>
 

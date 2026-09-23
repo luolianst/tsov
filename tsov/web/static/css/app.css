@@ -340,6 +340,7 @@ body.chat-folded #rail-chat { display: flex; }
 .tl-ck { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 .tl-ck input[type="number"] { width: 56px; }
 #tl-quant { padding: 1px 10px; }
+#tl-auto-param { padding: 1px 4px; }
 #tools-bar .sb-hint { margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #stage-body { position: relative; min-width: 0; min-height: 0; }
 #ruler, #markers, #roll, #lanes { display: block; width: 100%; height: 100%; }
@@ -577,6 +578,26 @@ body.chat-folded #rail-chat { display: flex; }
 .fader .f-ms .ms { width: 18px; height: 17px; padding: 0; font-size: var(--fs-xs); font-family: var(--font-mono); border-radius: 2px; color: var(--muted); }
 .fader .f-ms .ms.on { background: var(--warn); border-color: var(--warn); color: var(--on-accent); }
 .fader .f-ms .ms.solo.on { background: var(--accent); border-color: var(--accent); }
+/* M-V8 E5 段2：混音台 Send 支路（post-fader → 目标总线；量 0 即移除） */
+.fader .f-send { width: 100%; display: flex; flex-direction: column; gap: 3px; margin-top: 2px; }
+.fader .f-send .fs-row { display: flex; align-items: center; gap: 3px; font-size: var(--fs-xs); color: var(--muted); width: 100%; }
+.fader .f-send .fs-row .fs-nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fader .f-send .fs-row input[type="range"] {
+  writing-mode: horizontal-tb; direction: ltr;
+  flex: 1; width: auto; min-height: 0; height: 12px;
+}
+.fader .f-send .fs-row input[type="range"]::-webkit-slider-runnable-track { width: auto; height: 3px; }
+.fader .f-send .fs-row input[type="range"]::-webkit-slider-thumb { margin-left: -3px; height: 10px; width: 8px; }
+.fader .f-send select { width: 100%; font-size: var(--fs-xs); padding: 0 2px; }
+.fader .f-send .fs-x { padding: 0 4px; font-size: var(--fs-xs); line-height: 1.2; }
+/* M-V8 E5 段2：自动化 lane（叠在单轨卷帘底部） */
+#autoroll {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 132px;
+  width: 100%; box-sizing: border-box;   /* 替换元素：必须显式宽度，否则被固有比例反噬 */
+  background: var(--bg-elev); border-top: 1px solid var(--border-strong);
+  z-index: 5; cursor: crosshair;
+}
+#autoroll[hidden] { display: none; }
 
 /* ---------------- 选区工具条 ---------------- */
 #sel-bar {
@@ -600,6 +621,13 @@ body.chat-folded #rail-chat { display: flex; }
 }
 #status-summary { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #status-chips { flex: none; white-space: nowrap; }
+/* M-V8 E5 段2：电平表（试听通路 L/R 峰值 + 保持 + CLIP） */
+.meter { display: inline-flex; align-items: center; gap: 3px; flex: none; }
+.meter .mt { position: relative; width: 54px; height: 7px; background: var(--bg-sunken); border: 1px solid var(--border); border-radius: 2px; overflow: hidden; }
+.meter .mt i { position: absolute; left: 0; top: 0; bottom: 0; width: 0%; background: var(--ok); }
+.meter .mt i.hot { background: var(--warn); }
+.meter .mt b { position: absolute; top: 0; bottom: 0; width: 2px; left: 0; background: var(--text); opacity: .65; }
+.meter .mclip { color: var(--err); font-size: var(--fs-xs); font-weight: 700; }
 #status-diff { color: var(--warn); }
 .badge-add { color: var(--ok); }
 .badge-del { color: var(--err); }

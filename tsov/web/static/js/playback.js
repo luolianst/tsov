@@ -4,12 +4,99 @@
 
 import { api } from './api.js';
 import { bus } from './events.js';
-import { store, setPlayhead, setPlaying, setLoopOn, setMetronome, toast, setError } from './state.js';
+import { store, setPlayhead, setPlaying, setLoopOn, setMetronome, toast, setError, setMeter } from './state.js';
 
 let audio = null;        // <audio> wav 试听
 let rafId = 0;
 let hostT0 = 0;          // 后端播放起始时刻（playback_start；含 start 偏移）
 let playGen = 0;         // E1 修复：起播代际——停止作废在途起播（加载中点⏹不再事后冒播）
+
+/* ---------------- E5 段2：电平表（试听通路；MediaElementSource 单次绑定） ---------------- */
+
+let meterCtx = null, meterSrc = null, meterSplit = null;
+let meterAn = [null, null], meterBuf = [null, null];
+let meterHold = [0, 0], meterClipT = 0, meterLastPush = 0, meterErr = null;
+
+function ensureMeter() {
+  if (meterCtx) return meterCtx;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  try {
+    meterCtx = new AC();
+    meterSrc = meterCtx.createMediaElementSource(ensureAudio());   // 单次绑定（audio 为单例）
+    meterSrc.connect(meterCtx.destination);                        // 监听原样出声
+    meterSplit = meterCtx.createChannelSplitter(2);
+    meterSrc.connect(meterSplit);
+    for (let i = 0; i < 2; i++) {
+      meterAn[i] = meterCtx.createAnalyser();
+      meterAn[i].fftSize = 1024;
+      meterBuf[i] = new Float32Array(meterAn[i].fftSize);
+      meterSplit.connect(meterAn[i], i);
+    }
+  } catch (e) {
+    meterErr = String((e && e.message) || e);
+    try { console.error('[meter]', e); } catch (_) { /* 忽略 */ }
+    meterCtx = null;   // 绑定失败（旧内核）→ 弃表，不影响播放
+  }
+  return meterCtx;
+}
+
+/* CDP 诊断口：表初始化状态/错误 + 音频元素状态（不影响播放） */
+export function meterDebug() {
+  return {
+    ok: !!meterCtx, err: meterErr, state: meterCtx ? meterCtx.state : null, an: !!meterAn[0],
+    audio: audio ? {
+      paused: audio.paused, ct: Math.round((audio.currentTime || 0) * 1000) / 1000,
+      dur: Math.round((audio.duration || 0) * 1000) / 1000, ready: audio.readyState,
+      err: audio.error ? ("code " + audio.error.code) : null, src: String(audio.src || "").slice(-24),
+    } : null,
+  };
+}
+
+function setFill(sel, v) {
+  const el = document.querySelector(sel);
+  if (!el) return;
+  el.style.width = Math.round(Math.min(1, v) * 100) + '%';
+  el.classList.toggle('hot', v >= 0.85);
+}
+
+function setHoldMark(sel, v) {
+  const el = document.querySelector(sel);
+  if (el) el.style.left = Math.round(Math.min(1, v) * 100) + '%';
+}
+
+function meterTick() {
+  const on = store.playing === 'wav';
+  if (on) {
+    const ctx = ensureMeter();
+    if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {});
+  }
+  if (!meterCtx || !meterAn[0]) return;
+  const now = performance.now();
+  const lv = [0, 0];
+  if (on) {
+    for (let i = 0; i < 2; i++) {
+      meterAn[i].getFloatTimeDomainData(meterBuf[i]);
+      let m = 0;
+      const b = meterBuf[i];
+      for (let j = 0; j < b.length; j++) { const a = Math.abs(b[j]); if (a > m) m = a; }
+      lv[i] = Math.min(1, m);
+    }
+  }
+  for (let i = 0; i < 2; i++) meterHold[i] = Math.max(lv[i], meterHold[i] * 0.94);   // 保持：~12dB/s 衰减
+  if (lv[0] >= 0.999 || lv[1] >= 0.999) meterClipT = now;
+  const clip = (now - meterClipT) < 1500;
+  setFill('#mt-l', lv[0]); setFill('#mt-r', lv[1]);
+  setHoldMark('#mt-lh', meterHold[0]); setHoldMark('#mt-rh', meterHold[1]);
+  const clipEl = document.querySelector('#mt-clip');
+  if (clipEl) clipEl.hidden = !clip;
+  if (now - meterLastPush > 100) {   // store 快照 10Hz 节流（CDP 断言口）
+    meterLastPush = now;
+    setMeter({ l: Math.round(lv[0] * 1000) / 1000, r: Math.round(lv[1] * 1000) / 1000,
+               hold_l: Math.round(meterHold[0] * 1000) / 1000, hold_r: Math.round(meterHold[1] * 1000) / 1000,
+               clip });
+  }
+}
 
 function ensureAudio() {
   if (audio) return audio;
@@ -96,6 +183,7 @@ function tick() {
     setPlayhead(loopedPos((performance.now() - hostT0) / 1000));
   }
   if (store.playing) metroTick();
+  meterTick();                      // E5 段2：电平表（试听通路；停止时自然衰减到 0）
   rafId = requestAnimationFrame(tick);
 }
 
@@ -122,6 +210,7 @@ export function rewind() {
 
 export async function playWav() {
   if (!store.project) { setError('先打开一个工程'); return; }
+  ensureMeter();                    // E5：在用户手势内建 AudioContext（autoplay 政策友好）
   const a = ensureAudio();
   const gen = ++playGen;            // E1：本次起播代际（stop/新起播会作废）
   let from = Math.max(0, store.playhead || 0);
@@ -241,6 +330,7 @@ export function init(opts) {
     if (metroBtn) metroBtn.classList.toggle('on', store.metronome);
   });
 
+  window.__tsovMeterDebug = meterDebug;   // E5 段2：CDP 诊断口
   /* M-V7 D1：命令层落盘（手势/面板参数）→ 松手即听；渲染进度轻提示 */
   bus.on('batch_applied', () => scheduleFresh());
   bus.on('render_progress', (ev) => { if (ev && ev.state === 'render') toast('重渲 ' + ev.name + '…'); });
