@@ -25,7 +25,7 @@ from unit._cleanup import rmtree_force
 def env(monkeypatch):
     d = Path("output") / f"webrectest-{uuid.uuid4().hex[:10]}"
     d.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(tsov.web, "AGENT_SESSION_DIR", str(d / "agent-sessions"))
+    monkeypatch.setattr("tsov.webapp.config.AGENT_SESSION_DIR", str(d / "agent-sessions"))
     app = create_app(output_dir=d)
     client = TestClient(app)
     try:

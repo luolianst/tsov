@@ -35,7 +35,7 @@ def env(monkeypatch):
     """
     d = Path("output") / f"webtest-{uuid.uuid4().hex[:10]}"
     d.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(tsov.web, "AGENT_SESSION_DIR", str(d / "agent-sessions"))
+    monkeypatch.setattr("tsov.webapp.config.AGENT_SESSION_DIR", str(d / "agent-sessions"))
     app = create_app(output_dir=d)
     client = TestClient(app)
     try:
@@ -206,8 +206,8 @@ def test_log_and_summary(env):
 
 def test_sse_heartbeat_only(env, monkeypatch):
     """无写入：连通帧 + 心跳帧（SSE 传输层；close_after 收流避免无限流）。"""
-    import tsov.web as web_mod
-    monkeypatch.setattr(web_mod, "SSE_HEARTBEAT_SEC", 0.1)
+    import tsov.webapp.config as cfg
+    monkeypatch.setattr(cfg, "SSE_HEARTBEAT_SEC", 0.1)
 
     _make_project(env)
     c = env["client"]
@@ -220,8 +220,8 @@ def test_sse_heartbeat_only(env, monkeypatch):
 
 def test_sse_stream_events(env, monkeypatch):
     """并发写（batch）→ SSE 推 diff_applied + state_updated（跨线程 publish → asyncio 队列）。"""
-    import tsov.web as web_mod
-    monkeypatch.setattr(web_mod, "SSE_HEARTBEAT_SEC", 0.1)
+    import tsov.webapp.config as cfg
+    monkeypatch.setattr(cfg, "SSE_HEARTBEAT_SEC", 0.1)
 
     _make_project(env)
     c = env["client"]
@@ -331,7 +331,7 @@ def _install_fake_stream(monkeypatch, proj_root, seen_messages: list[int] | None
 
     奇数调 = edit_score（annotations 纯程序路径，不触网）；偶数调 = 最终回答。
     """
-    import tsov.web as web_mod
+    import tsov.webapp.agent_session as web_mod
 
     calls = {"n": 0}
 
@@ -664,7 +664,7 @@ def test_create_project_default_track(env):
 
 def _install_final_only_stream(monkeypatch, seen: dict):
     """假 stream：直接返回最终回答（不调工具）；记录首轮 messages 供 brief 断言。"""
-    import tsov.web as web_mod
+    import tsov.webapp.agent_session as web_mod
 
     def fake_stream(bus, project, session_id, messages, tools, stop_event):
         if "messages" not in seen:
