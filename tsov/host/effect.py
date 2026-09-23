@@ -61,8 +61,8 @@ _PLUGIN_NAMES: dict[str, str] = {
 
 
 def effect_kinds() -> list[str]:
-    """已支持的效果类型列表。"""
-    return sorted(_PARAM_RANGES)
+    """已支持的效果类型列表（含 vst3 托管：path 指向内层二进制）。"""
+    return sorted(list(_PARAM_RANGES) + ["vst3"])
 
 
 def _clamp(kind: str, key: str, value) -> float:
@@ -86,9 +86,29 @@ def _plugin_class(kind: str):
 
 
 def validate_effect(effect: Effect) -> list[str]:
-    """校验单个效果：返回问题列表（空 = 通过）。供预设入库检查用。"""
+    """校验单个效果：返回问题列表（空 = 通过）。供预设入库检查用。
+
+    vst3（E5）：要求 path 存在且可加载（失败报错要响——加载不了的插件不入链）。
+    """
     problems: list[str] = []
     kind = getattr(effect, "type", None)
+    if kind == "vst3":
+        path = str((effect.params or {}).get("path") or "").strip()
+        if not path:
+            problems.append("vst3 需要 path（内层二进制：xxx.vst3/Contents/x86_64-win/xxx.vst3）")
+            return problems
+        import os
+
+        if not os.path.isfile(path):
+            problems.append(f"vst3 路径不存在：{path}")
+            return problems
+        try:
+            import pedalboard
+
+            pedalboard.load_plugin(path)
+        except Exception as exc:  # noqa: BLE001 —— 加载失败必须上报，不静默
+            problems.append(f"vst3 加载失败：{path}（{exc}）")
+        return problems
     if kind not in _PARAM_RANGES:
         problems.append(f"未知效果类型：{kind!r}")
         return problems
@@ -123,6 +143,9 @@ class EffectChain(EffectProcessor):
         self._plugins: list = []
         for e in self.effects:
             kind = getattr(e, "type", None)
+            if kind == "vst3":
+                self._plugins.append(self._load_vst3(e))
+                continue
             if kind not in _PARAM_RANGES:
                 raise ValueError(
                     f"不支持的效果类型：{kind!r}（可用：{', '.join(effect_kinds())}）"
@@ -136,6 +159,33 @@ class EffectChain(EffectProcessor):
                     continue
                 params[key] = _clamp(kind, key, value)
             self._plugins.append(_plugin_class(kind)(**params))
+
+    def _load_vst3(self, e: Effect):
+        """加载 vst3 效果插件（path = 内层二进制；其余 params 逐项 setattr）。
+
+        加载失败/是乐器插件 → ValueError（失败要响，不静默）。
+        """
+        import pedalboard
+
+        params = dict(getattr(e, "params", None) or {})
+        path = str(params.pop("path", "") or "").strip()
+        if not path:
+            raise ValueError("vst3 效果缺少 path（内层二进制路径）")
+        try:
+            plugin = pedalboard.load_plugin(path)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"vst3 加载失败：{path}（{exc}）") from exc
+        if getattr(plugin, "is_instrument", False):
+            raise ValueError(f"vst3 效果需要效果插件（is_instrument=True）：{path}")
+        for key, value in params.items():
+            try:
+                setattr(plugin, key, float(value))
+            except Exception:  # noqa: BLE001 —— 回退 parameters 映射
+                try:
+                    plugin.parameters[key] = float(value)
+                except Exception as exc:  # noqa: BLE001
+                    raise ValueError(f"vst3 参数设置失败：{key}={value!r}（{exc}）") from exc
+        return plugin
 
     def process(self, audio: np.ndarray, samplerate: int) -> np.ndarray:
         arr = np.ascontiguousarray(np.asarray(audio, dtype=np.float32))

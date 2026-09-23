@@ -2,8 +2,9 @@
 
 矩阵维度：内容（master 混音 × 总线 stems × 轨道 stems）× 格式（WAV × MIDI）
 - 统一缩放系数：先探测 full mix 峰值，>1 时对**全部产物**应用同一系数（相对电平保持）
-- stems = 轨内处理（fader/pan/automation）后、总线/master 处理前
-- buses = 含该总线处理（fader/pan/automation）、master 处理前
+- stems = 轨内处理（fader/pan/automation）后、总线/master 处理前；**不含 send 支路**（E5）
+- buses = 含该总线处理（效果链 → fader/pan/automation）+ 汇入该总线的 send 支路、master 处理前（E5）
+- mix = 全量（含全部 send 支路与总线/master 效果链）
 - mute/solo 与 full mix 一致地作用于全部产物（solo 生效时非 solo 轨的 stem 为静音）
 """
 

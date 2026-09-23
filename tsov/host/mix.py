@@ -8,6 +8,9 @@
 - mute/solo：任一轨 solo → 仅 solo 轨可闻（mute 恒静音）
 - 防削波：沿用旧 mix_graph 行为——full mix 峰值 >1 时整体缩放（`auto_scale=True` 缺省）
 - 总线容错：track.bus 指向不存在的总线 → 按 master 处理
+- M-V8 E5：**send 支路**——post-fader（推子+automation+声像后）× 量 → 汇入目标总线缓冲（与分组路由同缓冲，
+  总线处理照常作用）；**stems 导出（only_track）不含 send 支路**；总线/master 处理序升级为
+  **效果 → 音量/automation → 声像**（与轨内同构；无效果时逐位与旧版一致）
 
 （换序前后差异只出现在「非线性效果 + 非单位推子」的轨：新序下效果输入不再被推子驱动；
 旧序产物对照见 `output/mv7-d1-compare/`，任务书 D1 闸门 1。）
@@ -105,26 +108,38 @@ def render_buses(
     - 返回 (n, 2) stereo；`stereo=False` 折叠为 mono (L+R)/2（与旧 mix_graph 数值一致）
     """
     samplerate = int(samplerate or session.samplerate)
+    bus_defs: dict[str, Bus] = {b.name: b for b in (getattr(session.score, "buses", None) or [])}
+    mdef = getattr(session.score, "master", None) or Bus(name="master")
     # 渲染长度 = 会话时长 + 1s 释放尾 + 效果链尾巴（reverb/delay；无效果时不改变既有长度）
+    # M-V8 E5：尾巴汇总纳入总线/master 效果链（取最大）
     fx_tail = max(
-        (effect_tail_seconds(getattr(ht.track.instrument, "effects", None)) for ht in session.tracks),
+        [effect_tail_seconds(getattr(ht.track.instrument, "effects", None)) for ht in session.tracks]
+        + [effect_tail_seconds(getattr(b, "effects", None)) for b in bus_defs.values()]
+        + [effect_tail_seconds(getattr(mdef, "effects", None))],
         default=0.0,
     )
     n_frames = max(1, int(round((session.duration + 1.0 + fx_tail) * samplerate)))
     times = np.arange(n_frames, dtype=np.float64) / samplerate
 
     master = np.zeros((n_frames, 2), dtype=np.float32)
-    bus_defs: dict[str, Bus] = {b.name: b for b in (getattr(session.score, "buses", None) or [])}
     bus_bufs: dict[str, np.ndarray] = {}
 
     any_solo = any(bool(getattr(ht.track, "solo", False)) for ht in session.tracks)
 
+    send_on = include_bus_processing and only_track is None   # stems（单轨）不含 send 支路
     for idx, ht in enumerate(session.tracks):
         tr = ht.track
         if only_track is not None and idx != only_track:
             continue
         target = getattr(tr, "bus", "master") or "master"
-        if only_bus is not None and target != only_bus:
+        # M-V8 E5：send 支路集合（量>0；only_bus 导出时也检查汇入本总线的 send）
+        sends_here: dict[str, float] = {}
+        if send_on:
+            for sname, amt in (getattr(tr, "sends", None) or {}).items():
+                a = _num(amt, 0.0)
+                if a > 0:
+                    sends_here[str(sname)] = a
+        if only_bus is not None and target != only_bus and only_bus not in sends_here:
             continue
         if bool(getattr(tr, "mute", False)) or (any_solo and not bool(getattr(tr, "solo", False))):
             continue
@@ -158,16 +173,30 @@ def render_buses(
         # 轨内后段（混音期实时层）：推子 → automation → 声像
         stereo_buf = apply_track_mix(np.asarray(buf, dtype=np.float32), tr, times)
 
-        if target == "master" or not include_bus_processing:
-            master += stereo_buf
-        else:
-            bus_bufs.setdefault(target, np.zeros((n_frames, 2), dtype=np.float32))
-            bus_bufs[target] += stereo_buf
+        if only_bus is None or target == only_bus:
+            if target == "master" or not include_bus_processing:
+                master += stereo_buf
+            else:
+                bus_bufs.setdefault(target, np.zeros((n_frames, 2), dtype=np.float32))
+                bus_bufs[target] += stereo_buf
+        # M-V8 E5：send 支路（post-fader × 量；与分组路由同缓冲；总线处理照常作用）
+        for sname, amt in sends_here.items():
+            if only_bus is not None and sname != only_bus:
+                continue
+            contrib = stereo_buf * amt
+            if sname == "master":
+                master += contrib
+            else:
+                bus_bufs.setdefault(sname, np.zeros((n_frames, 2), dtype=np.float32))
+                bus_bufs[sname] += contrib
 
-    # 总线处理 → master
+    # 总线处理（效果 → 音量/automation → 声像，与轨内同构）→ master
     for name, bb in bus_bufs.items():
         bdef = bus_defs.get(name)
         if bdef is not None:
+            fx = getattr(bdef, "effects", None) or []
+            if fx:
+                bb = apply_effect_chain(np.asarray(bb, dtype=np.float32), samplerate, fx)
             vol_curve = _curve((bdef.automation or {}).get("volume"), times)
             if vol_curve is not None:
                 bb = bb * vol_curve[:, None].astype(np.float32)
@@ -177,9 +206,11 @@ def render_buses(
             bb = bb * _pan_matrix(lg, rg)
         master += bb
 
-    # master 处理
-    mdef = getattr(session.score, "master", None) or Bus(name="master")
+    # master 处理（效果 → 音量/automation → 声像）
     if include_master_processing:
+        fx = getattr(mdef, "effects", None) or []
+        if fx:
+            master = apply_effect_chain(np.asarray(master, dtype=np.float32), samplerate, fx)
         vol_curve = _curve((mdef.automation or {}).get("volume"), times)
         if vol_curve is not None:
             master = master * vol_curve[:, None].astype(np.float32)

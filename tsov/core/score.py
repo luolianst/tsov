@@ -71,6 +71,8 @@ class Track:
     # ---- M-V8 E2：音频轨（additive；kind="midi" 时与旧数据完全同构）----
     kind: str = "midi"           # "midi" | "audio"
     audio: dict = field(default_factory=dict)  # 音频轨元数据：{"file": "audio/xxx.flac", "offset": 0.0}（工程内相对路径；第一刀单 clip/轨）
+    # ---- M-V8 E5：Send 支路（additive；post-fader × 量 → 汇入目标总线缓冲）----
+    sends: dict = field(default_factory=dict)  # {总线名: 量 0~1}；缺省空 dict = 无支路（旧数据完全同构）
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -89,6 +91,7 @@ class Track:
             folder=str(data.get("folder") or ""),
             kind=str(data.get("kind") or "midi"),
             audio=dict(data.get("audio") or {}),
+            sends={str(k): float(v) for k, v in (data.get("sends") or {}).items()},
         )
 
 
@@ -100,6 +103,8 @@ class Bus:
     volume: float = 1.0
     pan: float = 0.0
     automation: dict = field(default_factory=dict)
+    # ---- M-V8 E5：总线效果链（additive；处理序 效果 → 音量/automation → 声像）----
+    effects: list[Effect] = field(default_factory=list)  # master 同 Bus 类，一并可用
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -111,6 +116,7 @@ class Bus:
             volume=float(data["volume"]) if data.get("volume") is not None else 1.0,
             pan=float(data["pan"]) if data.get("pan") is not None else 0.0,
             automation=dict(data.get("automation") or {}),
+            effects=[Effect.from_dict(e) for e in data.get("effects") or []],
         )
 
 

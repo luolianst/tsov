@@ -14,6 +14,10 @@
 - M-V8 E5 增补（2026-09-24）：split_note（剪刀：at 处切分）/ merge_notes（胶水：与后邻同音高合并，gap≤max_gap）
   / shift_notes（微推：indices 选区或整轨批量时间平移，原子）/ quantize_time 扩展（value 升 {grid, swing?, indices?}，
   swing=后半格顺延比例；裸 grid 数向后兼容）——编辑工具集第一刀
+- M-V8 E5 段2：set_track_mix 增 sends（{总线名: 量0~1}，post-fader 支路，整体替换）/ add_effect 与
+  remove_effect 增 target（"track" 缺省 | "bus" | "master"，bus 经 ref 指定）——总线效果与 send 返回；
+  set_automation（三层点集整体替换：target/ref/param/points；空数组=清除；t 严格递增校验）；
+  附：add_bus / remove_bus（Send 前置——总线可建可删，仍被路由/Send 引用时拒删）——混音补齐
 - 事务协议：EditBatch.apply(score) 在深拷贝上逐条执行——非法命令被拒绝并记录 error，
   合法命令全部生效（部分应用 + 错误清单）；apply 前不脏原 Score。
 - 该命令层 = M-V2 起 agent 工具与 Web UI 共用的编辑通道（docs/05 接口契约）。
@@ -28,7 +32,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from ..core.notes import Note
-from ..core.score import Bookmark, Effect, Score, Track
+from ..core.score import Bookmark, Bus, Effect, Score, Track
 from ..core.units import midi_to_hz
 
 
@@ -115,6 +119,14 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
     # M-V8 E2：音频轨——add 不依赖 track 索引（改轨内字段见 set_audio_track）
     if c.op == "add_audio_track":
         return _apply_add_audio_track(score, c)
+    # M-V8 E5 段2：自动化（三层寻址：track 用 c.track；bus/master 用 ref/名称；不要求 c.track 在界内）
+    if c.op == "set_automation":
+        return _apply_set_automation(score, c)
+    # M-V8 E5 段2 附：总线管理（Send 前置；master 隐式、不可增删）
+    if c.op == "add_bus":
+        return _apply_add_bus(score, c)
+    if c.op == "remove_bus":
+        return _apply_remove_bus(score, c)
     if not (0 <= c.track < len(score.tracks)):
         return f"{c.op} 越界：track {c.track}（共 {len(score.tracks)} 轨）"
     track = score.tracks[c.track]
@@ -135,9 +147,9 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
     if c.op == "set_instrument":
         return _apply_set_instrument(track, c)
     if c.op == "add_effect":
-        return _apply_add_effect(track, c)
+        return _apply_add_effect(score, track, c)
     if c.op == "remove_effect":
-        return _apply_remove_effect(track, c)
+        return _apply_remove_effect(score, track, c)
 
     if c.op == "add":
         v = c.value
@@ -372,7 +384,7 @@ def _apply_set_track_mix(score: Score, track, c: EditCommand) -> str | None:
     v = c.value
     if not isinstance(v, dict):
         return "set_track_mix value 需 {volume?, pan?, mute?, solo?, bus?}"
-    known = ("volume", "pan", "mute", "solo", "bus")
+    known = ("volume", "pan", "mute", "solo", "bus", "sends")
     for k in v:
         if k not in known:
             return f"set_track_mix 未知键：{k!r}（可用：{', '.join(known)}）"
@@ -402,6 +414,26 @@ def _apply_set_track_mix(score: Score, track, c: EditCommand) -> str | None:
         if name not in known_buses:
             return f"未知总线：{name!r}（可用：{', '.join(sorted(known_buses))}）"
         track.bus = name
+    # M-V8 E5：send 支路 {总线名: 量 0~1}；整体替换（量 0 = 视为移除该支路，不占位）
+    if v.get("sends") is not None:
+        raw = v["sends"]
+        if not isinstance(raw, dict):
+            return "set_track_mix sends 需为对象：{总线名: 量}"
+        known_buses = {"master"} | {b.name for b in getattr(score, "buses", []) or []}
+        sends: dict = {}
+        for sname, amt in raw.items():
+            s = str(sname).strip()
+            if s not in known_buses:
+                return f"未知总线：{s!r}（可用：{', '.join(sorted(known_buses))}）"
+            try:
+                a = float(amt)
+            except (TypeError, ValueError):
+                return f"sends[{s}] 量非法：{amt!r}"
+            if not (0.0 <= a <= 1.0):
+                return f"sends[{s}] 量越界：{a}（0~1）"
+            if a > 0:
+                sends[s] = round(a, 4)
+        track.sends = sends
     return None
 
 
@@ -420,11 +452,35 @@ def _apply_set_instrument(track, c: EditCommand) -> str | None:
     return None
 
 
-def _apply_add_effect(track, c: EditCommand) -> str | None:
-    """value = {"type": kind, "params"?: {...}}；params 省略 = 插件默认参数。"""
+def _effect_target_list(score: Score, track, v: dict):
+    """效果目标解析（E5 段2）：target = "track"（缺省）| "bus" | "master"；bus 经 ref 指定名。"""
+
+    target = str(v.get("target") or "track").strip()
+    if target == "track":
+        return track.instrument.effects, None
+    if target == "bus":
+        name = str(v.get("ref") or "").strip()
+        for b in getattr(score, "buses", []) or []:
+            if b.name == name:
+                return b.effects, None
+        known = sorted({b.name for b in getattr(score, "buses", []) or []} | {"master"})
+        return None, f"未知总线：{name!r}（可用：{', '.join(known)}；master 用 target=\"master\"）"
+    if target == "master":
+        master = getattr(score, "master", None)
+        if master is None:
+            return None, "master 不存在"
+        return master.effects, None
+    return None, f"未知 target：{target!r}（track / bus / master）"
+
+
+def _apply_add_effect(score: Score, track, c: EditCommand) -> str | None:
+    """value = {"type": kind, "params"?: {...}, "target"?: "track"|"bus"|"master", "ref"?: 总线名}。"""
     v = c.value
     if not isinstance(v, dict) or not v.get("type"):
         return "add_effect value 需 {type, params?}"
+    effects, err = _effect_target_list(score, track, v)
+    if err:
+        return f"add_effect {err}"
     kind = str(v["type"]).strip()
     from .effect import effect_kinds, validate_effect
 
@@ -436,14 +492,17 @@ def _apply_add_effect(track, c: EditCommand) -> str | None:
     problems = validate_effect(Effect(type=kind, params=params))
     if problems:
         return "；".join(problems)
-    track.instrument.effects.append(Effect(type=kind, params=dict(params)))
+    effects.append(Effect(type=kind, params=dict(params)))
     return None
 
 
-def _apply_remove_effect(track, c: EditCommand) -> str | None:
-    """index = 效果链下标（用 index 字段；也接受 value 传数字）。"""
-    effects = track.instrument.effects
-    idx = c.index if c.index is not None else c.value
+def _apply_remove_effect(score: Score, track, c: EditCommand) -> str | None:
+    """index = 效果链下标（用 index 字段；也接受 value 传数字）；target/ref 同 add_effect。"""
+    v = c.value if isinstance(c.value, dict) else {}
+    effects, err = _effect_target_list(score, track, v)
+    if err:
+        return f"remove_effect {err}"
+    idx = c.index if c.index is not None else (v.get("index") if isinstance(c.value, dict) else c.value)
     try:
         idx = int(idx)
     except (TypeError, ValueError):
@@ -590,6 +649,125 @@ def _apply_set_track_folder(score: Score, track, c: EditCommand) -> str | None:
     if len(name) > 64:
         return "文件夹名过长（≤64 字符）"
     track.folder = name
+    return None
+
+
+# ======================================================================
+# M-V8 E5 段2：自动化（三层点集整体替换）
+# ======================================================================
+
+def _apply_add_bus(score: Score, c: EditCommand) -> str | None:
+    """value = {"name"?, "volume"?, "pan"?}——新增混音总线（E5 段2 附：Send 前置）。
+    缺省名自动编号 bus1、bus2…；master 为隐式总线（不可新增/占用）。"""
+
+    v = c.value if isinstance(c.value, dict) else {}
+    name = str(v.get("name") or "").strip()
+    existing = {b.name for b in getattr(score, "buses", []) or []}
+    if not name:
+        i = 1
+        while f"bus{i}" in existing:
+            i += 1
+        name = f"bus{i}"
+    if name == "master":
+        return "master 为隐式总线，不能新增同名总线"
+    if name in existing:
+        return f"总线已存在：{name!r}"
+    bus = Bus(name=name)
+    for key, lo, hi in (("volume", 0.0, 2.0), ("pan", -1.0, 1.0)):
+        val = v.get(key)
+        if val is None:
+            continue
+        try:
+            f = float(val)
+        except (TypeError, ValueError):
+            return f"add_bus {key} 非法：{val!r}"
+        if not (lo <= f <= hi):
+            return f"add_bus {key} 越界（{lo}~{hi}）：{f}"
+        setattr(bus, key, f)
+    score.buses.append(bus)
+    return None
+
+
+def _apply_remove_bus(score: Score, c: EditCommand) -> str | None:
+    """value = {"name": str}——移除总线；仍被轨道路由（track.bus）或 Send 引用时拒绝。"""
+
+    v = c.value if isinstance(c.value, dict) else {}
+    name = str(v.get("name") or "").strip()
+    hit = next((b for b in getattr(score, "buses", []) or [] if b.name == name), None)
+    if hit is None:
+        return f"总线不存在：{name!r}"
+    for t in score.tracks:
+        if str(getattr(t, "bus", "master") or "master") == name:
+            return f"总线被轨道路由引用（{t.name!r}）——先改 track.bus"
+        if name in (getattr(t, "sends", None) or {}):
+            return f"总线被 Send 引用（{t.name!r}）——先移除 Send"
+    score.buses.remove(hit)
+    return None
+
+
+_AUTOMATION_PARAMS = {
+    "volume": (0.0, 2.0),
+    "pan": (-1.0, 1.0),
+}
+
+
+def _apply_set_automation(score: Score, c: EditCommand) -> str | None:
+    """value = {"target"?: "track"|"bus"|"master", "ref"?: 总线名, "param": "volume"|"pan",
+    "points": [[t, v], …]}——目标参数的整个点集替换（空数组 = 清除；t≥0 严格递增；v 按参数域校验）。"""
+
+    v = c.value
+    if not isinstance(v, dict):
+        return "set_automation value 需 {target?, ref?, param, points}"
+    target = str(v.get("target") or "track").strip()
+    if target == "track":
+        if not (0 <= c.track < len(score.tracks)):
+            return f"set_automation 越界：track {c.track}（共 {len(score.tracks)} 轨）"
+        host = score.tracks[c.track]
+    elif target == "bus":
+        name = str(v.get("ref") or "").strip()
+        host = next((b for b in getattr(score, "buses", []) or [] if b.name == name), None)
+        if host is None:
+            known = sorted({b.name for b in getattr(score, "buses", []) or []} | {"master"})
+            return f"未知总线：{name!r}（可用：{', '.join(known)}；master 用 target=\"master\"）"
+    elif target == "master":
+        host = getattr(score, "master", None)
+        if host is None:
+            return "master 不存在"
+    else:
+        return f"未知 target：{target!r}（track / bus / master）"
+    param = str(v.get("param") or "").strip()
+    if param not in _AUTOMATION_PARAMS:
+        return f"未知 param：{param!r}（volume / pan）"
+    raw = v.get("points")
+    if raw is None:
+        return "set_automation 需要 points（数组；空数组=清除）"
+    if not isinstance(raw, (list, tuple)):
+        return "set_automation points 需为数组 [[t, v], …]"
+    lo, hi = _AUTOMATION_PARAMS[param]
+    pts: list[list[float]] = []
+    prev = None
+    for item in raw:
+        if not isinstance(item, (list, tuple)) or len(item) < 2:
+            return f"set_automation 点非法（需 [t, v]）：{item!r}"
+        try:
+            t = float(item[0])
+            val = float(item[1])
+        except (TypeError, ValueError):
+            return f"set_automation 点非法：{item!r}"
+        if t < 0:
+            return f"set_automation 时间点越界：{t}"
+        if prev is not None and t <= prev:
+            return f"set_automation 时间点须严格递增：{prev} → {t}"
+        if not (lo <= val <= hi):
+            return f"set_automation {param} 值越界：{val}（{lo}~{hi}）"
+        pts.append([round(t, 6), round(val, 4)])
+        prev = t
+    automation = dict(getattr(host, "automation", None) or {})
+    if pts:
+        automation[param] = pts
+    else:
+        automation.pop(param, None)
+    host.automation = automation
     return None
 
 
