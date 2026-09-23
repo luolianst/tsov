@@ -208,6 +208,40 @@ async function attachAudio(info, fallbackName) {
     (info.deduped ? '（复用已有文件）' : '') + ' · ' + Number(info.seconds).toFixed(2) + 's');
 }
 
+/* ---------------- M-V8 E5：MIDI 导入（本机路径 / 浏览器文件） ---------------- */
+
+function openMidiImport() {
+  if (!store.project) { setError('先打开一个工程'); return; }
+  const p = prompt('本机 MIDI 路径（留空则打开文件选择框；支持 .mid/.midi）：', '');
+  if (p === null) return;
+  if (p.trim()) { importMidiByPath(p.trim()); return; }
+  const inp = $('midi-file-input');
+  if (inp) inp.click();
+}
+
+async function importMidiByPath(path) {
+  if (!store.project) { setError('先打开一个工程'); return; }
+  try {
+    const r = await api.importMidiPath(store.project, path);
+    afterMidiImport(r);
+  } catch (e) { setError('MIDI 导入失败：' + e.message); }
+}
+
+async function importMidiFile(file) {
+  if (!store.project) { setError('先打开一个工程'); return; }
+  try {
+    const r = await api.importMidiUpload(store.project, file);
+    afterMidiImport(r);
+  } catch (e) { setError('MIDI 导入失败：' + e.message); }
+}
+
+function afterMidiImport(r) {
+  const names = (r.tracks || []).join('、');
+  bus.dispatch('toast', '已导入 MIDI：+' + r.added + ' 轨 / ' + r.notes + ' 音' +
+    (names ? '（' + names + '）' : '') + (r.adopted ? ' · 已采纳文件元数据' : '') +
+    (r.skipped ? ' · 跳过空轨 ' + r.skipped : ''));
+}
+
 /* ---------------- 启动 ---------------- */
 
 function boot() {
@@ -284,6 +318,13 @@ function boot() {
     const f = audioInp.files && audioInp.files[0];
     audioInp.value = '';
     if (f) importAudioFile(f);
+  });
+  $('mi-import-midi').addEventListener('click', () => { closeMenus(null); openMidiImport(); });
+  const midiInp = $('midi-file-input');
+  if (midiInp) midiInp.addEventListener('change', () => {
+    const f = midiInp.files && midiInp.files[0];
+    midiInp.value = '';
+    if (f) importMidiFile(f);
   });
   $('mi-refresh').addEventListener('click', () => { closeMenus(null); loadProjects(true); });
   $('mi-export').addEventListener('click', () => { closeMenus(null); openExport(); });

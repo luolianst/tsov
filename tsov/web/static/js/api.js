@@ -91,6 +91,15 @@ export const api = {
     fd.append('name', String(file.name || '').replace(/\.[^.]+$/, ''));   // 用原文件名（非临时名）
     return req('/api/projects/' + encodeURIComponent(name) + '/audio/import', { method: 'POST', body: fd });
   },
+  /* M-V8 E5：MIDI 导入（双来源，与音频入库同模式） */
+  importMidiPath: (name, path, label) =>
+    post('/api/projects/' + encodeURIComponent(name) + '/midi/import', { path, name: label || null }),
+  importMidiUpload: (name, file) => {
+    const fd = new FormData();
+    fd.append('file', file, file.name);
+    fd.append('name', String(file.name || '').replace(/\.[^.]+$/, ''));
+    return req('/api/projects/' + encodeURIComponent(name) + '/midi/import', { method: 'POST', body: fd });
+  },
   fetchPeaks: (name, file, buckets) =>
     req('/api/projects/' + encodeURIComponent(name) + '/audio/peaks?file=' + encodeURIComponent(file) +
         '&buckets=' + (buckets || 900)),
