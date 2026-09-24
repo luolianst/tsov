@@ -49,16 +49,30 @@ def _dll_dir() -> str | None:
     return None
 
 
+_FLUID = None
+
+
 def _load_fluidsynth():
-    """加载 pyfluidsynth（模块级只注册一次）。DLL 目录加入搜索路径后 import。"""
+    """加载 pyfluidsynth（模块级只注册一次）。DLL 目录加入搜索路径后 import。
+
+    幂等（2026-09-24 热修）：原实现每次调用都向 PATH 前置 dll_dir——Web 长驻进程反复
+    渲染会把 PATH 涨到 32767 上限（ValueError），之后进程环境块超限导致该进程所有
+    CreateProcess 报 WinError 8（web 全瘫）。现改为模块级缓存 + PATH 不重复添加。
+    """
+    global _FLUID
+    if _FLUID is not None:
+        return _FLUID
     dll_dir = _dll_dir()
     if dll_dir and os.name == "nt":
-        os.environ["PATH"] = dll_dir + os.pathsep + os.environ.get("PATH", "")
+        path = os.environ.get("PATH", "")
+        if dll_dir not in path.split(os.pathsep):
+            os.environ["PATH"] = dll_dir + os.pathsep + path
         if hasattr(os, "add_dll_directory"):
             os.add_dll_directory(dll_dir)
     import fluidsynth
 
-    return fluidsynth
+    _FLUID = fluidsynth
+    return _FLUID
 
 
 def render_midi(midi_path: str | Path, out_wav: str | Path, soundfont: str | None = None) -> str:
