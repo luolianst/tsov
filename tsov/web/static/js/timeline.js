@@ -325,6 +325,7 @@ function renderTracks(el) {
     });
     el.appendChild(item);
   });
+  bus.dispatch('rowlayout');   /* UI 修正轮3.2：行布局就绪 → main.js 收集推给卷帘（文件夹行/折叠路径对齐） */
 }
 
 /* ======================================================================

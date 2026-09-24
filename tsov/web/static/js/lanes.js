@@ -21,8 +21,22 @@ function rowH() {
   return Math.max(24, parseInt(v, 10) || 46);
 }
 
-/* UI 修正轮3：纵向滚动偏移（由左栏 #tracks-scroll 驱动；卷帘自身滚轮语义不变） */
+/* UI 修正轮3：纵向滚动偏移（由左栏 #tracks-scroll 驱动；卷帘自身滚轮语义不变）
+   3.1：maxScrollOv = 左栏滚动上限——卷帘范围与左栏一致（滚过行区后下方留白），任何滚动位置行都逐行匹配 */
 let scrollY = 0;
+let maxScrollOv = 0;
+/* UI 修正轮3.2：左栏真实行布局（文件夹行/折叠/行高差异 → 卷帘逐行匹配；由 main.js 收集推送）
+   rowMap[trackIndex] = y（相对卷帘内容顶）｜null = 该轨不占行（折叠/隐藏） */
+let rowMap = null;
+
+/* 行布局查询：无表时回退等距假设 */
+function rowHidden(ti) {
+  return !!(rowMap && Object.prototype.hasOwnProperty.call(rowMap, ti) && rowMap[ti] == null);
+}
+function rowY(ti) {
+  if (rowMap && rowMap[ti] != null) return rowMap[ti];
+  return ti * rowH();
+}
 
 function resize() {
   dpr = window.devicePixelRatio || 1;
@@ -32,17 +46,25 @@ function resize() {
   canvas.width = Math.floor(W * dpr);
   canvas.height = Math.floor(H * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  /* UI 修正轮3：可视高变化后校正滚动上限 */
+  /* UI 修正轮3：可视高变化后校正滚动上限（3.1：上限与左栏一致，含 maxScrollOv） */
   const n = (store.score && store.score.tracks.length) || 0;
-  scrollY = Math.max(0, Math.min(scrollY, Math.max(0, n * rowH() - H)));
+  scrollY = Math.max(0, Math.min(scrollY, Math.max(maxScrollOv, Math.max(0, n * rowH() - H))));
   store.lanesScroll = scrollY;
 }
 
 function xOf(t) { return KEYS + (t - store.view.scrollSec) * store.view.pxPerSec; }
 function tOf(x) { return store.view.scrollSec + (x - KEYS) / store.view.pxPerSec; }
 function laneAt(y) {
-  const i = Math.floor((y + scrollY) / rowH());   /* UI 修正轮3：随纵向滚动偏移 */
-  return (store.score && i >= 0 && i < store.score.tracks.length) ? i : -1;
+  const sc = store.score;
+  if (!sc) return -1;
+  const yy = y + scrollY;
+  for (let i = 0; i < sc.tracks.length; i++) {
+    if (rowHidden(i)) continue;
+    const ry = rowY(i);
+    if (yy >= ry && yy < ry + rowH()) return i;
+    if (ry > yy) break;   /* 行按 y 递增；越过即无命中 */
+  }
+  return -1;
 }
 
 /* ---- M-V8 E2：音频素材（波形块 / 拖动 / 试听） ---- */
@@ -106,9 +128,8 @@ function trackVisible(ti) {
 function flagAt(offX, offY) {
   const sc = store.score;
   if (!sc) return null;
-  const rh = rowH();
   const ti = laneAt(offY);
-  if (ti < 0 || offY > ti * rh - scrollY + 16) return null;   /* UI 修正轮3：命中区随滚动偏移 */
+  if (ti < 0 || offY > rowY(ti) - scrollY + 16) return null;   /* UI 修正轮3.2：命中区随行布局 */
   const folderHost = {};
   sc.tracks.forEach((t, i) => { if (t.folder && folderHost[t.folder] === undefined) folderHost[t.folder] = i; });
   const list = [];
@@ -157,7 +178,8 @@ export function draw() {
 
   /* ---- 行背景 + 标签槽（第一遍） ---- */
   for (let ti = 0; ti < sc.tracks.length; ti++) {
-    const y0 = ti * rh - scrollY;   /* UI 修正轮3：纵向滚动偏移 */
+    if (rowHidden(ti)) continue;   /* UI 修正轮3.2：折叠/隐藏 → 与左栏一致不占行 */
+    const y0 = rowY(ti) - scrollY;   /* UI 修正轮3.2：行布局 y（文件夹行/行高差异已计入） */
     if (y0 + rh < 0) continue;
     if (y0 > H) break;
     const selected = store.selection.track === ti;
@@ -216,7 +238,8 @@ export function draw() {
   const inner = Math.max(8, rh - pad * 2 - 2);
   const nh = Math.max(3, Math.min(9, rh * 0.20));
   for (let ti = 0; ti < sc.tracks.length; ti++) {
-    const y0 = ti * rh - scrollY;   /* UI 修正轮3：纵向滚动偏移 */
+    if (rowHidden(ti)) continue;   /* UI 修正轮3.2：折叠/隐藏 → 不占行（与左栏一致） */
+    const y0 = rowY(ti) - scrollY;   /* UI 修正轮3.2：行布局 y */
     if (y0 + rh < 0) continue;
     if (y0 > H) break;
     if (!trackVisible(ti)) continue;   // M-V8 E1：隐藏/文件夹折叠 → 不画音符
@@ -312,10 +335,10 @@ export function draw() {
       let host = -1;
       if (b.scope === 'track') host = sc.tracks.findIndex((t) => t.name === b.ref);
       else host = (folderHost[b.ref] !== undefined) ? folderHost[b.ref] : -1;
-      if (host < 0 || host * rh - scrollY > H || host * rh - scrollY + 16 < 0 || !trackVisible(host)) continue;
+      if (host < 0 || rowHidden(host) || rowY(host) - scrollY > H || rowY(host) - scrollY + 16 < 0 || !trackVisible(host)) continue;
       const x = Math.round(xOf(b.start));
       if (x < KEYS - 4 || x > W) continue;
-      const y0 = host * rh - scrollY;   /* UI 修正轮3：随纵向滚动偏移 */
+      const y0 = rowY(host) - scrollY;   /* UI 修正轮3.2：随行布局 */
       const isFolder = b.scope === 'folder';
       ctx.fillStyle = isFolder ? p.rulerText : tc[host % tc.length];
       ctx.fillRect(x, y0 + 2, 1, 10);
@@ -437,13 +460,22 @@ export function resizeNow() {
   draw();
 }
 
-/* UI 修正轮3：总谱纵向滚动偏移（左栏轨道面板驱动、clamp 到内容范围；__tsovState 快照观测用） */
-export function setScrollY(y) {
+/* UI 修正轮3：总谱纵向滚动偏移（左栏轨道面板驱动；__tsovState 快照观测用）
+   3.1：maxOverride = 左栏滚动上限（含信息区）→ 卷帘范围与左栏一致，滚到底两边仍逐行匹配 */
+export function setScrollY(y, maxOverride) {
+  if (maxOverride != null) maxScrollOv = Math.max(0, Number(maxOverride) || 0);
   const n = (store.score && store.score.tracks.length) || 0;
-  const max = Math.max(0, n * rowH() - H);
+  const max = Math.max(maxScrollOv, Math.max(0, n * rowH() - H));
   const v = Math.max(0, Math.min(Number(y) || 0, max));
   store.lanesScroll = v;
   if (v === scrollY) return;
   scrollY = v;
+  draw();
+}
+
+/* UI 修正轮3.2：左栏真实行布局（main.js 收集推送；文件夹行/折叠/行高差异 → 两栏逐行匹配） */
+export function setRowLayout(map) {
+  rowMap = (map && typeof map === 'object') ? map : null;
+  store.laneRows = rowMap;   /* __tsovState 快照观测用 */
   draw();
 }

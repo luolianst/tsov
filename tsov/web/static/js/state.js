@@ -388,6 +388,7 @@ export function snapshot() {
     clipTrack: store.clipTrack,
     range: store.range ? Object.assign({}, store.range) : null,
     lanesScroll: store.lanesScroll || 0,
+    laneRows: store.laneRows || null,   /* UI 修正轮3.2：左栏行布局表（文件夹行/折叠对齐观测） */
     /* M-V8 E5 段2：自动化 lane / 电平表快照（CDP 断言用） */
     automation: { open: store.autoLane.open, param: store.autoLane.param },
     meter: Object.assign({}, store.meter),

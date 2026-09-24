@@ -248,9 +248,26 @@ function boot() {
   initTheme();   // UI 批A：浅色默认（?theme= / localStorage 可覆盖）
   roll.init($('roll'));
   lanes.init($('lanes'), { onEnter: enterSingle, onDropAudio: importAudioFile });
+  /* UI 修正轮3.2：把左栏真实行布局（文件夹行/折叠/行高差异）推给卷帘——两栏逐行匹配 */
+  function syncLaneRows() {
+    const sc = $('tracks-scroll'); const list = $('track-list');
+    if (!sc || !list) return;
+    const scTop = sc.getBoundingClientRect().top;
+    const base = sc.scrollTop;   /* 行内容坐标（相对 scroller 内容顶）= rect.top - scTop + scrollTop */
+    const map = {};
+    for (const el of list.querySelectorAll('.track-item')) {
+      const ti = Number(el.dataset.track);
+      if (!Number.isFinite(ti)) continue;
+      if (!el.getClientRects().length) { map[ti] = null; continue; }   // 折叠/隐藏：不占行
+      map[ti] = Math.round(el.getBoundingClientRect().top - scTop + base);
+    }
+    lanes.setRowLayout(Object.keys(map).length ? map : null);
+  }
+  bus.on('rowlayout', syncLaneRows);   /* 须在 timeline.init 前注册（捕获首渲染） */
+  window.addEventListener('resize', () => requestAnimationFrame(syncLaneRows));
   timeline.init($('ruler'), $('track-list'), $('segments-info'), $('meta-info'), { onEnter: enterSingle });
-  /* UI 修正轮3：左栏滚动 → 卷帘同步纵向滚动（卷帘自身滚轮=横向/缩放，语义不变） */
-  $('tracks-scroll').addEventListener('scroll', () => lanes.setScrollY($('tracks-scroll').scrollTop));
+  /* UI 修正轮3：左栏滚动 → 卷帘同步纵向滚动（卷帘自身滚轮=横向/缩放，语义不变；3.1：范围与左栏一致） */
+  $('tracks-scroll').addEventListener('scroll', () => { const ts = $('tracks-scroll'); lanes.setScrollY(ts.scrollTop, ts.scrollHeight - ts.clientHeight); });
   timeline.initMarkers($('markers'));   // M-V8 E1：段道
   /* 修正轮2.1：段轨已删（洛怜：段落/和弦两行可以删；后续以「书签」替代，见 Q46） */
   dock.init($('dock'));
