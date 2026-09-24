@@ -21,6 +21,20 @@ function resize() {
 function xOf(t) { return KEYS_W + (t - store.view.scrollSec) * store.view.pxPerSec; }
 function tOf(x) { return store.view.scrollSec + (x - KEYS_W) / store.view.pxPerSec; }
 
+/* UI 修正轮3：拍级吸附（循环段 / 乐段创建与调整）；按住 Alt = 临时自由。拍长定义与 playback.js 一致 */
+function beatSec() {
+  const sc = store.score;
+  const m = sc && sc.time_signature ? /^(\d+)\s*\/\s*(\d+)/.exec(sc.time_signature) : null;
+  const den = m ? parseInt(m[2], 10) : 4;
+  return (60 / tempo()) * (4 / (den || 4));
+}
+function snapT(t, e) {
+  if (e && e.altKey) return Math.max(0, t);
+  const b = beatSec();
+  if (!(b > 0)) return Math.max(0, t);
+  return Math.max(0, Math.round(t / b) * b);
+}
+
 export function draw() {
   if (!ctx) return;
   ctx.clearRect(0, 0, W, H);
@@ -555,22 +569,24 @@ export function initMarkers(markersCanvas) {
     const mi = markAt(e.offsetX);
     if (mi >= 0) { setSelBookmark(mi); return; }
     setSelBookmark(-1);
-    mdrag = { i: -1, mode: 'new', t0: t, cur: { start: t, end: t }, moved: false };
+    mdrag = { i: -1, mode: 'new', t0: snapT(t, e), cur: { start: t, end: t }, moved: false };   /* UI 修正轮3：起点吸附 */
   });
 
   window.addEventListener('mousemove', (e) => {
     if (!mdrag) return;
     const r = mcanvas.getBoundingClientRect();
     if (e.clientY < r.top - 60 || e.clientY > r.bottom + 60) return;
-    const t = Math.max(0, tOf(e.clientX - r.left));
+    const traw = Math.max(0, tOf(e.clientX - r.left));
+    const t = snapT(traw, e);   /* UI 修正轮3：拍级吸附（Alt = 自由） */
     if (!mdrag.moved && Math.abs(e.clientX - r.left - xOf(mdrag.t0)) < 3) return;
     mdrag.moved = true;
     const c = mdrag.cur;
     if (mdrag.mode === 'new') { c.start = Math.min(mdrag.t0, t); c.end = Math.max(mdrag.t0, t); }
     else if (mdrag.mode === 'body') {
-      const d = t - mdrag.t0;
-      c.start = Math.max(0, mdrag.b0.start + d);
-      c.end = Math.max(0, mdrag.b0.end + d);
+      const d = traw - mdrag.t0;
+      const ns = snapT(mdrag.b0.start + d, e);   /* 起点吸附、保长 */
+      c.start = Math.max(0, ns);
+      c.end = c.start + (mdrag.b0.end - mdrag.b0.start);
     } else if (mdrag.mode === 'a') { c.start = Math.max(0, Math.min(t, c.end - 0.05)); }
     else if (mdrag.mode === 'b') { c.end = Math.max(t, c.start + 0.05); }
     showPreview(c.start, c.end);
@@ -637,51 +653,75 @@ export function init(rulerCanvas, trackListEl, segmentsInfoEl, metaInfoEl, opts)
   new ResizeObserver(() => { resize(); draw(); }).observe(canvas);
   for (const topic of ['state', 'view', 'playhead', 'markers']) bus.on(topic, draw);
 
-  /* ===== M-V8 E1：标尺交互——单击=定位 ｜ 拖动=划循环区间 ｜ 拖把手=调区间 ｜ 双击区间=清除 ===== */
+  /* ===== UI 修正轮3：标尺交互——左键单击/拖动 = 同一逻辑定位播放起点（跟手 seek）；
+     右键拖动 = 划循环区间（拍级吸附，Alt 自由）；右键拖端点=调区间 / 拖区间中=整段移动 / 右键双击=清除 ===== */
   let rdrag = null;
+  let lastRC = { t: 0, x: 0 };
+  canvas.addEventListener('contextmenu', (e) => { if (e.clientX - canvas.getBoundingClientRect().left >= KEYS_W) e.preventDefault(); });
   canvas.addEventListener('mousedown', (e) => {
-    if (e.button !== 0 || e.offsetX < KEYS_W) return;
+    if (e.offsetX < KEYS_W) return;
     const t = Math.max(0, tOf(e.offsetX));
-    const L = store.loop;
+    if (e.button === 0) {                     /* 左键：按下即定位；拖动持续跟手（同一 seekTo 逻辑） */
+      rdrag = { mode: 'seek', t0: t, last: 0 };
+      seekTo(t);
+      return;
+    }
+    if (e.button !== 2) return;
+    const now = performance.now();            /* 右键双击（同点、350ms 内）= 清除循环区间 */
+    if (now - lastRC.t < 350 && Math.abs(e.offsetX - lastRC.x) < 6) {
+      lastRC = { t: 0, x: 0 };
+      const L0 = store.loop;
+      if (L0 && e.offsetX >= xOf(L0.start) && e.offsetX <= xOf(L0.end)) {
+        setLoop(null);
+        setLoopOn(false);
+        bus.dispatch('toast', '已清除循环区间');
+      }
+      return;
+    }
+    lastRC = { t: now, x: e.offsetX };
+    const L = store.loop;                     /* 右键：把手 / 整段 / 新建 */
     if (L) {
       const xa = xOf(L.start), xb = xOf(L.end);
       if (Math.abs(e.offsetX - xa) <= 5) { rdrag = { mode: 'a', t0: t, loop0: { start: L.start, end: L.end }, moved: false }; return; }
       if (Math.abs(e.offsetX - xb) <= 5) { rdrag = { mode: 'b', t0: t, loop0: { start: L.start, end: L.end }, moved: false }; return; }
       if (e.offsetX > xa + 5 && e.offsetX < xb - 5) { rdrag = { mode: 'move', t0: t, loop0: { start: L.start, end: L.end }, moved: false }; return; }
     }
-    rdrag = { mode: 'new', t0: t, moved: false };
+    rdrag = { mode: 'new', t0: snapT(t, e), moved: false };
   });
   window.addEventListener('mousemove', (e) => {
     if (!rdrag) return;
     const r = canvas.getBoundingClientRect();
     if (e.clientY < r.top - 60 || e.clientY > r.bottom + 60) return;
-    const t = Math.max(0, tOf(e.clientX - r.left));
+    const traw = Math.max(0, tOf(e.clientX - r.left));
+    if (rdrag.mode === 'seek') {              /* 跟手定位（~60fps 节流） */
+      const now = performance.now();
+      if (now - rdrag.last < 16) return;
+      rdrag.last = now;
+      seekTo(traw);
+      return;
+    }
+    const t = snapT(traw, e);                 /* UI 修正轮3：拍级吸附（Alt = 自由） */
     if (!rdrag.moved && Math.abs(e.clientX - r.left - xOf(rdrag.t0)) < 3) return;
     rdrag.moved = true;
     if (rdrag.mode === 'new') setLoop({ start: Math.min(rdrag.t0, t), end: Math.max(rdrag.t0, t) });
     else if (rdrag.mode === 'a') setLoop({ start: Math.max(0, Math.min(t, rdrag.loop0.end - 0.05)), end: rdrag.loop0.end });
     else if (rdrag.mode === 'b') setLoop({ start: rdrag.loop0.start, end: Math.max(t, rdrag.loop0.start + 0.05) });
     else if (rdrag.mode === 'move') {
-      const d = t - rdrag.t0;
-      setLoop({ start: Math.max(0, rdrag.loop0.start + d), end: Math.max(0, rdrag.loop0.end + d) });
+      const d = traw - rdrag.t0;
+      const ns = Math.max(0, snapT(rdrag.loop0.start + d, e));
+      setLoop({ start: ns, end: ns + (rdrag.loop0.end - rdrag.loop0.start) });
     }
   });
-  window.addEventListener('mouseup', () => {
+  window.addEventListener('mouseup', (e) => {
     if (!rdrag) return;
     const d = rdrag;
     rdrag = null;
-    if (!d.moved) { seekTo(d.t0); return; }          // 单击 = 定位
-    if (!store.loopOn) setLoopOn(true);              // 划出/调整区间 → 自动打开循环
-  });
-  canvas.addEventListener('dblclick', (e) => {
-    if (e.offsetX < KEYS_W) return;
-    const L = store.loop;
-    if (!L) return;
-    if (e.offsetX >= xOf(L.start) && e.offsetX <= xOf(L.end)) {
-      setLoop(null);
-      setLoopOn(false);
-      bus.dispatch('toast', '已清除循环区间');
+    if (d.mode === 'seek') {                  /* 左键：松手收尾精准定位一次 */
+      seekTo(Math.max(0, tOf(e.clientX - canvas.getBoundingClientRect().left)));
+      return;
     }
+    if (!d.moved) return;                     /* 右键单击（未拖动）：不动 */
+    if (!store.loopOn) setLoopOn(true);       /* 划出/调整区间 → 自动打开循环 */
   });
 
   /* 修正轮2：视图模式切换 → 重画行（主轨/叠加标记） */

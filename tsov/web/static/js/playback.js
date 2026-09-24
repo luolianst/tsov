@@ -317,7 +317,7 @@ export function init(opts) {
   /* E1：循环 / 节拍器开关按钮（状态类随 markers 事件同步） */
   const { loopBtn, metroBtn } = opts;
   if (loopBtn) loopBtn.addEventListener('click', () => {
-    if (!store.loop) { setError('先划循环区间：在标尺上拖动'); return; }
+    if (!store.loop) { setError('先划循环区间：在标尺上右键拖动'); return; }
     setLoopOn(!store.loopOn);
     toast(store.loopOn ? '循环开（区间 ' + store.loop.start.toFixed(1) + '–' + store.loop.end.toFixed(1) + 's）' : '循环关');
   });

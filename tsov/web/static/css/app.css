@@ -33,6 +33,7 @@
   --chat-col: var(--chat-w);
   --row-h: 46px;
   --ruler-h: 40px;   /* 标尺高度；左栏面板头同高 → 轨道行与 lane 逐行对齐 */
+  --markers-h: 22px; /* 段道行高（UI 修正轮3：左栏占位同高 → 卷帘逐行对齐） */
   --rail-w: 26px;
   --radius: 0px;
   --radius-note: 3px;
@@ -224,11 +225,14 @@ body.chat-folded #rail-chat { display: flex; }
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;          /* UI 修正轮3：滚动下沉到 #tracks-scroll（面板头/占位固定） */
   min-height: 0;
 }
-/* 修正轮2.1：子项不收缩（否则矮窗口下头部被压扁 → 行与 lane 错位）；超高整栏滚动 */
+/* 修正轮2.1：子项不收缩（否则矮窗口下头部被压扁 → 行与 lane 错位） */
 #tracks-panel > * { flex: none; }
+/* UI 修正轮3：占位与段道同高 → 逐行对齐；下方内容独立滚动（与卷帘同步由 main.js 联动） */
+#track-list-top { height: var(--markers-h); border-bottom: 1px solid var(--border); }
+#tracks-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .panel-title {
   font-size: var(--fs-xs);
   color: var(--faint);
@@ -347,7 +351,7 @@ body.chat-folded #rail-chat { display: flex; }
 #roll, #lanes { position: absolute; inset: 0; }
 #ruler { background: var(--bg-panel); border-bottom: 1px solid var(--border); }
 /* M-V8 E1：段道（乐段/记号）——固定在 22px 高，cursor 十字 */
-#markers { height: 22px; background: var(--bg-panel); border-bottom: 1px solid var(--border); cursor: crosshair; }
+#markers { height: var(--markers-h); background: var(--bg-panel); border-bottom: 1px solid var(--border); cursor: crosshair; }
 #roll { cursor: default; }
 #lanes { cursor: default; }
 

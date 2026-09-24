@@ -21,6 +21,9 @@ function rowH() {
   return Math.max(24, parseInt(v, 10) || 46);
 }
 
+/* UI 修正轮3：纵向滚动偏移（由左栏 #tracks-scroll 驱动；卷帘自身滚轮语义不变） */
+let scrollY = 0;
+
 function resize() {
   dpr = window.devicePixelRatio || 1;
   const r = canvas.getBoundingClientRect();
@@ -29,12 +32,16 @@ function resize() {
   canvas.width = Math.floor(W * dpr);
   canvas.height = Math.floor(H * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  /* UI 修正轮3：可视高变化后校正滚动上限 */
+  const n = (store.score && store.score.tracks.length) || 0;
+  scrollY = Math.max(0, Math.min(scrollY, Math.max(0, n * rowH() - H)));
+  store.lanesScroll = scrollY;
 }
 
 function xOf(t) { return KEYS + (t - store.view.scrollSec) * store.view.pxPerSec; }
 function tOf(x) { return store.view.scrollSec + (x - KEYS) / store.view.pxPerSec; }
 function laneAt(y) {
-  const i = Math.floor(y / rowH());
+  const i = Math.floor((y + scrollY) / rowH());   /* UI 修正轮3：随纵向滚动偏移 */
   return (store.score && i >= 0 && i < store.score.tracks.length) ? i : -1;
 }
 
@@ -101,7 +108,7 @@ function flagAt(offX, offY) {
   if (!sc) return null;
   const rh = rowH();
   const ti = laneAt(offY);
-  if (ti < 0 || offY > ti * rh + 16) return null;
+  if (ti < 0 || offY > ti * rh - scrollY + 16) return null;   /* UI 修正轮3：命中区随滚动偏移 */
   const folderHost = {};
   sc.tracks.forEach((t, i) => { if (t.folder && folderHost[t.folder] === undefined) folderHost[t.folder] = i; });
   const list = [];
@@ -150,7 +157,8 @@ export function draw() {
 
   /* ---- 行背景 + 标签槽（第一遍） ---- */
   for (let ti = 0; ti < sc.tracks.length; ti++) {
-    const y0 = ti * rh;
+    const y0 = ti * rh - scrollY;   /* UI 修正轮3：纵向滚动偏移 */
+    if (y0 + rh < 0) continue;
     if (y0 > H) break;
     const selected = store.selection.track === ti;
     const overlay = store.overlayTracks.has(ti);
@@ -208,7 +216,8 @@ export function draw() {
   const inner = Math.max(8, rh - pad * 2 - 2);
   const nh = Math.max(3, Math.min(9, rh * 0.20));
   for (let ti = 0; ti < sc.tracks.length; ti++) {
-    const y0 = ti * rh;
+    const y0 = ti * rh - scrollY;   /* UI 修正轮3：纵向滚动偏移 */
+    if (y0 + rh < 0) continue;
     if (y0 > H) break;
     if (!trackVisible(ti)) continue;   // M-V8 E1：隐藏/文件夹折叠 → 不画音符
     const trk = sc.tracks[ti];
@@ -303,10 +312,10 @@ export function draw() {
       let host = -1;
       if (b.scope === 'track') host = sc.tracks.findIndex((t) => t.name === b.ref);
       else host = (folderHost[b.ref] !== undefined) ? folderHost[b.ref] : -1;
-      if (host < 0 || host * rh > H || !trackVisible(host)) continue;
+      if (host < 0 || host * rh - scrollY > H || host * rh - scrollY + 16 < 0 || !trackVisible(host)) continue;
       const x = Math.round(xOf(b.start));
       if (x < KEYS - 4 || x > W) continue;
-      const y0 = host * rh;
+      const y0 = host * rh - scrollY;   /* UI 修正轮3：随纵向滚动偏移 */
       const isFolder = b.scope === 'folder';
       ctx.fillStyle = isFolder ? p.rulerText : tc[host % tc.length];
       ctx.fillRect(x, y0 + 2, 1, 10);
@@ -425,5 +434,16 @@ export function init(el, opts) {
 export function resizeNow() {
   if (!canvas) return;
   resize();
+  draw();
+}
+
+/* UI 修正轮3：总谱纵向滚动偏移（左栏轨道面板驱动、clamp 到内容范围；__tsovState 快照观测用） */
+export function setScrollY(y) {
+  const n = (store.score && store.score.tracks.length) || 0;
+  const max = Math.max(0, n * rowH() - H);
+  const v = Math.max(0, Math.min(Number(y) || 0, max));
+  store.lanesScroll = v;
+  if (v === scrollY) return;
+  scrollY = v;
   draw();
 }

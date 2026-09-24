@@ -249,6 +249,8 @@ function boot() {
   roll.init($('roll'));
   lanes.init($('lanes'), { onEnter: enterSingle, onDropAudio: importAudioFile });
   timeline.init($('ruler'), $('track-list'), $('segments-info'), $('meta-info'), { onEnter: enterSingle });
+  /* UI 修正轮3：左栏滚动 → 卷帘同步纵向滚动（卷帘自身滚轮=横向/缩放，语义不变） */
+  $('tracks-scroll').addEventListener('scroll', () => lanes.setScrollY($('tracks-scroll').scrollTop));
   timeline.initMarkers($('markers'));   // M-V8 E1：段道
   /* 修正轮2.1：段轨已删（洛怜：段落/和弦两行可以删；后续以「书签」替代，见 Q46） */
   dock.init($('dock'));
@@ -441,7 +443,7 @@ function boot() {
       e.preventDefault();
       playback.rewind();
     } else if (e.key === 'l' || e.key === 'L') {
-      if (!store.loop) { setError('先在标尺上拖动划循环区间'); return; }
+      if (!store.loop) { setError('先在标尺上右键拖动划循环区间'); return; }
       setLoopOn(!store.loopOn);
       toast(store.loopOn ? '循环开' : '循环关');
     } else if (e.key === 'm' || e.key === 'M') {

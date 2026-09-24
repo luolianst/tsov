@@ -387,6 +387,7 @@ export function snapshot() {
     clipboard: store.clipboard.length,
     clipTrack: store.clipTrack,
     range: store.range ? Object.assign({}, store.range) : null,
+    lanesScroll: store.lanesScroll || 0,
     /* M-V8 E5 段2：自动化 lane / 电平表快照（CDP 断言用） */
     automation: { open: store.autoLane.open, param: store.autoLane.param },
     meter: Object.assign({}, store.meter),
