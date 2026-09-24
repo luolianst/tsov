@@ -28,7 +28,8 @@ export const store = {
   /* 视图模式（修正轮2）：'lanes' = 总谱预览（每轨 lane）| 'single' = 单轨写谱 */
   viewMode: 'lanes',
   singleTrack: 0,
-  overlayTracks: new Set(),   // single 模式灰叠加轨（不可编辑）
+  overlayTracks: new Set(),   // single 模式灰叠加轨（不可编辑；跨类型叠加 → 上下分屏）
+  splitRatio: 0.5,            // M-V8 E3 段1：单轨分屏上下比例（主轨上 / 叠加下；0.15~0.85，可拖分界）
 
   /* 轨道可见性（Set<trackIndex>；空 = 全可见） */
   hiddenTracks: new Set(),
@@ -215,6 +216,7 @@ export function setViewMode(mode, track) {
     store.overlayTracks = new Set();
   }
   store.viewMode = m;
+  if (m === 'lanes') store.singleTrack = 0;   /* E3 段1 修：回总谱/切工程 → 单轨主轨记忆清空（残留值曾静默挡住 overlay 叠加） */
   if (track != null) {
     store.singleTrack = Math.max(0, track | 0);
     store.overlayTracks.delete(store.singleTrack);
@@ -231,7 +233,7 @@ export function setSingleTrack(ti) {
 
 /* 灰叠加开关（返回是否已成为叠加） */
 export function toggleOverlay(ti) {
-  if (ti === store.singleTrack) return false;
+  if (store.viewMode === 'single' && ti === store.singleTrack) return false;   /* 仅单轨态下主轨不可叠 */
   if (store.overlayTracks.has(ti)) store.overlayTracks.delete(ti);
   else store.overlayTracks.add(ti);
   bus.dispatch('viewmode');
@@ -239,6 +241,49 @@ export function toggleOverlay(ti) {
 }
 
 export function isOverlay(ti) { return store.overlayTracks.has(ti); }
+
+/* ---------------- M-V8 E3 段1：单轨分屏（主轨上 / 叠加轨下） ---------------- */
+
+/* 分屏对象：第一个跨类型的叠加轨（主轨为音频时取第一个叠加轨）；无 → null。
+   规则（E3 任务书 §11.1 D / G7）：MIDI×MIDI 走灰叠加；跨类型（含音频）走上下分屏。 */
+export function splitPartner() {
+  const sc = store.score;
+  if (!sc || store.viewMode !== 'single') return null;
+  const main = sc.tracks[store.singleTrack];
+  if (!main) return null;
+  const mainIsAudio = main.kind === 'audio';
+  const list = Array.from(store.overlayTracks).sort((a, b) => a - b);
+  for (const oi of list) {
+    if (oi === store.singleTrack) continue;   /* 防自己入叠（交换时序中间态） */
+    const o = sc.tracks[oi];
+    if (!o) continue;
+    if (mainIsAudio || o.kind === 'audio') {
+      return { ti: oi, kind: o.kind === 'audio' ? 'audio' : 'midi' };
+    }
+  }
+  return null;
+}
+
+export function setSplitRatio(r) {
+  store.splitRatio = Math.max(0.15, Math.min(0.85, Number(r) || 0.5));
+  bus.dispatch('view');
+}
+
+/* 分屏快照（__tsovState / roll / main 共用） */
+export function splitState() {
+  const sc = store.score;
+  const single = store.viewMode === 'single';
+  const main = single && sc ? sc.tracks[store.singleTrack] : null;
+  const p = splitPartner();
+  return {
+    on: !!p,
+    ratio: store.splitRatio,
+    main: main ? store.singleTrack : null,
+    mainKind: main ? ((main.kind === 'audio') ? 'audio' : 'midi') : null,
+    overlay: p ? p.ti : null,
+    overlayKind: p ? p.kind : null,
+  };
+}
 
 /* ---------------- 批B B1-3：agent 改动高亮 ---------------- */
 export function setAgentTracks(indices) {
@@ -389,6 +434,7 @@ export function snapshot() {
     range: store.range ? Object.assign({}, store.range) : null,
     lanesScroll: store.lanesScroll || 0,
     laneRows: store.laneRows || null,   /* UI 修正轮3.2：左栏行布局表（文件夹行/折叠对齐观测） */
+    split: splitState(),   /* M-V8 E3 段1：单轨分屏快照（CDP 断言用） */
     /* M-V8 E5 段2：自动化 lane / 电平表快照（CDP 断言用） */
     automation: { open: store.autoLane.open, param: store.autoLane.param },
     meter: Object.assign({}, store.meter),

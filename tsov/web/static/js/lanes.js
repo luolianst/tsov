@@ -8,6 +8,7 @@ import { store, tempo, beatsPerBar, setSelection, toggleOverlay, setView, bookma
 import { pal, trackColors } from './theme.js';
 import { seekTo } from './playback.js';
 import { api } from './api.js';
+import { peaksGet } from './peaks.js';   /* E3 段1：波形峰值公共模块（原本地实现已抽走） */
 
 const KEYS = 56;   // 左侧标签槽（与卷帘 KEYS_W 对齐）
 const FONT_UI = '11px "Microsoft YaHei UI","PingFang SC","MiSans","HarmonyOS Sans SC",system-ui,sans-serif';
@@ -69,26 +70,10 @@ function laneAt(y) {
 
 /* ---- M-V8 E2：音频素材（波形块 / 拖动 / 试听） ---- */
 
-const peaksCache = new Map();   // `${project}|${rel}` → {seconds,min,max}（内容寻址文件名 = 天然失效键）
-const peaksPending = new Set();
 let drag = null;                // {ti, startX, baseOffset, curOffset, moved}
 let preview = null;             // 试听 Audio 单例
 
-/** 波形峰值缓存；未就绪时触发一次拉取并返回 null（拉回后重绘）。 */
-function peaksGet(rel) {
-  if (!rel || !store.project) return null;
-  const key = store.project + '|' + rel;
-  const hit = peaksCache.get(key);
-  if (hit) return hit;
-  if (!peaksPending.has(key)) {
-    peaksPending.add(key);
-    api.fetchPeaks(store.project, rel, 900)
-      .then((d) => { if (d && d.max && d.max.length) { peaksCache.set(key, d); draw(); } })
-      .catch(() => { /* 拿不到波形 → 画占位框 */ })
-      .finally(() => peaksPending.delete(key));
-  }
-  return null;
-}
+/* E3 段1：波形峰值 → 公共模块 js/peaks.js（与单轨波形共用；未就绪返回 null 并触发拉取，拉回后经 bus 'peaks' 重绘） */
 
 function round3(x) { return Math.round(Number(x) * 1000) / 1000; }
 
@@ -389,6 +374,8 @@ export function init(el, opts) {
     if (fl) { setSelBookmark(fl.i); seekTo(fl.b.start); return; }
     const ti = laneAt(e.offsetY);
     if (ti < 0) return;
+    /* E3 段1：叠加集（Ctrl/Shift 单击）对音频轨同样生效（跨类型叠加 → 单轨分屏） */
+    if (e.ctrlKey || e.shiftKey || e.metaKey) { toggleOverlay(ti); return; }
     const trk = store.score && store.score.tracks[ti];
     if (trk && trk.kind === 'audio') {   /* M-V8 E2：块内按下 = 拖动改 offset；块外 = 选中 */
       const pv = peaksGet(trk.audio && trk.audio.file);
@@ -402,7 +389,6 @@ export function init(el, opts) {
       setSelection(ti, []);
       return;
     }
-    if (e.ctrlKey || e.shiftKey || e.metaKey) { toggleOverlay(ti); return; }
     setSelection(ti, []);
   });
 
@@ -434,8 +420,7 @@ export function init(el, opts) {
   canvas.addEventListener('dblclick', (e) => {
     const ti = laneAt(e.offsetY);
     if (ti < 0) return;
-    const trk = store.score && store.score.tracks[ti];
-    if (trk && trk.kind === 'audio') { previewAudio(trk); return; }   /* M-V8 E2：双击试听素材 */
+    /* E3 段1：音频轨同样进单轨 → 主轨波形视图（handoff #183①）；试听移至单轨波形区双击 */
     if (onEnter) onEnter(ti);
   });
 
@@ -448,7 +433,7 @@ export function init(el, opts) {
     if (f && onDropAudio) onDropAudio(f);
   });
 
-  for (const topic of ['state', 'view', 'selection', 'viewmode', 'playhead', 'playing', 'agenttracks', 'markers']) {
+  for (const topic of ['state', 'view', 'selection', 'viewmode', 'playhead', 'playing', 'agenttracks', 'markers', 'peaks']) {
     bus.on(topic, draw);
   }
 }
