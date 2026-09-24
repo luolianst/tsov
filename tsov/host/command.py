@@ -11,7 +11,7 @@
   / remove_track / rename_track——工具与 UI 同一动作路径（工具经 EditBatch）
 - M-V8 E2 增补（2026-09-21）：add_audio_track（追加音频轨；file=工程 audio/ 内相对路径）
   / set_audio_track（音频轨改 offset/file——只作用于 kind=="audio"）——音频轨一等公民第一刀
-- M-V8 E5 增补（2026-09-24）：split_note（剪刀：at 处切分）/ merge_notes（胶水：与后邻同音高合并，gap≤max_gap）
+- M-V8 E5 增补（2026-09-23）：split_note（剪刀：at 处切分）/ merge_notes（胶水：与后邻同音高合并，gap≤max_gap）
   / shift_notes（微推：indices 选区或整轨批量时间平移，原子）/ quantize_time 扩展（value 升 {grid, swing?, indices?}，
   swing=后半格顺延比例；裸 grid 数向后兼容）——编辑工具集第一刀
 - M-V8 E5 段2：set_track_mix 增 sends（{总线名: 量0~1}，post-fader 支路，整体替换）/ add_effect 与
