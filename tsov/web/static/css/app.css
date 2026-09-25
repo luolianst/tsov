@@ -871,3 +871,38 @@ body.chat-folded #rail-chat { display: flex; }
 .rec-timer { font-variant-numeric: tabular-nums; font-size: 15px; letter-spacing: .5px; min-width: 64px; }
 .rec-hint { color: var(--muted); font-size: 11px; }
 .rec-mon { display: flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; }
+
+/* M-V8 E3 段2：处理链面板（哼唱快车道） */
+.chain-wrap { display: flex; flex-direction: column; gap: 4px; padding: 8px 12px; }
+.chain-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.chain-title { font-weight: 600; font-size: var(--fs-md, 12px); }
+.chain-step { display: flex; align-items: center; gap: 8px; padding: 3px 8px; border: 1px solid var(--border); background: var(--bg-elev); min-height: 24px; }
+.chain-step.running { border-color: var(--accent); }
+.chain-step.failed { border-color: var(--err); background: var(--accent-soft); }
+.chain-step.skipped { opacity: .55; }
+.chain-no { color: var(--faint); font-size: var(--fs-xs, 10px); min-width: 12px; }
+.chain-name { min-width: 72px; font-size: var(--fs-md, 12px); }
+.chain-badge { font-size: var(--fs-xs, 10px); padding: 0 6px; border: 1px solid var(--border); color: var(--muted); }
+.chain-badge.done { color: var(--ok); border-color: var(--ok); }
+.chain-badge.running { color: var(--accent); border-color: var(--accent); }
+.chain-badge.failed { color: var(--err); border-color: var(--err); }
+.chain-badge.skipped { color: var(--faint); }
+.chain-badge.dirty { color: var(--warn); border-color: var(--warn); }
+.chain-params { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.chain-params label { display: inline-flex; gap: 3px; align-items: center; font-size: var(--fs-xs, 10px); color: var(--muted); }
+.chain-params input, .chain-params select { width: 56px; font-size: var(--fs-xs, 11px); background: var(--bg-sunken); border: 1px solid var(--bg-hover); color: inherit; padding: 1px 3px; font-variant-numeric: tabular-nums; }
+.chain-params input[type=text] { width: 72px; }
+.chain-btn { font-size: var(--fs-xs, 11px); border: 1px solid var(--border); background: var(--bg-raise); color: inherit; padding: 1px 8px; cursor: pointer; }
+.chain-btn:hover { border-color: var(--border-strong); }
+.chain-btn:disabled { opacity: .5; cursor: default; }
+.chain-btn.chain-run { background: var(--accent); color: var(--on-accent); border: none; padding: 2px 12px; }
+.chain-btn.chain-mute.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.chain-btn.chain-apply { background: var(--warn); color: #fff; border: none; }
+.chain-art { font-size: var(--fs-xs, 11px); color: var(--accent); text-decoration: none; }
+.chain-art:hover { text-decoration: underline; }
+.chain-sub { color: var(--muted); font-size: var(--fs-xs, 11px); }
+.chain-err { color: var(--err); font-size: var(--fs-xs, 11px); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* E3 段2：用户侧「新建轨道」入口（#183② 闭环） */
+.track-add { display: block; width: calc(100% - 16px); margin: 8px; padding: 5px 10px; border: 1px dashed var(--border); background: transparent; color: var(--muted); cursor: pointer; font-size: var(--fs-sm, 12px); text-align: left; }
+.track-add:hover { color: inherit; border-color: var(--border-strong, var(--border)); background: var(--bg-raise); }

@@ -1,0 +1,15 @@
+{
+  "id": "humming-quicklane",
+  "name": {"zh": "哼唱快车道", "en": "Humming quick lane"},
+  "description": {
+    "zh": "降噪 → 响度归一 → 转录（RMVPE）→ 量化 → 调内吸附；哼唱 → 可编辑乐谱的一键链",
+    "en": "Denoise → loudnorm → transcribe (RMVPE) → quantize → scale-snap"
+  },
+  "steps": [
+    {"tool": "denoise", "params": {"strength": 0.8}},
+    {"tool": "loudnorm", "params": {"target_lufs": -16.0, "true_peak_db": -1.0}},
+    {"tool": "transcribe", "params": {"backend": "rmvpe", "pitch_jump_semitones": 0.5, "min_note_ms": 60.0, "confidence_threshold": 0.4}},
+    {"tool": "quantize", "params": {"grid": 16, "strength": 1.0}},
+    {"tool": "snap_scale", "params": {"key": "auto", "threshold_cents": 42.0}}
+  ]
+}

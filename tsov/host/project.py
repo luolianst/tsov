@@ -373,12 +373,25 @@ class Project:
         if not self._has_git():
             self._git("init", "-q")   # 对已存在的空 .git 目录：git init 会补全结构（重初始化）
         gitignore = self.root / ".gitignore"
+        lines = [
+            "# 音频产物与运行时状态不入库（工程版本只存 Score JSON + MIDI）",
+            "*.wav", "*.mp3", "*.flac", "*.m4a",
+            ".agent-actions/", ".tsov-state.json", "agent-edited-score.json",
+            "chain/",   # M-V8 E3：处理链产物目录（音频/中间 json 不入库）
+        ]
         if not gitignore.exists():
-            gitignore.write_text(
-                "# 音频产物与运行时状态不入库（工程版本只存 Score JSON + MIDI）\n"
-                "*.wav\n*.mp3\n*.flac\n*.m4a\n"
-                ".agent-actions/\n.tsov-state.json\nagent-edited-score.json\n",
-                encoding="utf-8")
+            gitignore.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            return
+        # E3：存量工程补齐缺失条目（幂等——只追不改）
+        try:
+            text = gitignore.read_text(encoding="utf-8")
+        except OSError:
+            return
+        existing = set(text.splitlines())
+        missing = [ln for ln in lines if ln not in existing]
+        if missing:
+            with gitignore.open("a", encoding="utf-8") as f:
+                f.write(("" if text.endswith("\n") or not text else "\n") + "\n".join(missing) + "\n")
 
     def commit(self, message: str) -> str | None:
         """git add -A + commit；返回短 hash（失败返回 None）。"""

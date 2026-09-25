@@ -26,6 +26,8 @@ const SSE_TYPES = [
   'agent_turn', 'agent_tool', 'agent_answer', 'agent_error', 'agent_delta',
   'state_updated', 'diff_applied', 'playback_start', 'playback_stop',
   'render_progress', 'render_done',
+  /* M-V8 E3 段2：处理链（agent/REST 通道触发的运行也驱动 UI 刷新） */
+  'chain_started', 'chain_step', 'chain_finished',
 ];
 
 let current = null;   // EventSource

@@ -18,6 +18,10 @@
   remove_effect 增 target（"track" 缺省 | "bus" | "master"，bus 经 ref 指定）——总线效果与 send 返回；
   set_automation（三层点集整体替换：target/ref/param/points；空数组=清除；t 严格递增校验）；
   附：add_bus / remove_bus（Send 前置——总线可建可删，仍被路由/Send 引用时拒删）——混音补齐
+- M-V8 E3 段2 增补（2026-09-24）：snap_scale（调内吸附：调外且 |dev|≥阈值的音吸到最近调内音；
+  key 可指定/缺省自动检测，threshold_cents 默认 42；indices 选区或整轨）——哼唱快车道 MIDI 处理步同源（core/snap.py）
+- M-V8 E3 段2 补（2026-09-25）：add_track（新建空白 MIDI 轨：name 缺省「轨道 N」、重名自动加序号、
+  folder 可选）——用户侧「新建轨道」入口与 agent 同一路径（#183② 闭环）
 - 事务协议：EditBatch.apply(score) 在深拷贝上逐条执行——非法命令被拒绝并记录 error，
   合法命令全部生效（部分应用 + 错误清单）；apply 前不脏原 Score。
 - 该命令层 = M-V2 起 agent 工具与 Web UI 共用的编辑通道（docs/05 接口契约）。
@@ -33,6 +37,7 @@ from typing import Any
 
 from ..core.notes import Note
 from ..core.score import Bookmark, Bus, Effect, Score, Track
+from ..core.snap import snap_out_of_key
 from ..core.units import midi_to_hz
 
 
@@ -119,6 +124,9 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
     # M-V8 E2：音频轨——add 不依赖 track 索引（改轨内字段见 set_audio_track）
     if c.op == "add_audio_track":
         return _apply_add_audio_track(score, c)
+    # M-V8 E3 段2：新建空白 MIDI 轨（#183② 用户侧入口闭环）
+    if c.op == "add_track":
+        return _apply_add_track(score, c)
     # M-V8 E5 段2：自动化（三层寻址：track 用 c.track；bus/master 用 ref/名称；不要求 c.track 在界内）
     if c.op == "set_automation":
         return _apply_set_automation(score, c)
@@ -318,6 +326,35 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
             n.end = round(round(n.end / cell_s) * cell_s, 6)
             if n.end <= n.start:
                 n.end = round(n.start + cell_s, 6)
+        return None
+    # M-V8 E3 段2：调内吸附——调外音吸到最近调内音（key 缺省自动检测；indices 选区或整轨）
+    if c.op == "snap_scale":
+        v = c.value if c.value is not None else {}
+        if not isinstance(v, dict):
+            return f"snap_scale value 需 {{key?, threshold_cents?, indices?}}：{v!r}"
+        raw_key = v.get("key")
+        key = str(raw_key) if raw_key not in (None, "", "auto") else None
+        try:
+            threshold = float(v.get("threshold_cents", 42.0))
+        except (TypeError, ValueError):
+            return f"snap_scale threshold_cents 非法：{v.get('threshold_cents')!r}"
+        if not (0.0 <= threshold <= 100.0):
+            return f"snap_scale threshold_cents 越界：{threshold}（0~100）"
+        indices = None
+        if v.get("indices") is not None:
+            indices, err = _parse_note_indices(v["indices"], len(notes))
+            if err:
+                return err
+        targets = notes if indices is None else [notes[j] for j in indices]
+        try:
+            new_notes, _stats = snap_out_of_key(targets, key=key, threshold_cents=threshold)
+        except ValueError as e:
+            return f"snap_scale {e}"
+        if indices is None:
+            notes[:] = new_notes
+        else:
+            for j, nn in zip(indices, new_notes):
+                notes[j] = nn
         return None
     # M-V8 E5：微推——批量时间平移（原子：任一出界整批拒绝；indices 缺省=整轨）
     if c.op == "shift_notes":
@@ -924,6 +961,29 @@ def _audio_default_name(rel: str) -> str:
     if len(parts) == 2 and re.fullmatch(r"[0-9a-f]{8}", parts[1]):
         stem = parts[0]
     return (stem or "音频")[:64]
+
+
+def _apply_add_track(score: Score, c: EditCommand) -> str | None:
+    """value = {name?, folder?}；追加一条空白 MIDI 轨（供单轨视图手绘/编辑工具画音符）。
+
+    - name 缺省 = 「轨道 N」（N = 现轨数 + 1）；与现有轨重名 → 自动加序号（2, 3, …）
+    - folder 可选：组织层文件夹归属（单层；空 = 无归属）
+    """
+    v = c.value if isinstance(c.value, dict) else {}
+    name = str(v.get("name") or "").strip() or f"轨道 {len(score.tracks) + 1}"
+    if len(name) > 64:
+        return "add_track 名称过长（≤64 字符）"
+    existing = {t.name for t in score.tracks}
+    base, i = name, 2
+    while name in existing:
+        name = f"{base} {i}"
+        i += 1
+    tr = Track(name=name)
+    folder = str(v.get("folder") or "").strip()
+    if folder:
+        tr.folder = folder[:64]
+    score.tracks.append(tr)
+    return None
 
 
 def _apply_add_audio_track(score: Score, c: EditCommand) -> str | None:

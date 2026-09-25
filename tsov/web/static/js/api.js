@@ -114,4 +114,17 @@ export const api = {
     post('/api/projects/' + encodeURIComponent(name) + '/record/stop', body || {}),
   recordStatus: (name) =>
     req('/api/projects/' + encodeURIComponent(name) + '/record/status'),
+  /* M-V8 E3 段2：处理链（哼唱快车道）——5 工具 / 链运行 / 参数配置 / 产物 */
+  chainTools: (name) =>
+    req('/api/projects/' + encodeURIComponent(name) + '/chain/tools'),
+  chainStatus: (name) =>
+    req('/api/projects/' + encodeURIComponent(name) + '/chain/status'),
+  chainRun: (name, body) =>
+    post('/api/projects/' + encodeURIComponent(name) + '/chain/run', body || {}),
+  chainConfig: (name, body) =>
+    post('/api/projects/' + encodeURIComponent(name) + '/chain/config', body || {}),
+  chainCancel: (name) =>
+    post('/api/projects/' + encodeURIComponent(name) + '/chain/cancel', {}),
+  chainArtifactUrl: (name, file) =>
+    '/api/projects/' + encodeURIComponent(name) + '/chain/artifact?file=' + encodeURIComponent(file),
 };

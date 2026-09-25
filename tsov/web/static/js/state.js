@@ -59,6 +59,20 @@ export const store = {
   /* M-V8 E5 段2：自动化 lane（单轨视图底部子道）与电平表 */
   autoLane: { open: false, param: 'volume' },   // param: volume | pan（目标恒为单轨视图当前轨）
   meter: { l: 0, r: 0, hold_l: 0, hold_r: 0, clip: false },   // 试听通路实时电平（CDP 断言口）
+
+  /* M-V8 E3 段2：处理链（哼唱快车道）——前端镜像（真值 = 后端 ChainRunner / 工程 chain.json） */
+  chain: {
+    tools: [],                 // 工具 schema（/chain/tools：id/tier/params）
+    steps: [],                 // 槽位状态（/chain/status：params/mute/status/artifact/stats）
+    preset: 'humming-quicklane',
+    sourceTrack: null,
+    runTs: '',
+    running: false,
+    finished: false,
+    savedOnly: true,
+    needsApply: '',            // 慢档改参标脏（等「应用」）
+    error: null,
+  },
 };
 
 export function setError(msg) {
@@ -182,6 +196,12 @@ export function setAutoLane(partial) {
 /* 高频直写（每帧；不 dispatch——UI 由 playback.js 直接刷 DOM，快照供 CDP 断言） */
 export function setMeter(m) {
   store.meter = m;
+}
+
+/* M-V8 E3 段2：处理链状态镜像（批量并入 + 广播；渲染在 chain.js） */
+export function setChainState(partial) {
+  Object.assign(store.chain, partial || {});
+  bus.dispatch('chain');
 }
 
 /** 当前谱内书签列表（只读引用；写走命令层）。 */
@@ -438,6 +458,19 @@ export function snapshot() {
     /* M-V8 E5 段2：自动化 lane / 电平表快照（CDP 断言用） */
     automation: { open: store.autoLane.open, param: store.autoLane.param },
     meter: Object.assign({}, store.meter),
+    /* M-V8 E3 段2：处理链快照（CDP 断言用；steps 浅拷贝防外部持引用） */
+    chain: {
+      preset: store.chain.preset,
+      sourceTrack: store.chain.sourceTrack,
+      runTs: store.chain.runTs,
+      running: store.chain.running,
+      finished: store.chain.finished,
+      savedOnly: store.chain.savedOnly,
+      needsApply: store.chain.needsApply,
+      error: store.chain.error,
+      toolIds: store.chain.tools.map((t) => t.id),
+      steps: store.chain.steps.map((s) => Object.assign({}, s)),
+    },
     hasDiff: !!store.diff,
     error: store.error,
   };

@@ -144,6 +144,23 @@ function markSelected(el) {
   }
 }
 
+/* E3 段2：用户侧「新建轨道」入口（#183② 闭环；命令层 add_track 同路径） */
+function trackAddBtn() {
+  const add = document.createElement('button');
+  add.className = 'track-add';
+  add.textContent = '＋ 新建轨道';
+  add.title = '新建一条空白 MIDI 轨（双击进入单轨视图画音符；走命令层可撤销）';
+  add.addEventListener('click', async () => {
+    if (!store.project) { setError('先打开一个工程'); return; }
+    try {
+      const r = await api.postBatch(store.project, '新建轨道', [{ op: 'add_track', value: {} }], null);
+      if (!r.applied) setError('被拒：' + (r.errors || []).join('；'));
+      else bus.dispatch('toast', '已新建轨道（双击选中它进单轨画音符）');
+    } catch (e) { setError(e.message); }
+  });
+  return add;
+}
+
 function renderTracks(el) {
   el.innerHTML = '';
   if (!store.score || !store.score.tracks.length) {
@@ -152,6 +169,7 @@ function renderTracks(el) {
     d.style.padding = '0 10px';
     d.textContent = '（无音轨）';
     el.appendChild(d);
+    el.appendChild(trackAddBtn());
     return;
   }
   const tc = trackColors();
@@ -268,6 +286,11 @@ function renderTracks(el) {
       const tname = tr.name || ('track ' + ti);
       const nTracks = store.score ? store.score.tracks.length : 0;
       openBmMenu(e.clientX, e.clientY, [
+        /* E3 段2：音频轨 → 转乐谱（挂「哼唱快车道」链并切到处理链面板） */
+        ...(tr.kind === 'audio' ? [{
+          label: '转乐谱…（实验性）',
+          fn: () => bus.dispatch('voice2score', { track: ti }),
+        }] : []),
         {
           label: '文件夹归属…',
           fn: () => {
@@ -325,6 +348,7 @@ function renderTracks(el) {
     });
     el.appendChild(item);
   });
+  el.appendChild(trackAddBtn());
   bus.dispatch('rowlayout');   /* UI 修正轮3.2：行布局就绪 → main.js 收集推给卷帘（文件夹行/折叠路径对齐） */
 }
 
@@ -448,7 +472,8 @@ let menuEl = null;
 
 export function closeBmMenu() { if (menuEl) { menuEl.remove(); menuEl = null; } }
 
-function openBmMenu(x, y, items) {
+/* E3 段2：改名导出——通用右键菜单（轨头/后续 lanes 可复用） */
+export function openBmMenu(x, y, items) {
   closeBmMenu();
   menuEl = document.createElement('div');
   menuEl.className = 'bm-menu';

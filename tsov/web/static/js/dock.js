@@ -5,9 +5,11 @@ import { bus } from './events.js';
 import { api } from './api.js';
 import { store, setError, refTag } from './state.js';
 import { themeName, trackColors } from './theme.js';
+import { initChain, enterChain } from './chain.js';
 
 let dockEl = null, chanPane = null, fxPane = null, srcPane = null, mixPane = null, hintEl = null;
 let recPane = null;
+let chainPane = null;
 let meta = { programs: [], effect_kinds: [] };
 let metaLoaded = false;
 /* M-V8 E5 段2：效果目标（当前轨 / 各总线 / master） */
@@ -476,6 +478,8 @@ function renderRec() {
       '<div class="rec-row"><button id="rec-btn" class="rec-btn">● 开始录制</button>' +
       '<span id="rec-timer" class="rec-timer">00:00.0</span>' +
       '<span class="rec-hint">录完自动入库（44.1k flac）并加入时间线</span></div>' +
+      '<div class="rec-row"><button id="rec-v2s" class="chain-btn">转乐谱 ◈实验性</button>' +
+      '<span class="rec-hint">录音 / 任意音频轨 → 哼唱快车道（降噪→响度→转录→量化→吸附）</span></div>' +
     '</div>';
   const selIn = recPane.querySelector('#rec-in');
   const selOut = recPane.querySelector('#rec-out');
@@ -493,6 +497,9 @@ function renderRec() {
     } catch (e) { setError('设备枚举失败：' + e.message); }
   })();
   btn.addEventListener('click', () => recToggle(btn, selIn, selOut));
+  /* E3 段2：「转乐谱」——切到处理链面板（voice2score 在 init 里接） */
+  const v2s = recPane.querySelector('#rec-v2s');
+  if (v2s) v2s.addEventListener('click', () => bus.dispatch('voice2score', {}));
 }
 
 async function recToggle(btn, selIn, selOut) {
@@ -559,19 +566,27 @@ export function init(el) {
   srcPane = dockEl.querySelector('#dock-src');
   mixPane = dockEl.querySelector('#dock-mix');
   recPane = dockEl.querySelector('#dock-rec');
+  chainPane = dockEl.querySelector('#dock-chain');
   hintEl = dockEl.querySelector('#dock-hint');
 
   /* tab 切换 */
   const tabs = Array.from(dockEl.querySelectorAll('.dock-tab'));
-  const panes = { chan: chanPane, fx: fxPane, src: srcPane, mix: mixPane, rec: recPane };
-  for (const t of tabs) {
-    t.addEventListener('click', () => {
-      for (const x of tabs) x.classList.toggle('active', x === t);
-      const name = t.dataset.pane;
-      for (const k of Object.keys(panes)) panes[k].classList.toggle('active', k === name);
-      if (name === 'rec') renderRec();   // E2 段 3：录音面板懒渲染
-    });
-  }
+  const panes = { chan: chanPane, fx: fxPane, src: srcPane, mix: mixPane, rec: recPane, chain: chainPane };
+  const activateTab = (name) => {
+    for (const x of tabs) x.classList.toggle('active', x.dataset.pane === name);
+    for (const k of Object.keys(panes)) panes[k].classList.toggle('active', k === name);
+    if (name === 'rec') renderRec();   // E2 段 3：录音面板懒渲染
+    if (name === 'chain') enterChain();   // E3 段 2：处理链面板懒渲染
+  };
+  for (const t of tabs) t.addEventListener('click', () => activateTab(t.dataset.pane));
+  /* E3 段2：「转乐谱」入口（录音面板按钮 / 音频轨右键）→ 切处理链 tab（#3 验收；链 = 预设默认挂载） */
+  bus.on('voice2score', () => {
+    activateTab('chain');
+    const hasAudio = !!(store.score && store.score.tracks.some((t) => t.kind === 'audio'));
+    bus.dispatch('toast', hasAudio
+      ? '已挂链「哼唱快车道」：降噪→响度→转录→量化→吸附——点「运行全链」开始'
+      : '本工程暂无音频轨：先录音或导入音频，链会以它为首环');
+  });
 
   /* 折叠（记忆；无记忆时：紧凑档默认折叠） */
   dockEl.querySelector('#dock-fold').addEventListener('click', () => {
@@ -585,6 +600,7 @@ export function init(el) {
   const btn = dockEl.querySelector('#dock-fold');
   if (btn) btn.textContent = folded ? '▸ 展开' : '▾ 收起';
 
+  initChain(chainPane);   // E3 段2：处理链面板（自挂 bus；tab 打开时懒渲染）
   bus.on('state', renderAll);
   bus.on('selection', renderAll);
   bus.on('viewmode', renderAll);   // 修正轮2：总谱 ↔ 单轨切换 → 通道条跟随上下文

@@ -245,3 +245,36 @@ def test_quantize_time_rejects():
     for c in cases:
         _out, res = _apply(s, {"op": "quantize_time", "track": 0, "value": c})
         assert res.applied == 0 and res.errors, c
+
+
+# ---------------- add_track（新建空白 MIDI 轨，#183②）----------------
+
+
+def test_add_track_default_and_sequence():
+    out, res = _apply(_score(), {"op": "add_track", "value": {}})
+    assert res.ok and res.applied == 1
+    assert len(out.tracks) == 2
+    t = out.tracks[1]
+    assert t.name == "轨道 2"          # 缺省 = 现轨数 + 1
+    assert t.kind == "midi" and t.notes == []
+
+
+def test_add_track_rename_and_folder():
+    out, res = _apply(_score(),
+                      {"op": "add_track", "value": {"name": "哼唱", "folder": "人声"}})
+    assert res.ok
+    t = out.tracks[1]
+    assert t.name == "哼唱" and t.folder == "人声"
+
+
+def test_add_track_dup_name_autonumber():
+    out, res = _apply(_score(),                    # 已有轨「轨0」
+                      {"op": "add_track", "value": {"name": "轨0"}},
+                      {"op": "add_track", "value": {"name": "轨0"}})
+    assert res.ok and res.applied == 2
+    assert [t.name for t in out.tracks] == ["轨0", "轨0 2", "轨0 3"]
+
+
+def test_add_track_name_guard():
+    _out, res = _apply(_score(), {"op": "add_track", "value": {"name": "x" * 65}})
+    assert res.applied == 0 and res.errors

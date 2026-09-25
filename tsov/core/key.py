@@ -25,6 +25,35 @@ KEY_SCALES = {
     "dorian": {0, 2, 3, 5, 7, 9, 10},
 }
 _NOTE_NAMES12 = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+# 降号 → 等音升号（用户手输容错，如 "Bb major"）
+_FLAT_EQUIV = {"CB": "B", "DB": "C#", "EB": "D#", "FB": "E", "GB": "F#", "AB": "G#", "BB": "A#"}
+
+
+def parse_key(name: str | None) -> tuple[int, str] | None:
+    """调名字符串 → (根音 pitch class, 调式)；非法 → None。
+
+    支持 "C major" / "a minor" / "D dorian" / 降号容错（"Bb major"）；大小写不敏感。
+    M-V8 E3 段2：snap_scale（调外音吸附）与链工具共用。
+    """
+    tokens = str(name or "").strip().split()
+    if len(tokens) != 2:
+        return None
+    raw = tokens[0].strip()
+    token = (raw[0].upper() + raw[1:].lower()) if len(raw) > 1 else raw.upper()
+    token = _FLAT_EQUIV.get(token.upper(), token)
+    mode = tokens[1].strip().lower()
+    if mode not in KEY_SCALES or token not in _NOTE_NAMES12:
+        return None
+    return _NOTE_NAMES12.index(token), mode
+
+
+def key_pitch_classes(name: str | None) -> set[int] | None:
+    """调名字符串 → 调内 pitch class 集合；非法 → None。"""
+    parsed = parse_key(name)
+    if parsed is None:
+        return None
+    root, mode = parsed
+    return {(s + root) % 12 for s in KEY_SCALES[mode]}
 
 
 def detect_key(notes: list[Note], top: int = 2) -> list[KeyCandidate]:

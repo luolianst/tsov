@@ -77,6 +77,8 @@ class WebState:
         self.agent_stop = threading.Event()  # 用户请求停止当前 agent 会话
         self.chat_sessions: dict[str, dict] = {}  # 工程 → {session_id}（多轮续接同一 JSONL）
         self.bus = EventBus()
+        self.chains: dict = {}  # M-V8 E3：工程 → ChainRunner（处理链；懒建）
+        self.chains_lock = threading.Lock()
         self._engine = None  # HostEngine 懒加载（soundfont 依赖）
 
     # ---------------- 工程 ----------------
