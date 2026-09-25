@@ -22,6 +22,10 @@
   key 可指定/缺省自动检测，threshold_cents 默认 42；indices 选区或整轨）——哼唱快车道 MIDI 处理步同源（core/snap.py）
 - M-V8 E3 段2 补（2026-09-25）：add_track（新建空白 MIDI 轨：name 缺省「轨道 N」、重名自动加序号、
   folder 可选）——用户侧「新建轨道」入口与 agent 同一路径（#183② 闭环）
+- M-V8 E3 段3 增补（2026-09-25）：add_track 扩展 at（插入位：0..len，缺省追加）/ unique
+  （false=允许重名——「转谱进工程」原始轨「与源同名」场景）；set_notes（批量替换轨音符：
+  链产物一次落轨；start<end / 音高界内校验、上限 2 万、按 start 排序）——「转谱进工程」
+  与手绘/agent 同一动作路径
 - 事务协议：EditBatch.apply(score) 在深拷贝上逐条执行——非法命令被拒绝并记录 error，
   合法命令全部生效（部分应用 + 错误清单）；apply 前不脏原 Score。
 - 该命令层 = M-V2 起 agent 工具与 Web UI 共用的编辑通道（docs/05 接口契约）。
@@ -150,6 +154,9 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
         return _apply_set_audio_track(score, track, c)
     if c.op == "set_track_mix":
         return _apply_set_track_mix(score, track, c)
+    # M-V8 E3 段3：批量写音符（链产物落轨；轨级批量替换）
+    if c.op == "set_notes":
+        return _apply_set_notes(score, track, c)
     if c.op == "set_track_folder":
         return _apply_set_track_folder(score, track, c)
     if c.op == "set_instrument":
@@ -964,25 +971,90 @@ def _audio_default_name(rel: str) -> str:
 
 
 def _apply_add_track(score: Score, c: EditCommand) -> str | None:
-    """value = {name?, folder?}；追加一条空白 MIDI 轨（供单轨视图手绘/编辑工具画音符）。
+    """value = {name?, folder?, at?, unique?}；插入一条空白 MIDI 轨（手绘/编辑/转谱进工程共用）。
 
-    - name 缺省 = 「轨道 N」（N = 现轨数 + 1）；与现有轨重名 → 自动加序号（2, 3, …）
+    - name 缺省 = 「轨道 N」（N = 现轨数 + 1）
+    - unique 缺省 true：与现有轨重名 → 自动加序号（2, 3, …）；
+      unique=false：允许重名（「转谱进工程」原始轨「与源同名」场景）
+    - at：插入位置（0..len；缺省=末尾追加）——「排在源轨正下方」用
     - folder 可选：组织层文件夹归属（单层；空 = 无归属）
     """
     v = c.value if isinstance(c.value, dict) else {}
     name = str(v.get("name") or "").strip() or f"轨道 {len(score.tracks) + 1}"
     if len(name) > 64:
         return "add_track 名称过长（≤64 字符）"
-    existing = {t.name for t in score.tracks}
-    base, i = name, 2
-    while name in existing:
-        name = f"{base} {i}"
-        i += 1
+    if bool(v.get("unique", True)):
+        existing = {t.name for t in score.tracks}
+        base, i = name, 2
+        while name in existing:
+            name = f"{base} {i}"
+            i += 1
+    at_raw = v.get("at")
+    if at_raw is None:
+        at = len(score.tracks)
+    else:
+        try:
+            at = int(at_raw)
+        except (TypeError, ValueError):
+            return f"add_track at 非法：{at_raw!r}"
+        if not (0 <= at <= len(score.tracks)):
+            return f"add_track at 越界：{at}（允许 0..{len(score.tracks)}）"
     tr = Track(name=name)
     folder = str(v.get("folder") or "").strip()
     if folder:
         tr.folder = folder[:64]
-    score.tracks.append(tr)
+    score.tracks.insert(at, tr)
+    return None
+
+
+def _apply_set_notes(score: Score, track, c: EditCommand) -> str | None:
+    """value = {notes: [...]}（或裸数组）；批量替换该轨全部音符（链产物落轨）。
+
+    - 音符字段：{start, end, pitch_midi, pitch_hz?, velocity?, confidence?, deviation_cents?, is_ornament?}
+    - 校验：start<end / 0≤pitch_midi≤127 / 数量 ≤ 20000（护栏）；pitch_hz 缺省按等分音律补齐
+    - 只作用于 MIDI 轨；落轨后按 start 排序（链产物通常已序）
+    """
+    if str(getattr(track, "kind", "midi") or "midi") != "midi":
+        return f"set_notes 只能写 MIDI 轨（track {c.track} kind={getattr(track, 'kind', 'midi')!r}）"
+    v = c.value
+    notes_raw = v.get("notes") if isinstance(v, dict) else v
+    if not isinstance(notes_raw, list):
+        return "set_notes value 需 {notes: [...]} 或音符数组"
+    if len(notes_raw) > 20000:
+        return f"set_notes 数量超限：{len(notes_raw)}（≤20000）"
+    out: list[Note] = []
+    for k, item in enumerate(notes_raw):
+        if not isinstance(item, dict) or "pitch_midi" not in item:
+            return f"set_notes 第 {k} 条缺 pitch_midi"
+        try:
+            pm = int(item["pitch_midi"])
+            start = float(item.get("start", 0.0))
+            end = float(item.get("end", start + 0.3))
+            vel = round(float(item.get("velocity", 0.8)), 3)
+            conf = round(float(item.get("confidence", 0.8)), 3)
+        except (TypeError, ValueError):
+            return f"set_notes 第 {k} 条字段非法：{item!r}"
+        if not (0 <= pm <= 127):
+            return f"set_notes 第 {k} 条 pitch_midi 非法：{pm}"
+        if start >= end:
+            return f"set_notes 第 {k} 条 start>=end：{start}/{end}"
+        try:
+            hz = float(item.get("pitch_hz") or 0.0) or midi_to_hz(pm)
+        except (TypeError, ValueError):
+            hz = midi_to_hz(pm)
+        note = Note(start=round(start, 6), end=round(end, 6), pitch_midi=pm,
+                    pitch_hz=round(hz, 6), velocity=vel, confidence=conf)
+        dev = item.get("deviation_cents")
+        if dev is not None:
+            try:
+                note.deviation_cents = round(float(dev), 3)
+            except (TypeError, ValueError):
+                pass
+        if bool(item.get("is_ornament", False)):
+            note.is_ornament = True
+        out.append(note)
+    out.sort(key=lambda n: n.start)
+    track.notes = out
     return None
 
 

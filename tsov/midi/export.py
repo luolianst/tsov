@@ -89,6 +89,21 @@ def is_drum_track(program: str) -> bool:
     return str(program).strip().lower() == "drums"
 
 
+def midi_safe_name(name: str) -> str:
+    """SMF meta 文本编码防护（E3 段3 修复：中文轨名导出曾 UnicodeEncodeError）。
+
+    mido/pretty_midi 以 latin-1 编码 meta 文本。latin-1 无法表示的名字（如中文）→
+    转 UTF-8 字节再以 latin-1 伪串承载（写出字节即 UTF-8，主流 DAW 按 UTF-8 读回正确
+    中文）。导入侧 restore_midi_name 对称还原。latin-1 原生可表示的名（ASCII/西欧）
+    原样返回——行为不变。
+    """
+    try:
+        name.encode("latin-1")
+        return name
+    except UnicodeEncodeError:
+        return name.encode("utf-8").decode("latin-1")
+
+
 def score_to_midi(score: Score, output_path: str) -> str:
     """Score → MIDI 文件，返回产物路径。
 
@@ -102,7 +117,7 @@ def score_to_midi(score: Score, output_path: str) -> str:
         is_drum = is_drum_track(track.instrument.program)
         prog = 0 if is_drum else program_number(track.instrument.program)
         inst = pretty_midi.Instrument(program=prog, is_drum=is_drum,
-                                      name=str(track.name or ""))
+                                      name=midi_safe_name(str(track.name or "")))
         for n in sorted(track.notes, key=lambda n: n.start):
             velocity = max(1, min(127, int(round(float(n.velocity) * 127.0))))
             inst.notes.append(

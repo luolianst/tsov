@@ -42,6 +42,18 @@ def key_name(key_number: int) -> str:
     return _PITCH_NAMES[k] + " major"
 
 
+def restore_midi_name(name: str) -> str:
+    """轨名还原（对称 export.midi_safe_name；E3 段3 中文轨名回环）。
+
+    「UTF-8 字节经 latin-1 读出」的伪串 → 还原出原 UTF-8 文本；非法序列/常规
+    latin-1 名 → 原样返回（ASCII 不受影响）。对外部 MIDI 的 UTF-8 轨名是更正确的恢复。
+    """
+    try:
+        return name.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return name
+
+
 def midi_to_score(path: str | Path, *, title: str | None = None) -> Score:
     """读 MIDI 文件 → Score（保序、不裁空轨——空轨由 Project.import_midi 跳过）。"""
     midi = pretty_midi.PrettyMIDI(str(path))
@@ -77,7 +89,7 @@ def midi_to_score(path: str | Path, *, title: str | None = None) -> Score:
             )
             for n in inst.notes
         ]
-        nm = str(inst.name or "").strip() or f"track {i + 1}"
+        nm = restore_midi_name(str(inst.name or "").strip()) or f"track {i + 1}"
         tracks.append(Track(name=nm, instrument=Instrument(program=prog), notes=notes))
 
     return Score(

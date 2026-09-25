@@ -898,6 +898,7 @@ body.chat-folded #rail-chat { display: flex; }
 .chain-btn.chain-run { background: var(--accent); color: var(--on-accent); border: none; padding: 2px 12px; }
 .chain-btn.chain-mute.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 .chain-btn.chain-apply { background: var(--warn); color: #fff; border: none; }
+.chain-btn.chain-to-proj { background: var(--accent); color: var(--on-accent); border: none; padding: 2px 12px; }
 .chain-art { font-size: var(--fs-xs, 11px); color: var(--accent); text-decoration: none; }
 .chain-art:hover { text-decoration: underline; }
 .chain-sub { color: var(--muted); font-size: var(--fs-xs, 11px); }

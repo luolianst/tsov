@@ -190,3 +190,35 @@ def test_import_guards(tmp_path):
     mid.save(str(nonotes))
     with pytest.raises(ValueError, match="不含任何音符"):
         proj.import_midi(nonotes)
+
+
+# ---------------- 轨名编码（E3 段3 修复：中文轨名导出不再崩） ----------------
+
+def test_midi_name_utf8_roundtrip(tmp_path):
+    """中文轨名导出（曾 UnicodeEncodeError）→ import 名字逐字还原；ASCII/西欧名不受影响。"""
+    sc = Score(title="t", tempo=120.0, tracks=[
+        Track(name="原始哼唱", instrument=Instrument(program="piano"),
+              notes=[_note(0.0, 0.5, 60, 0.8)]),
+        Track(name="melody", instrument=Instrument(program="piano"),
+              notes=[_note(0.5, 1.0, 62, 0.8)]),
+        Track(name="café", instrument=Instrument(program="piano"),
+              notes=[_note(1.0, 1.5, 64, 0.8)]),
+    ])
+    out = tmp_path / "names.mid"
+    score_to_midi(sc, str(out))          # 修复前：UnicodeEncodeError: 'latin-1' codec
+    back = mi.midi_to_score(out)
+    names = [t.name for t in back.tracks]
+    assert names[0] == "原始哼唱"         # UTF-8 字节经 latin-1 承载 → import 还原
+    assert names[1] == "melody"          # ASCII 行为不变
+    assert names[2] == "café"            # latin-1 直存名原样（不被误还原）
+
+
+def test_midi_name_helpers():
+    from tsov.midi.export import midi_safe_name
+    assert midi_safe_name("melody") == "melody"
+    assert midi_safe_name("café") == "café"
+    assert midi_safe_name("原始哼唱") != "原始哼唱"                       # 承载为伪串
+    assert midi_safe_name("原始哼唱").encode("latin-1").decode("utf-8") == "原始哼唱"  # 字节即 UTF-8
+    assert mi.restore_midi_name(midi_safe_name("原始哼唱")) == "原始哼唱"
+    assert mi.restore_midi_name("melody") == "melody"
+    assert mi.restore_midi_name("café") == "café"

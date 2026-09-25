@@ -22,8 +22,8 @@ import soundfile as sf
 from fastapi.testclient import TestClient
 
 import tsov.web
-from tsov.chain import (ChainRunner, apply_config, auto_run_plan,
-                        list_tools, load_chain_json, load_preset)
+from tsov.chain import (ChainRunner, apply_config, auto_run_plan, build_apply_commands,
+                        list_tools, load_chain_json, load_preset, load_run_notes)
 from tsov.chain.tools import TOOLS, ChainContext, get_tool
 from tsov.web import create_app
 
@@ -417,3 +417,126 @@ def test_chain_rest_run_and_artifact(env, monkeypatch):
     assert miss.status_code == 404
     c = client.post("/api/projects/p1/chain/cancel")
     assert c.status_code == 409
+
+
+# ---------------- 段3：apply 装配（双轨进工程）----------------
+
+
+def test_load_run_notes(tmp_path):
+    run = tmp_path / "r1"
+    run.mkdir()
+    (run / "03-voice.json").write_text(
+        json.dumps({"notes": [{"start": 0, "end": 1, "pitch_midi": 60}]}), encoding="utf-8")
+    (run / "05-notes-snapped.json").write_text(
+        json.dumps([{"start": 0.1, "end": 1, "pitch_midi": 61}]), encoding="utf-8")
+    got = load_run_notes(run)
+    assert [n["pitch_midi"] for n in got["raw"]] == [60]
+    assert [n["pitch_midi"] for n in got["processed"]] == [61]
+    assert load_run_notes(tmp_path / "none") == {"raw": None, "processed": None}
+
+
+def test_build_apply_first_run():
+    tracks = [{"name": "melody", "kind": "midi"}, {"name": "录音", "kind": "audio"}]
+    plan = build_apply_commands(tracks, source_track=1, raw_notes=[1, 2], processed_notes=[3])
+    assert [(c["op"], c.get("track")) for c in plan["commands"]] == [
+        ("add_track", 0), ("add_track", 0), ("set_notes", 2), ("set_notes", 3)]
+    assert plan["commands"][0]["value"] == {"name": "录音", "at": 2, "unique": False}
+    assert plan["commands"][1]["value"]["name"] == "录音 · 处理"
+    assert plan["meta"]["names"] == ["录音", "录音 · 处理"]
+    assert plan["meta"]["raw_notes"] == 2 and plan["meta"]["processed_notes"] == 1
+
+
+def test_build_apply_rerun_idempotent():
+    tracks = [{"name": "melody", "kind": "midi"}, {"name": "录音", "kind": "audio"},
+              {"name": "录音", "kind": "midi"}, {"name": "录音 · 处理", "kind": "midi"}]
+    plan = build_apply_commands(tracks, source_track=1, raw_notes=[], processed_notes=[])
+    ops = [(c["op"], c.get("track")) for c in plan["commands"]]
+    assert ops[:2] == [("remove_track", 3), ("remove_track", 2)]        # 从后往前删
+    assert ops[2:] == [("add_track", 0), ("add_track", 0),
+                       ("set_notes", 2), ("set_notes", 3)]
+    assert plan["meta"]["removed"] == [2, 3]
+    assert plan["meta"]["inserted"] == [2, 3]
+
+
+def test_build_apply_old_before_source():
+    tracks = [{"name": "录音", "kind": "midi"}, {"name": "melody", "kind": "midi"},
+              {"name": "录音", "kind": "audio"}]
+    plan = build_apply_commands(tracks, source_track=2, raw_notes=[], processed_notes=[])
+    assert plan["meta"]["removed"] == [0]
+    assert plan["commands"][1]["value"]["at"] == 2                       # 源轨删后前移 → 重算
+    assert plan["meta"]["inserted"] == [2, 3]
+
+
+def test_build_apply_source_guard():
+    with pytest.raises(ValueError):
+        build_apply_commands([], source_track=0, raw_notes=[], processed_notes=[])
+
+
+def test_chain_apply_guard_no_run(env):
+    _make_project(env)
+    r = env["client"].post("/api/projects/p1/chain/apply", json={})
+    assert r.status_code == 409
+
+
+def test_chain_apply_guard_missing_artifacts(env):
+    _make_project(env)
+    root = env["dir"] / "p1"
+    (root / "chain" / "20990101-000000").mkdir(parents=True)
+    (root / "chain" / "20990101-000000" / "03-voice.json").write_text(
+        json.dumps({"notes": []}), encoding="utf-8")
+    (root / "chain.json").write_text(json.dumps(
+        {"source_track": 0, "run_ts": "20990101-000000", "preset": "humming-quicklane",
+         "steps": []}), encoding="utf-8")
+    r = env["client"].post("/api/projects/p1/chain/apply", json={})
+    assert r.status_code == 409 and "缺音符产物" in r.json()["error"]
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="需要 ffmpeg")
+def test_chain_apply_rest_dual_tracks(env, monkeypatch):
+    """段3：链产物进工程（双轨）——REST 一条路径：轨数 +2 / 音符落轨 / 幂等 / undo 可回。"""
+    _project_with_audio(env)
+    _patch_tools(monkeypatch)
+    client = env["client"]
+    r = client.post("/api/projects/p1/chain/run", json={})
+    assert r.status_code == 200
+    st = _wait_http(client, "p1")
+    assert [s["status"] for s in st["steps"]] == ["done"] * 5
+    saved = load_chain_json(env["dir"] / "p1")
+    run_dir = env["dir"] / "p1" / "chain" / saved["run_ts"]
+    raw = [{"start": 0.0, "end": 0.4, "pitch_midi": 60},
+           {"start": 0.5, "end": 0.9, "pitch_midi": 62}]
+    proc = [{"start": 0.0, "end": 0.5, "pitch_midi": 60},
+            {"start": 0.5, "end": 1.0, "pitch_midi": 63}]
+    (run_dir / "03-voice.json").write_text(json.dumps({"notes": raw}), encoding="utf-8")
+    (run_dir / "05-notes-snapped.json").write_text(json.dumps(proc), encoding="utf-8")
+
+    proj = _proj(env)
+    src_idx = saved["source_track"]
+    src_name = proj.score.tracks[src_idx].name
+
+    a1 = client.post("/api/projects/p1/chain/apply", json={})
+    assert a1.status_code == 200, a1.text
+    body = a1.json()
+    assert body["ok"] is True and body["tracks"] == 4
+    proj = _proj(env)
+    assert [t.name for t in proj.score.tracks] == ["melody", src_name, src_name,
+                                                   src_name + " · 处理"]
+    assert [n.pitch_midi for n in proj.score.tracks[2].notes] == [60, 62]
+    assert [n.pitch_midi for n in proj.score.tracks[3].notes] == [60, 63]
+
+    # 幂等：重跑不增轨（先删旧同名轨）
+    a2 = client.post("/api/projects/p1/chain/apply", json={})
+    assert a2.status_code == 200 and a2.json()["tracks"] == 4
+    proj = _proj(env)
+    assert [t.name for t in proj.score.tracks] == ["melody", src_name, src_name,
+                                                   src_name + " · 处理"]
+
+    # undo 可回（生效即可：journal 线性游标不保证单步——循环撤销直到回退到进工程前）
+    for _ in range(6):
+        proj = _proj(env)
+        if len(proj.score.tracks) == 2:
+            break
+        u = client.post("/api/projects/p1/undo")
+        assert u.status_code == 200
+    proj = _proj(env)
+    assert [t.name for t in proj.score.tracks] == ["melody", src_name]

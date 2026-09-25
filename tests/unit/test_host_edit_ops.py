@@ -278,3 +278,73 @@ def test_add_track_dup_name_autonumber():
 def test_add_track_name_guard():
     _out, res = _apply(_score(), {"op": "add_track", "value": {"name": "x" * 65}})
     assert res.applied == 0 and res.errors
+
+
+# ---------------- add_track at/unique + set_notes（E3 段3 双轨进工程）----------------
+
+
+def test_add_track_at_inserts_position():
+    out, res = _apply(_score(), {"op": "add_track", "value": {"name": "B", "at": 0}})
+    assert res.ok and res.applied == 1
+    assert [t.name for t in out.tracks] == ["B", "轨0"]
+
+
+def test_add_track_unique_false_allows_dup_name():
+    out, res = _apply(_score(),                      # 已有轨「轨0」
+                      {"op": "add_track", "value": {"name": "轨0", "unique": False}},
+                      {"op": "add_track", "value": {"name": "轨0"}})
+    assert res.ok and res.applied == 2
+    assert [t.name for t in out.tracks] == ["轨0", "轨0", "轨0 2"]  # 去重只作用于 unique 缺省轨
+
+
+def test_add_track_at_guard():
+    _out, res = _apply(_score(),
+                       {"op": "add_track", "value": {"name": "x", "at": 5}},
+                       {"op": "add_track", "value": {"name": "y", "at": -1}},
+                       {"op": "add_track", "value": {"name": "z", "at": "a"}})
+    assert not res.ok and res.applied == 0 and len(res.errors) == 3
+
+
+def _notes_payload():
+    return [
+        {"start": 0.5, "end": 0.9, "pitch_midi": 62, "velocity": 0.7, "confidence": 0.8},
+        {"start": 0.0, "end": 0.4, "pitch_midi": 60, "deviation_cents": 3.5},
+    ]
+
+
+def test_set_notes_replace_and_sort():
+    out, res = _apply(_score([_note()]),
+                      {"op": "set_notes", "track": 0, "value": {"notes": _notes_payload()}})
+    assert res.ok and res.applied == 1
+    notes = out.tracks[0].notes
+    assert [n.pitch_midi for n in notes] == [60, 62]        # 按 start 排序
+    assert notes[0].deviation_cents == 3.5                  # 扩展字段透传
+    assert notes[0].velocity == 0.8 and notes[0].confidence == 0.8   # 缺省值
+    assert all(n.pitch_hz > 0 for n in notes)
+
+
+def test_set_notes_bare_array_and_hz_backfill():
+    out, res = _apply(_score(), {"op": "set_notes", "track": 0,
+                                 "value": [{"start": 0.1, "end": 0.2, "pitch_midi": 69}]})
+    assert res.ok
+    (n,) = out.tracks[0].notes
+    assert abs(n.pitch_hz - 440.0) < 0.01                   # A4 等分音律回填
+
+
+def test_set_notes_guards():
+    bad = [
+        {"op": "set_notes", "track": 0, "value": {"notes": [{"start": 0.0, "end": 0.5}]}},
+        {"op": "set_notes", "track": 0,
+         "value": {"notes": [{"start": 0.5, "end": 0.5, "pitch_midi": 60}]}},
+        {"op": "set_notes", "track": 0,
+         "value": {"notes": [{"start": 0.0, "end": 1.0, "pitch_midi": 200}]}},
+        {"op": "set_notes", "track": 0, "value": None},
+    ]
+    _out, res = _apply(_score(), *bad)
+    assert not res.ok and res.applied == 0 and len(res.errors) == 4
+
+
+def test_set_notes_audio_track_rejected():
+    s = Score(title="t", tracks=[Track(name="录音", kind="audio")])
+    _out, res = _apply(s, {"op": "set_notes", "track": 0, "value": {"notes": []}})
+    assert not res.ok and "MIDI" in res.errors[0]

@@ -1,6 +1,6 @@
-"""处理链域路由（M-V8 E3 段2）。
+"""处理链域路由（M-V8 E3 段2/3）。
 
-- run / status / config / cancel / artifact / tools
+- run / status / config / cancel / artifact / tools / apply（段3：双轨进工程）
 - 运行器：每工程一个 ChainRunner（app.state.tsov.chains）；一次一个 run（409）
 - chain.json 工程伴生（参数/mute/源轨）；产物 <project>/chain/<run-ts>/
 - SSE：chain_started / chain_step / chain_log / chain_finished（轮询为主的加成）
@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
 
-from ...chain import ChainRunner, apply_config, auto_run_plan, load_chain_json, load_preset, list_tools
+from ...chain import (ChainRunner, apply_config, auto_run_plan, build_apply_commands,
+                      load_chain_json, load_preset, load_run_notes, list_tools)
+from ...host import EditBatch
+from ..helpers import project_state
 from ..state import WebState
 
 DEFAULT_PRESET = "humming-quicklane"
@@ -143,6 +146,47 @@ def register(app: FastAPI) -> None:
         if r is None or not r.running:
             raise HTTPException(409, "没有进行中的链运行")
         return {"ok": True, "project": name, **r.cancel()}
+
+    @app.post("/api/projects/{name}/chain/apply")
+    def chain_apply(name: str, body: dict | None = None) -> dict:
+        """链产物进工程（双轨）：转录原始 + 处理版 → 源轨正下方两条 MIDI 轨（命令层事务）。
+
+        - 幂等：重跑先删同名的旧产物轨再插入；undo 可回（快照窗口）
+        - body: {run_ts?（缺省最近一次）、source_track?（缺省 chain.json 记录）}
+        """
+        body = body or {}
+        proj = st().get_project(name)
+        saved = load_chain_json(proj.root)
+        run_ts = str(body.get("run_ts") or saved.get("run_ts") or "")
+        if not run_ts:
+            raise HTTPException(409, "该工程还没有链产物（先运行一次链）")
+        run_dir = proj.root / "chain" / run_ts
+        got = load_run_notes(run_dir)
+        if not got["raw"] or not got["processed"]:
+            miss = "转录原始（03）" if not got["raw"] else ""
+            miss += ("、" if miss else "") + ("处理版（05）" if not got["processed"] else "")
+            raise HTTPException(409, f"运行 {run_ts} 缺音符产物：{miss}——先跑完转录与处理步")
+        source_track = body.get("source_track", saved.get("source_track"))
+        if source_track is None:
+            raise HTTPException(409, "链未记录源轨（先运行一次链或显式给 source_track）")
+        try:
+            plan = build_apply_commands(list(proj.score.tracks), source_track=int(source_track),
+                                        raw_notes=got["raw"], processed_notes=got["processed"])
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        batch = EditBatch(label="转谱进工程（双轨）")
+        for c in plan["commands"]:
+            batch.add(c["op"], track=int(c.get("track", 0)), value=c.get("value"))
+        result = proj.apply_batch(batch, commit_message="转谱进工程：原始 + 处理（双轨）",
+                                  source="user")
+        if result["applied"] == 0:
+            return {"ok": False, "project": name, **plan["meta"], **result}
+        st().bus.publish(name, "diff_applied", {**result["diff"], "commit": result["commit"],
+                                                "seq": result.get("seq")})
+        st().bus.publish(name, "state_updated", project_state(proj))
+        return {"ok": True, "project": name, "run_ts": run_ts, **plan["meta"],
+                "applied": result["applied"], "errors": result.get("errors") or [],
+                "tracks": len(proj.score.tracks)}
 
     @app.get("/api/projects/{name}/chain/artifact")
     def chain_artifact(name: str, file: str):

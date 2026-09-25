@@ -125,6 +125,8 @@ export const api = {
     post('/api/projects/' + encodeURIComponent(name) + '/chain/config', body || {}),
   chainCancel: (name) =>
     post('/api/projects/' + encodeURIComponent(name) + '/chain/cancel', {}),
+  chainApply: (name, body) =>
+    post('/api/projects/' + encodeURIComponent(name) + '/chain/apply', body || {}),
   chainArtifactUrl: (name, file) =>
     '/api/projects/' + encodeURIComponent(name) + '/chain/artifact?file=' + encodeURIComponent(file),
 };

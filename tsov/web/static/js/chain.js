@@ -132,6 +132,44 @@ function restIds(fromIdx) {
   return store.chain.steps.slice(fromIdx).map((x) => x.tool_id);
 }
 
+/* 段3：失败恢复——读取该步输入框当前参数 → 保存（chain.json）→ 从该步起重跑 */
+async function rerunWithParams(s, idx) {
+  if (busy || store.chain.running || !store.project) return;
+  const tool = store.chain.tools.find((t) => t.id === s.tool_id);
+  const specs = (tool && tool.params) || {};
+  const p = {};
+  const row = document.querySelector('.chain-step[data-tool="' + s.tool_id + '"]');
+  if (row) {
+    row.querySelectorAll('[data-param]').forEach((ctl) => {
+      const spec = specs[ctl.dataset.param] || {};
+      p[ctl.dataset.param] = (spec.type === 'number') ? Number(ctl.value) : ctl.value;
+    });
+  }
+  if (!Object.keys(p).length) p = null;   // 无输入框：退回「重试」语义
+  try {
+    if (p) await api.chainConfig(store.project, { overrides: { [s.tool_id]: p } });
+  } catch (e) {
+    setError('参数保存：' + e.message);
+    return;
+  }
+  doRun(restIds(idx));
+}
+
+/* 段3：链产物进工程（双轨）——REST → 命令层事务；SSE state_updated 自动刷新轨列表 */
+async function doApply() {
+  if (busy || store.chain.running || !store.project) return;
+  busy = true;
+  try {
+    const r = await api.chainApply(store.project, {});
+    bus.dispatch('toast', '已进工程：' + (r.names || []).join(' + ')
+      + '（轨 ' + (r.tracks != null ? r.tracks : '?') + '，命令 ' + (r.applied || 0) + '）');
+  } catch (e) {
+    setError('进工程：' + e.message);
+  } finally {
+    busy = false;
+  }
+}
+
 function renderStep(s, idx) {
   const row = el('div', 'chain-step ' + (s.status || 'pending'));
   row.dataset.tool = s.tool_id;
@@ -194,10 +232,14 @@ function renderStep(s, idx) {
     const retry = el('button', 'chain-btn', '重试');
     retry.title = '从该步起重跑（输入用上一轮产物，免重跑上游）';
     retry.onclick = () => doRun(restIds(idx));
+    const rerun = el('button', 'chain-btn', '改参再跑');
+    rerun.title = '读取本步当前参数并保存，从该步起重跑（先在上方输入框改好参数）';
+    rerun.onclick = () => rerunWithParams(s, idx);
     const skip = el('button', 'chain-btn', '跳过');
     skip.title = '静音该步并从其后继续';
     skip.onclick = () => toggleMute(s.tool_id, true).then(() => doRun(restIds(idx + 1)));
     row.appendChild(retry);
+    row.appendChild(rerun);
     row.appendChild(skip);
   }
 
@@ -246,6 +288,13 @@ export function renderChain() {
   cancel.disabled = !store.chain.running;
   cancel.onclick = doCancel;
   head.appendChild(cancel);
+
+  const toProj = el('button', 'chain-btn chain-to-proj', '⇥ 进工程');
+  toProj.disabled = store.chain.running || busy || !store.chain.runTs;
+  toProj.title = '把最近一次链产物落成两条 MIDI 轨（原始 + 处理），插在源轨正下方；'
+    + '重跑幂等（先删旧同名轨）；undo 可回';
+  toProj.onclick = doApply;
+  head.appendChild(toProj);
 
   head.appendChild(el('span', 'chain-sub',
     store.chain.running ? '运行中…' : (store.chain.runTs ? ('最近运行 ' + store.chain.runTs) : '未运行')));
