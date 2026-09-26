@@ -81,6 +81,17 @@ export const store = {
     agents: null,              // /agents 现状（project_md / user_md）
     loaded: false,
   },
+
+  /* M-V8 E4 段2：AI 调参（事实包 / 建议批次 / 勾选 / 应用小结；真值 = 后端 tune/） */
+  tune: {
+    facts: null,               // 最近一次 analyze / suggest 内附事实快照
+    batch: null,               // 展示中的批次（suggest / get 回填）
+    selected: {},              // sid -> bool（默认全选）
+    report: null,              // 最近一次应用小结（build_report）
+    pack: '',                  // 风格包（'' = 通用平衡口径）
+    busy: null,                // 'analyze' | 'suggest' | 'apply' | 'preview'
+    loaded: false,
+  },
 };
 
 export function setError(msg) {
@@ -216,6 +227,12 @@ export function setChainState(partial) {
 export function setStagingState(partial) {
   Object.assign(store.staging, partial || {});
   bus.dispatch('staging');
+}
+
+/* M-V8 E4 段2：调参镜像（同上；渲染在 staging.js） */
+export function setTuneState(partial) {
+  Object.assign(store.tune, partial || {});
+  bus.dispatch('tune');
 }
 
 /** 当前谱内书签列表（只读引用；写走命令层）。 */
@@ -494,6 +511,18 @@ export function snapshot() {
         ? { hasProject: !!store.staging.agents.project_md, hasUser: !!store.staging.agents.user_md }
         : null,
       loaded: !!store.staging.loaded,
+    },
+    /* M-V8 E4 段2：调参快照（CDP 断言用） */
+    tune: {
+      loaded: !!store.tune.loaded,
+      busy: store.tune.busy || null,
+      pack: store.tune.pack || '',
+      batchTs: (store.tune.batch && store.tune.batch.batch_ts) || null,
+      batchState: (store.tune.batch && store.tune.batch.state) || null,
+      nSuggestions: ((store.tune.batch && store.tune.batch.suggestions) || []).length,
+      selected: Object.keys(store.tune.selected || {}).filter((k) => store.tune.selected[k]).length,
+      hasFacts: !!store.tune.facts,
+      reportStatus: (store.tune.report && store.tune.report.status) || null,
     },
     hasDiff: !!store.diff,
     error: store.error,

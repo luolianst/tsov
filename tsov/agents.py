@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 
@@ -135,3 +136,78 @@ def ensure_user_agents(*, path=None) -> dict:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(_user_skeleton(), encoding="utf-8")
     return {"path": str(p), "file": USER_FILE, "created": created}
+
+
+# ---------------------------------------------------------------------------
+# 段2 接线：历史与决策（AI 提炼入口）+ 全局统计块（确定性累计）
+# ---------------------------------------------------------------------------
+
+HISTORY_HEADING = "## 历史与决策"
+HISTORY_PLACEHOLDER = "（待沉淀：段 2 接线后由 AI 从 journal 提炼关键决策与理由）"
+STATS_PLACEHOLDER = "（待沉淀：段 2 接线后由 AI 从前述 journal 事件提炼：采纳率 / 常用强度档 / 常改参数）"
+STATS_BEGIN = "<!-- TSOV-STATS:BEGIN -->"
+STATS_END = "<!-- TSOV-STATS:END -->"
+
+_STATS_RE = re.compile(r"累计采纳建议：(\d+) 条（电平 (\d+) / 声像 (\d+) / 效果 (\d+)）")
+
+
+def append_history(proj_root, entry: str, *, ts: float | None = None) -> dict:
+    """在工程 agents.md「## 历史与决策」区追加一条（首条替换占位行；无区块 → 建区块）。
+
+    文件不存在 → ValueError（调用方先 sync_project_agents）。
+    """
+    path = Path(proj_root) / FILE
+    if not path.is_file():
+        raise ValueError("工程 agents.md 不存在（先 sync）")
+    line = str(entry or "").strip().replace("\n", " ")
+    if not line:
+        raise ValueError("历史条目为空")
+    block = f"- {line}"
+    text = path.read_text(encoding="utf-8")
+    if HISTORY_PLACEHOLDER in text:
+        text = text.replace(HISTORY_PLACEHOLDER, block)
+    else:
+        idx = text.find(HISTORY_HEADING)
+        if idx == -1:
+            text = text.rstrip("\n") + f"\n\n{HISTORY_HEADING}\n{block}\n"
+        else:
+            eol = text.find("\n", idx)
+            text = text + "\n" + block + "\n" if eol == -1 else (
+                text[: eol + 1] + "\n" + block + "\n" + text[eol + 1:])
+    path.write_text(text, encoding="utf-8")
+    return {"path": str(path), "appended": True}
+
+
+def update_user_stats(*, delta: dict | None = None, path=None, ts: float | None = None) -> dict:
+    """更新全局 agents-user.md「统计」块（确定性累计）：累计采纳建议数（按类型）。
+
+    delta = {"level": n, "pan": n, "effect": n}（增量）；块不存在 → 用占位行位置建块。
+    返回累计数 {path, total, level, pan, effect, last}。
+    """
+    p = Path(path) if path else user_agents_path()
+    if not p.is_file():
+        ensure_user_agents(path=p)
+    text = p.read_text(encoding="utf-8")
+    d = {k: int((delta or {}).get(k) or 0) for k in ("level", "pan", "effect")}
+    total = lv = pn = ef = 0
+    m = _STATS_RE.search(text)
+    if m:
+        total, lv, pn, ef = (int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)))
+    total += sum(d.values())
+    lv += d["level"]
+    pn += d["pan"]
+    ef += d["effect"]
+    stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(ts if ts is not None else time.time()))
+    block = (f"{STATS_BEGIN}\n"
+             f"- 累计采纳建议：{total} 条（电平 {lv} / 声像 {pn} / 效果 {ef}）｜最近：{stamp}\n"
+             f"{STATS_END}")
+    if STATS_BEGIN in text and STATS_END in text:
+        pre, _, rest = text.partition(STATS_BEGIN)
+        _, _, post = rest.partition(STATS_END)
+        text = f"{pre}{block}{post}"
+    elif STATS_PLACEHOLDER in text:
+        text = text.replace(STATS_PLACEHOLDER, block)
+    else:
+        text = text.rstrip("\n") + f"\n{block}\n"
+    p.write_text(text, encoding="utf-8")
+    return {"path": str(p), "total": total, "level": lv, "pan": pn, "effect": ef, "last": stamp}

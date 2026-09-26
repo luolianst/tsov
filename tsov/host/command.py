@@ -26,6 +26,8 @@
   （false=允许重名——「转谱进工程」原始轨「与源同名」场景）；set_notes（批量替换轨音符：
   链产物一次落轨；start<end / 音高界内校验、上限 2 万、按 start 排序）——「转谱进工程」
   与手绘/agent 同一动作路径
+- M-V8 E4 段2 增补（2026-09-26）：set_effect_params（部分更新既有链中第 k 个效果的参数：
+  index 定位 + params 合并 + validate_effect 全量复验）——调参建议「改既有效果」同径落地
 - 事务协议：EditBatch.apply(score) 在深拷贝上逐条执行——非法命令被拒绝并记录 error，
   合法命令全部生效（部分应用 + 错误清单）；apply 前不脏原 Score。
 - 该命令层 = M-V2 起 agent 工具与 Web UI 共用的编辑通道（docs/05 接口契约）。
@@ -165,6 +167,9 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
         return _apply_add_effect(score, track, c)
     if c.op == "remove_effect":
         return _apply_remove_effect(score, track, c)
+    # M-V8 E4 段2：改既有效果参数（部分合并；调参建议落地）
+    if c.op == "set_effect_params":
+        return _apply_set_effect_params(score, track, c)
 
     if c.op == "add":
         v = c.value
@@ -554,6 +559,36 @@ def _apply_remove_effect(score: Score, track, c: EditCommand) -> str | None:
     if not (0 <= idx < len(effects)):
         return f"remove_effect 越界：index {idx}（共 {len(effects)} 个效果）"
     effects.pop(idx)
+    return None
+
+
+def _apply_set_effect_params(score: Score, track, c: EditCommand) -> str | None:
+    """value = {"index": k, "params": {...}, "target"?, "ref"?}——部分更新第 k 个效果（E4 段2）。
+
+    合并语义：只覆盖 params 给出的键；合并结果整体过 validate_effect（未知键拒）。
+    """
+    v = c.value if isinstance(c.value, dict) else {}
+    effects, err = _effect_target_list(score, track, v)
+    if err:
+        return f"set_effect_params {err}"
+    idx = c.index if c.index is not None else v.get("index")
+    try:
+        idx = int(idx)
+    except (TypeError, ValueError):
+        return f"set_effect_params 需要 index：{idx!r}"
+    if not (0 <= idx < len(effects)):
+        return f"set_effect_params 越界：index {idx}（共 {len(effects)} 个效果）"
+    params = v.get("params")
+    if not isinstance(params, dict) or not params:
+        return "set_effect_params params 需为非空对象"
+    from .effect import validate_effect
+
+    eff = effects[idx]
+    merged = {**dict(eff.params or {}), **params}
+    problems = validate_effect(Effect(type=eff.type, params=merged))
+    if problems:
+        return "；".join(problems)
+    eff.params = merged
     return None
 
 

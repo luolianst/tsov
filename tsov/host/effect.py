@@ -65,6 +65,11 @@ def effect_kinds() -> list[str]:
     return sorted(list(_PARAM_RANGES) + ["vst3"])
 
 
+def param_spec(kind: str) -> dict:
+    """参数表（只读快照）：{key: [lo, hi] | None}；未知 kind → {}。"""
+    return {k: (list(v) if v else None) for k, v in (_PARAM_RANGES.get(str(kind)) or {}).items()}
+
+
 def _clamp(kind: str, key: str, value) -> float:
     rng = _PARAM_RANGES[kind].get(key)
     v = float(value)

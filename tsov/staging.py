@@ -3,7 +3,7 @@
 条目（item）抽象（全 producer 统一）：
     {id, producer, kind, title, created_at, state, ready, refs, meta}
 - id = "<producer>:<ref>"（如 chain:<run_ts>）
-- producer: chain | tune | arrange（段1 仅 chain 接入；tune/arrange 随段2/段3 注册）
+- producer: chain | tune | arrange（chain / tune 已接入；arrange 随段3 注册）
 - kind: notes | audio | commands
 - state: pending → adopted / discarded（pending = 探针动态枚举减去已处置记录）
 - ready: 是否具备采纳条件（链 = 03 原始 + 05 处理都在）
@@ -25,6 +25,7 @@ from pathlib import Path
 
 STATE_FILE = ".tsov-state.json"
 CHAIN_DIR = "chain"
+TUNE_DIR = "tune"
 
 # 链 run 目录产物命名（与 tsov/chain/tools.py 一致）
 CHAIN_WAVS = ("01-denoised.wav", "02-loudnorm.wav")
@@ -139,7 +140,51 @@ def chain_items(proj_root) -> list[dict]:
     return out
 
 
-_PRODUCERS = {"chain": chain_items}
+def tune_items(proj_root) -> list[dict]:
+    """调参批次探针：扫 <工程>/tune/*.json（新→旧）；就绪 = 建议集非空。
+
+    与链产物同抽象：AI 出的批次默认 pending——人批（应用/丢弃）才写处置记录。
+    """
+    root = Path(proj_root) / TUNE_DIR
+    if not root.is_dir():
+        return []
+    out: list[dict] = []
+    for f in sorted(root.glob("*.json")):
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(d, dict) or not d.get("batch_ts"):
+            continue
+        ts = str(d["batch_ts"])
+        sugg = d.get("suggestions") or []
+        try:
+            created = float(f.stat().st_mtime)
+        except OSError:
+            created = 0.0
+        out.append({
+            "id": f"tune:{ts}",
+            "producer": "tune",
+            "kind": "commands",
+            "title": f"调参建议批次（{len(sugg)} 条）",
+            "created_at": created,
+            "state": "pending",
+            "ready": bool(sugg),
+            "refs": {"batch_ts": ts},
+            "meta": {
+                "batch_ts": ts,
+                "suggestions": len(sugg),
+                "applied": len(d.get("applied") or []),
+                "pack": d.get("pack"),
+                "has_report": bool(d.get("report")),
+                "stats": d.get("stats"),
+            },
+        })
+    out.sort(key=lambda x: x["created_at"], reverse=True)
+    return out
+
+
+_PRODUCERS = {"chain": chain_items, "tune": tune_items}
 
 
 # ---------------------------------------------------------------------------

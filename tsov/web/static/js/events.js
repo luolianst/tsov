@@ -28,6 +28,8 @@ const SSE_TYPES = [
   'render_progress', 'render_done',
   /* M-V8 E3 段2：处理链（agent/REST 通道触发的运行也驱动 UI 刷新） */
   'chain_started', 'chain_step', 'chain_finished',
+  /* M-V8 E4 段2：调参批次（suggest/apply/discard 通道触发） */
+  'tune_updated',
 ];
 
 let current = null;   // EventSource

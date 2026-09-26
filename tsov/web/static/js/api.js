@@ -142,4 +142,22 @@ export const api = {
     req('/api/projects/' + encodeURIComponent(name) + '/agents'),
   agentsSync: (name) =>
     post('/api/projects/' + encodeURIComponent(name) + '/agents/sync', {}),
+
+  /* M-V8 E4 段2：AI 调参（事实 / 建议 / 应用 / 试听 / 丢弃；与 agent 同动作路径） */
+  tuneAnalyze: (name, pack) =>
+    post('/api/projects/' + encodeURIComponent(name) + '/tune/analyze', { pack: pack || null }),
+  tuneSuggest: (name, body) =>
+    post('/api/projects/' + encodeURIComponent(name) + '/tune/suggest', body || {}),
+  tuneApply: (name, body) =>
+    post('/api/projects/' + encodeURIComponent(name) + '/tune/apply', body || {}),
+  tuneDiscard: (name, body) =>
+    post('/api/projects/' + encodeURIComponent(name) + '/tune/discard', body || {}),
+  tunePreview: (name, batchTs, id) =>
+    post('/api/projects/' + encodeURIComponent(name) + '/tune/preview', { batch_ts: batchTs, id }),
+  tuneList: (name) =>
+    req('/api/projects/' + encodeURIComponent(name) + '/tune/list'),
+  tuneGet: (name, ts) =>
+    req('/api/projects/' + encodeURIComponent(name) + '/tune/' + encodeURIComponent(ts)),
+  tuneFileUrl: (name, ts, file) =>
+    '/api/projects/' + encodeURIComponent(name) + '/tune/' + encodeURIComponent(ts) + '/file?file=' + encodeURIComponent(file),
 };
