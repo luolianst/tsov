@@ -1,4 +1,4 @@
-/* chain.js —— 处理链面板（M-V8 E3 段2）：哼唱快车道 5 工具槽位
+/* chain.js —— 处理链面板（M-V8 E3 段2；09-26 卡片化：横排卡片 + › 连接）：哼唱快车道 5 工具槽位
    - 状态真值在后端（ChainRunner + 工程 chain.json）；前端镜像 store.chain
    - REST：tools / status / run / config / cancel / artifact（ADR-0017：与 agent 同一动作路径）
    - 快档改参 → config 返回 plan.auto → 自动顺跑；慢档 → needs_apply 亮「应用」
@@ -171,12 +171,16 @@ async function doApply() {
 }
 
 function renderStep(s, idx) {
-  const row = el('div', 'chain-step ' + (s.status || 'pending'));
-  row.dataset.tool = s.tool_id;
-  row.appendChild(el('span', 'chain-no', String(idx + 1)));
-  row.appendChild(el('span', 'chain-name', (s.name && (s.name.zh || s.name.en)) || s.tool_id));
-  row.appendChild(el('span', 'chain-badge ' + (s.status || 'pending'),
+  const card = el('div', 'chain-step ' + (s.status || 'pending'));
+  card.dataset.tool = s.tool_id;
+
+  /* 卡头：序号 / 名称 / 状态徽 */
+  const hd = el('div', 'chain-hd');
+  hd.appendChild(el('span', 'chain-no', String(idx + 1)));
+  hd.appendChild(el('span', 'chain-name', (s.name && (s.name.zh || s.name.en)) || s.tool_id));
+  hd.appendChild(el('span', 'chain-badge ' + (s.status || 'pending'),
     STATUS_TEXT[s.status] || s.status));
+  card.appendChild(hd);
 
   /* 参数控件（来自 /chain/tools 的 schema） */
   const tool = store.chain.tools.find((t) => t.id === s.tool_id);
@@ -215,20 +219,31 @@ function renderStep(s, idx) {
     lab.appendChild(ctl);
     pbox.appendChild(lab);
   }
-  if (pbox.childNodes.length) row.appendChild(pbox);
+  if (pbox.childNodes.length) card.appendChild(pbox);
 
-  /* mute */
-  const mb = el('button', 'chain-btn chain-mute' + (s.mute ? ' on' : ''), s.mute ? '已静音' : '静音');
-  mb.title = 'mute：本步跳过（存 chain.json，可撤销式重跑）';
-  mb.onclick = () => toggleMute(s.tool_id, !s.mute);
-  row.appendChild(mb);
+  /* 统计（完成时的小字摘要） */
+  if (s.status === 'done' && s.stats && Object.keys(s.stats).length) {
+    card.appendChild(el('span', 'chain-sub',
+      Object.entries(s.stats).slice(0, 3).map(([k, v]) => k + '=' + v).join(' · ')));
+  }
 
-  if (s.status === 'running') row.appendChild(el('span', 'chain-sub', '运行中…'));
-
+  /* 失败：错误行（卡内全宽，悬停看全） */
   if (s.status === 'failed') {
     const err = el('span', 'chain-err', s.error || '失败');
     err.title = s.error || '';
-    row.appendChild(err);
+    card.appendChild(err);
+  }
+
+  /* 卡脚：动作 + 产物 */
+  const ft = el('div', 'chain-ft');
+  const mb = el('button', 'chain-btn chain-mute' + (s.mute ? ' on' : ''), s.mute ? '已静音' : '静音');
+  mb.title = 'mute：本步跳过（存 chain.json，可撤销式重跑）';
+  mb.onclick = () => toggleMute(s.tool_id, !s.mute);
+  ft.appendChild(mb);
+
+  if (s.status === 'running') ft.appendChild(el('span', 'chain-sub', '运行中…'));
+
+  if (s.status === 'failed') {
     const retry = el('button', 'chain-btn', '重试');
     retry.title = '从该步起重跑（输入用上一轮产物，免重跑上游）';
     retry.onclick = () => doRun(restIds(idx));
@@ -238,9 +253,9 @@ function renderStep(s, idx) {
     const skip = el('button', 'chain-btn', '跳过');
     skip.title = '静音该步并从其后继续';
     skip.onclick = () => toggleMute(s.tool_id, true).then(() => doRun(restIds(idx + 1)));
-    row.appendChild(retry);
-    row.appendChild(rerun);
-    row.appendChild(skip);
+    ft.appendChild(retry);
+    ft.appendChild(rerun);
+    ft.appendChild(skip);
   }
 
   /* 慢档「应用」（needs_apply → 从该步起跑） */
@@ -248,7 +263,7 @@ function renderStep(s, idx) {
     const ap = el('button', 'chain-btn chain-apply', '应用');
     ap.title = '从该步起重跑（含下游）';
     ap.onclick = () => doRun(restIds(idx));
-    row.appendChild(ap);
+    ft.appendChild(ap);
   }
 
   /* 产物 */
@@ -259,13 +274,11 @@ function renderStep(s, idx) {
     a.href = api.chainArtifactUrl(store.project, s.artifact);
     a.target = '_blank';
     a.title = '打开产物（wav 直接试听；json 下载）';
-    row.appendChild(a);
+    ft.appendChild(a);
   }
-  if (s.status === 'done' && s.stats && Object.keys(s.stats).length) {
-    row.appendChild(el('span', 'chain-sub',
-      Object.entries(s.stats).slice(0, 3).map(([k, v]) => k + '=' + v).join(' · ')));
-  }
-  return row;
+
+  card.appendChild(ft);
+  return card;
 }
 
 export function renderChain() {
@@ -276,7 +289,7 @@ export function renderChain() {
 
   const head = el('div', 'chain-head');
   const title = el('span', 'chain-title', '哼唱快车道');
-  title.title = '降噪 → 响度 → 转录 → 量化 → 调内吸附（一句哼唱 → 可编辑音符）';
+  title.title = '降噪 → 响度 → 转录 → 量化 → 调内吸附（一句哼唱 → 可编辑音符）｜快档（降噪/响度/量化/吸附）改参即自动顺跑；转录为秒级 → 改参后点「应用」｜静音=跳过该步｜产物在 chain/<运行时间戳>/';
   head.appendChild(title);
 
   const runAll = el('button', 'chain-btn chain-run', store.chain.running ? '运行中…' : '▶ 运行全链');
@@ -309,10 +322,15 @@ export function renderChain() {
   if (!store.chain.steps.length) {
     wrap.appendChild(el('div', 'fx-none', '链未初始化（打开工程后自动取 5 步槽位）'));
   } else {
-    store.chain.steps.forEach((s, i) => wrap.appendChild(renderStep(s, i)));
+    /* 09-26 卡片化：横排卡片 + › 连接（对齐效果器栏 .fx-chain 设计语言） */
+    const row = el('div', 'chain-row');
+    store.chain.steps.forEach((s, i) => {
+      row.appendChild(renderStep(s, i));
+      if (i < store.chain.steps.length - 1) row.appendChild(el('span', 'chain-arrow', '›'));
+    });
+    wrap.appendChild(row);
   }
-  wrap.appendChild(el('div', 'chain-sub',
-    '快档（降噪/响度/量化/吸附）改参即自动顺跑；转录为秒级 → 改参后点「应用」｜静音=跳过该步｜产物在 chain/<运行时间戳>/'));
+
   pane.appendChild(wrap);
 }
 

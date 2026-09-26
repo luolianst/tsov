@@ -38,7 +38,7 @@
   --radius: 0px;
   --radius-note: 3px;
   --radius-agent: 4px;
-  --dock-h: 208px;
+  --dock-h: 228px;   /* 09-26：链面板卡片化——卡片需要呼吸位（原 208，-16 会裁统计行） */
   --dock-fold-h: 34px;
   /* 字体 */
   --font-ui: "Microsoft YaHei UI", "PingFang SC", "MiSans", "HarmonyOS Sans SC", system-ui, sans-serif;
@@ -767,7 +767,7 @@ body.chat-folded #rail-chat { display: flex; }
 @media (max-width: 1439px) {
   :root { --tracks-w: 160px; --chat-w: 320px; }
   .dh-hint { display: none; }
-  #dock:not(.folded) { height: 176px; }
+  #dock:not(.folded) { height: 200px; }   /* 09-26：链面板卡片化——卡片需要呼吸位（原 176，-24 会裁卡内容） */
   #project-select { max-width: 220px; }   /* 修正轮2.2：顶栏收窄 */
 }
 
@@ -873,25 +873,35 @@ body.chat-folded #rail-chat { display: flex; }
 .rec-mon { display: flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; }
 
 /* M-V8 E3 段2：处理链面板（哼唱快车道） */
-.chain-wrap { display: flex; flex-direction: column; gap: 4px; padding: 8px 12px; }
+.chain-wrap { display: flex; flex-direction: column; gap: 4px; padding: 6px 10px; min-height: 0; min-width: 0; }
 .chain-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .chain-title { font-weight: 600; font-size: var(--fs-md, 12px); }
-.chain-step { display: flex; align-items: center; gap: 8px; padding: 3px 8px; border: 1px solid var(--border); background: var(--bg-elev); min-height: 24px; }
+/* 09-26 卡片化：横排卡片 + › 连接——对齐效果器栏 .fx-chain 设计语言 */
+.chain-row { display: flex; align-items: stretch; gap: 5px; flex: 1; min-height: 0; overflow-x: auto; overflow-y: hidden; padding-bottom: 1px; }
+.chain-step {
+  flex: none; width: 260px; min-height: 24px;
+  display: flex; flex-direction: column; gap: 4px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-elev); padding: 5px 8px; overflow-y: auto;
+}
 .chain-step.running { border-color: var(--accent); }
 .chain-step.failed { border-color: var(--err); background: var(--accent-soft); }
 .chain-step.skipped { opacity: .55; }
+.chain-hd { display: flex; align-items: center; gap: 6px; }
 .chain-no { color: var(--faint); font-size: var(--fs-xs, 10px); min-width: 12px; }
-.chain-name { min-width: 72px; font-size: var(--fs-md, 12px); }
-.chain-badge { font-size: var(--fs-xs, 10px); padding: 0 6px; border: 1px solid var(--border); color: var(--muted); }
+.chain-name { font-size: var(--fs-md, 12px); font-weight: 600; }
+.chain-badge { font-size: var(--fs-xs, 10px); padding: 0 6px; border: 1px solid var(--border); color: var(--muted); border-radius: 3px; }
 .chain-badge.done { color: var(--ok); border-color: var(--ok); }
 .chain-badge.running { color: var(--accent); border-color: var(--accent); }
 .chain-badge.failed { color: var(--err); border-color: var(--err); }
 .chain-badge.skipped { color: var(--faint); }
 .chain-badge.dirty { color: var(--warn); border-color: var(--warn); }
-.chain-params { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.chain-params { display: flex; gap: 3px 8px; flex-wrap: wrap; align-items: center; }
 .chain-params label { display: inline-flex; gap: 3px; align-items: center; font-size: var(--fs-xs, 10px); color: var(--muted); }
 .chain-params input, .chain-params select { width: 56px; font-size: var(--fs-xs, 11px); background: var(--bg-sunken); border: 1px solid var(--bg-hover); color: inherit; padding: 1px 3px; font-variant-numeric: tabular-nums; }
 .chain-params input[type=text] { width: 72px; }
+.chain-ft { margin-top: auto; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.chain-arrow { align-self: center; color: var(--faint); font-size: 15px; flex: none; }
 .chain-btn { font-size: var(--fs-xs, 11px); border: 1px solid var(--border); background: var(--bg-raise); color: inherit; padding: 1px 8px; cursor: pointer; }
 .chain-btn:hover { border-color: var(--border-strong); }
 .chain-btn:disabled { opacity: .5; cursor: default; }
@@ -902,7 +912,8 @@ body.chat-folded #rail-chat { display: flex; }
 .chain-art { font-size: var(--fs-xs, 11px); color: var(--accent); text-decoration: none; }
 .chain-art:hover { text-decoration: underline; }
 .chain-sub { color: var(--muted); font-size: var(--fs-xs, 11px); }
-.chain-err { color: var(--err); font-size: var(--fs-xs, 11px); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chain-step .chain-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }   /* 卡片内统计=单行省略（保卡高可控） */
+.chain-err { color: var(--err); font-size: var(--fs-xs, 11px); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* E3 段2：用户侧「新建轨道」入口（#183② 闭环） */
 .track-add { display: block; width: calc(100% - 16px); margin: 8px; padding: 5px 10px; border: 1px dashed var(--border); background: transparent; color: var(--muted); cursor: pointer; font-size: var(--fs-sm, 12px); text-align: left; }
