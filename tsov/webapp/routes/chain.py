@@ -19,6 +19,46 @@ from ..state import WebState
 DEFAULT_PRESET = "humming-quicklane"
 
 
+def apply_chain_run(ws: WebState, proj, *, run_ts=None, source_track=None) -> dict:
+    """链产物进工程（双轨）——/chain/apply 与暂存区采纳共用同一动作路径（ADR-0017）。
+
+    转录原始 + 处理版 → 源轨正下方两条 MIDI 轨（命令层事务）；幂等：先删同名的旧产物轨。
+    run_ts 缺省 = chain.json 最近一次；source_track 缺省 = chain.json 记录。
+    """
+    saved = load_chain_json(proj.root)
+    run_ts = str(run_ts or saved.get("run_ts") or "")
+    if not run_ts:
+        raise HTTPException(409, "该工程还没有链产物（先运行一次链）")
+    run_dir = proj.root / "chain" / run_ts
+    got = load_run_notes(run_dir)
+    if not got["raw"] or not got["processed"]:
+        miss = "转录原始（03）" if not got["raw"] else ""
+        miss += ("、" if miss else "") + ("处理版（05）" if not got["processed"] else "")
+        raise HTTPException(409, f"运行 {run_ts} 缺音符产物：{miss}——先跑完转录与处理步")
+    if source_track is None:
+        source_track = saved.get("source_track")
+    if source_track is None:
+        raise HTTPException(409, "链未记录源轨（先运行一次链或显式给 source_track）")
+    try:
+        plan = build_apply_commands(list(proj.score.tracks), source_track=int(source_track),
+                                    raw_notes=got["raw"], processed_notes=got["processed"])
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    batch = EditBatch(label="转谱进工程（双轨）")
+    for c in plan["commands"]:
+        batch.add(c["op"], track=int(c.get("track", 0)), value=c.get("value"))
+    result = proj.apply_batch(batch, commit_message="转谱进工程：原始 + 处理（双轨）",
+                              source="user")
+    if result["applied"] == 0:
+        return {"ok": False, "project": proj.name, **plan["meta"], **result}
+    ws.bus.publish(proj.name, "diff_applied", {**result["diff"], "commit": result["commit"],
+                                               "seq": result.get("seq")})
+    ws.bus.publish(proj.name, "state_updated", project_state(proj))
+    return {"ok": True, "project": proj.name, "run_ts": run_ts, **plan["meta"],
+            "applied": result["applied"], "errors": result.get("errors") or [],
+            "tracks": len(proj.score.tracks)}
+
+
 def register(app: FastAPI) -> None:
     def st() -> WebState:
         return app.state.tsov
@@ -156,37 +196,8 @@ def register(app: FastAPI) -> None:
         """
         body = body or {}
         proj = st().get_project(name)
-        saved = load_chain_json(proj.root)
-        run_ts = str(body.get("run_ts") or saved.get("run_ts") or "")
-        if not run_ts:
-            raise HTTPException(409, "该工程还没有链产物（先运行一次链）")
-        run_dir = proj.root / "chain" / run_ts
-        got = load_run_notes(run_dir)
-        if not got["raw"] or not got["processed"]:
-            miss = "转录原始（03）" if not got["raw"] else ""
-            miss += ("、" if miss else "") + ("处理版（05）" if not got["processed"] else "")
-            raise HTTPException(409, f"运行 {run_ts} 缺音符产物：{miss}——先跑完转录与处理步")
-        source_track = body.get("source_track", saved.get("source_track"))
-        if source_track is None:
-            raise HTTPException(409, "链未记录源轨（先运行一次链或显式给 source_track）")
-        try:
-            plan = build_apply_commands(list(proj.score.tracks), source_track=int(source_track),
-                                        raw_notes=got["raw"], processed_notes=got["processed"])
-        except ValueError as e:
-            raise HTTPException(400, str(e)) from e
-        batch = EditBatch(label="转谱进工程（双轨）")
-        for c in plan["commands"]:
-            batch.add(c["op"], track=int(c.get("track", 0)), value=c.get("value"))
-        result = proj.apply_batch(batch, commit_message="转谱进工程：原始 + 处理（双轨）",
-                                  source="user")
-        if result["applied"] == 0:
-            return {"ok": False, "project": name, **plan["meta"], **result}
-        st().bus.publish(name, "diff_applied", {**result["diff"], "commit": result["commit"],
-                                                "seq": result.get("seq")})
-        st().bus.publish(name, "state_updated", project_state(proj))
-        return {"ok": True, "project": name, "run_ts": run_ts, **plan["meta"],
-                "applied": result["applied"], "errors": result.get("errors") or [],
-                "tracks": len(proj.score.tracks)}
+        return apply_chain_run(st(), proj, run_ts=body.get("run_ts"),
+                               source_track=body.get("source_track"))
 
     @app.get("/api/projects/{name}/chain/artifact")
     def chain_artifact(name: str, file: str):

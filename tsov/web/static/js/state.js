@@ -73,6 +73,14 @@ export const store = {
     needsApply: '',            // 慢档改参标脏（等「应用」）
     error: null,
   },
+
+  /* M-V8 E4 段1：暂存区 + 工程上下文（AI 页签；真值 = 后端 staging + 工程伴生文件） */
+  staging: {
+    items: [],                 // /staging 列表（pending 前 + 已处置后）
+    counts: { pending: 0, adopted: 0, discarded: 0 },
+    agents: null,              // /agents 现状（project_md / user_md）
+    loaded: false,
+  },
 };
 
 export function setError(msg) {
@@ -202,6 +210,12 @@ export function setMeter(m) {
 export function setChainState(partial) {
   Object.assign(store.chain, partial || {});
   bus.dispatch('chain');
+}
+
+/* M-V8 E4 段1：暂存区/上下文镜像（批量并入 + 广播；渲染在 staging.js） */
+export function setStagingState(partial) {
+  Object.assign(store.staging, partial || {});
+  bus.dispatch('staging');
 }
 
 /** 当前谱内书签列表（只读引用；写走命令层）。 */
@@ -470,6 +484,16 @@ export function snapshot() {
       error: store.chain.error,
       toolIds: store.chain.tools.map((t) => t.id),
       steps: store.chain.steps.map((s) => Object.assign({}, s)),
+    },
+    /* M-V8 E4 段1：暂存区快照（CDP 断言用；items 浅拷贝防外部持引用） */
+    staging: {
+      counts: Object.assign({}, store.staging.counts),
+      items: store.staging.items.map((x) => ({ id: x.id, state: x.state, producer: x.producer,
+                                               ready: !!x.ready, title: x.title })),
+      agents: store.staging.agents
+        ? { hasProject: !!store.staging.agents.project_md, hasUser: !!store.staging.agents.user_md }
+        : null,
+      loaded: !!store.staging.loaded,
     },
     hasDiff: !!store.diff,
     error: store.error,

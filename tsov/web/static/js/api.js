@@ -129,4 +129,17 @@ export const api = {
     post('/api/projects/' + encodeURIComponent(name) + '/chain/apply', body || {}),
   chainArtifactUrl: (name, file) =>
     '/api/projects/' + encodeURIComponent(name) + '/chain/artifact?file=' + encodeURIComponent(file),
+  /* M-V8 E4 段1：暂存区 + 工程上下文（agents.md 双层） */
+  stagingList: (name) =>
+    req('/api/projects/' + encodeURIComponent(name) + '/staging'),
+  stagingAdopt: (name, itemId) =>
+    post('/api/projects/' + encodeURIComponent(name) + '/staging/' + encodeURIComponent(itemId) + '/adopt', {}),
+  stagingDiscard: (name, itemId) =>
+    post('/api/projects/' + encodeURIComponent(name) + '/staging/' + encodeURIComponent(itemId) + '/discard', {}),
+  stagingArtifactUrl: (name, itemId, file) =>
+    '/api/projects/' + encodeURIComponent(name) + '/staging/' + encodeURIComponent(itemId) + '/artifact?file=' + encodeURIComponent(file),
+  agentsGet: (name) =>
+    req('/api/projects/' + encodeURIComponent(name) + '/agents'),
+  agentsSync: (name) =>
+    post('/api/projects/' + encodeURIComponent(name) + '/agents/sync', {}),
 };

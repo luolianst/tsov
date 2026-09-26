@@ -54,3 +54,5 @@ tmp/
 temp/
 *.bak
 tsov-settings.json
+# 用户级全局偏好（本机档，同 settings；不入库）
+agents-user.md

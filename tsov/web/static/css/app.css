@@ -918,3 +918,30 @@ body.chat-folded #rail-chat { display: flex; }
 /* E3 段2：用户侧「新建轨道」入口（#183② 闭环） */
 .track-add { display: block; width: calc(100% - 16px); margin: 8px; padding: 5px 10px; border: 1px dashed var(--border); background: transparent; color: var(--muted); cursor: pointer; font-size: var(--fs-sm, 12px); text-align: left; }
 .track-add:hover { color: inherit; border-color: var(--border-strong, var(--border)); background: var(--bg-raise); }
+
+
+/* ---------------- M-V8 E4 段1：AI 页签（暂存区 + 工程上下文） ---------------- */
+.stg-wrap { display: flex; flex-direction: column; gap: 4px; padding: 6px 10px; min-height: 0; min-width: 0; }
+.stg-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.stg-title-main { font-weight: 600; font-size: var(--fs-md, 12px); }
+.stg-sub { color: var(--muted); font-size: var(--fs-xs, 11px); }
+.stg-ctx { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border: 1px solid var(--border); background: var(--bg-raise); padding: 4px 8px; }
+.stg-ctx-item { color: var(--muted); font-size: var(--fs-xs, 11px); }
+.stg-list { display: flex; gap: 6px; overflow-x: auto; min-height: 0; padding-bottom: 2px; }
+.stg-card { border: 1px solid var(--border); background: var(--bg-raise); padding: 6px 8px; min-width: 240px; max-width: 320px; display: flex; flex-direction: column; gap: 4px; }
+.stg-card.stg-adopted { opacity: .72; }
+.stg-card.stg-discarded { opacity: .5; }
+.stg-hd { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.stg-badge { font-size: var(--fs-xs, 10px); padding: 0 6px; border: 1px solid var(--border); color: var(--muted); border-radius: 3px; }
+.stg-badge-pending { color: var(--accent); border-color: var(--accent); }
+.stg-badge-adopted { color: var(--ok); border-color: var(--ok); }
+.stg-badge-discarded { color: var(--faint); }
+.stg-title { font-weight: 600; font-size: var(--fs-md, 12px); }
+.stg-acts { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: auto; }
+.stg-btn { font-size: var(--fs-xs, 11px); border: 1px solid var(--border); background: var(--bg-raise); color: inherit; padding: 1px 8px; cursor: pointer; }
+.stg-btn:hover { border-color: var(--border-strong); }
+.stg-btn:disabled { opacity: .5; cursor: default; }
+.stg-btn.stg-adopt { background: var(--accent); color: var(--on-accent); border: none; padding: 2px 10px; }
+.stg-btn.stg-discard { color: var(--err); }
+.stg-btn.stg-play.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.stg-empty { color: var(--faint); font-size: var(--fs-xs, 11px); padding: 4px 2px; }
