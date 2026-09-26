@@ -21,6 +21,7 @@ GM_PROGRAMS = {
     "e_piano": 4,       # Electric Piano 1（Rhodes 系）
     "guitar": 27,       # Electric Guitar (clean)
     "guitar_clean": 27,
+    "guitar_acoustic": 25,  # Acoustic Guitar (steel) —— E4 段3 配器角色用（2026-09-26 增补）
     "guitar_muted": 28, # Electric Guitar (muted) —— 哑音 riff
     "guitar_overdrive": 29,
     "guitar_distortion": 30,
@@ -46,6 +47,7 @@ GM_PROGRAMS = {
     "synth_lead": 81,  # Lead 2 (sawtooth)
     "synth_lead_square": 80,   # Lead 1 (square)
     "synth_lead_charang": 85,  # Lead 5 (charang)
+    "synth_arp": 82,   # Lead 3 (calliope) —— E4 段3 配器角色（琶音/pluck 层；2026-09-26 增补）
     "pad": 89,       # Pad 2 (warm)
     "pad_polysynth": 90,       # Pad 3 (polysynth)
     "drums": None,   # 打击乐：is_drum=True

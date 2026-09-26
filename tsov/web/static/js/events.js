@@ -30,6 +30,8 @@ const SSE_TYPES = [
   'chain_started', 'chain_step', 'chain_finished',
   /* M-V8 E4 段2：调参批次（suggest/apply/discard 通道触发） */
   'tune_updated',
+  /* M-V8 E4 段3：配器批次（generate/apply/discard 通道触发） */
+  'arrange_updated',
 ];
 
 let current = null;   // EventSource

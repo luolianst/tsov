@@ -121,6 +121,37 @@ def harmonize(melody_notes: list[Note], key: str, bpm: float, **params) -> list[
     return chords
 
 
+def harmonize_bars(melody_notes: list[Note], key: str, bars: list[tuple[float, float]], **params) -> list[Chord]:
+    """按显式小节切分（[(start, end), ...]，任意拍号）逐小节选和弦——harmonize 的泛化版。
+
+    6/8（每小节 3 拍）等非 4/4 工程由调用方给出真实小节边界；选择逻辑与 harmonize 相同：
+    1/4/5/2/6 级候选，取与小节内旋律重合度最高者；空窗小节沿用前值和弦。
+    """
+    if not bars:
+        return []
+    root_pc, scale = parse_key(key)
+    cands = _candidates(root_pc, scale)
+    chords: list[Chord] = []
+    for s, e in bars:
+        window = [n for n in melody_notes if n.start >= float(s) - 1e-9 and n.start < float(e) - 1e-9]
+        pcs = {int(n.pitch_midi) % 12 for n in window}
+        if not pcs:
+            if chords:
+                prev = chords[-1]
+                chords.append(Chord(prev.root_pc, prev.kind, float(s), float(e), set(prev.tones)))
+            else:
+                kind, tones = _scale_chord(root_pc, scale)
+                chords.append(Chord(root_pc, kind, float(s), float(e), tones))
+        else:
+            best, best_score = None, -1
+            for root, kind, tones in cands:
+                score = len(pcs & tones)
+                if score > best_score:
+                    best, best_score = (root, kind, tones), score
+            chords.append(Chord(best[0], best[1], float(s), float(e), best[2]))
+    return chords
+
+
 def chord_notes(chord: Chord, target: float = 48.0, velocity: float = 0.5) -> list[Note]:
     """和弦 → 3 个 Note（构成音，紧致 voicing 在 target 附近，跨整个小节）。
 

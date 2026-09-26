@@ -968,3 +968,12 @@ body.chat-folded #rail-chat { display: flex; }
 .tune-report.tune-rep-bad { border-color: var(--err); }
 .tune-rep-items { display: flex; flex-direction: column; gap: 1px; }
 .tune-rep-item { font-size: var(--fs-xs, 11px); color: var(--muted); }
+
+/* ---------------- M-V8 E4 段3：AI 配器（风格包 / 密度 / 角色行） ---------------- */
+.arr-wrap { border-top: 1px dashed var(--border); padding-top: 4px; }
+.arr-list { display: flex; flex-direction: column; gap: 2px; }
+.arr-role { display: flex; align-items: baseline; gap: 8px; font-size: var(--fs-xs, 11px); color: var(--muted); border: 1px solid var(--border); background: var(--bg-raise); padding: 2px 8px; }
+.arr-role .arr-name { color: inherit; font-weight: 600; min-width: 84px; }
+.arr-role .arr-seg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.arr-role .arr-n { color: var(--faint); font-variant-numeric: tabular-nums; }
+.arr-role .arr-prog { color: var(--faint); font-size: var(--fs-xs, 10px); }

@@ -136,6 +136,8 @@ class PresetLibrary:
         if not d.is_dir():
             return
         for path in sorted(d.glob("*.json")):
+            if path.name.endswith(".patterns.json"):
+                continue  # E4 段3：配器模式库（机读数据，tsov.arrange.library 装载）——非预设
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 preset = cls.from_dict(data)

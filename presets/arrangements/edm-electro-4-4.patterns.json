@@ -1,0 +1,231 @@
+{
+  "pack": "edm-electro-4-4",
+  "meter": "4/4",
+  "grids_per_bar": 16,
+  "description": "电子舞曲 4/4 的机读模式库（E4 段3 · Q14）：散文规格的结构化——角色 × 段型 × 变体 ID × 事件模板 + fills + 强度档缩放。16 分格制：4/4 每小节 16 格。drum pitches: kick=36 snare=38 clap=39 closed hat=42 open hat=46 crash=49 ride=51。",
+  "sources": [
+    "presets/arrangements/edm-electro-4-4.json —— 各角色 pattern_notes 散文（本库为其机读化；prose 留原文件溯源）",
+    "reference: blog.bandlab.com house 范式（kick 每拍/offbeat open hat）；经验值声明见原文件 sources"
+  ],
+  "energy_tiers": {
+    "1": {"label": "收", "vel_scale": 0.85},
+    "2": {"label": "标准", "vel_scale": 1.0},
+    "3": {"label": "满", "vel_scale": 1.12}
+  },
+  "strengths": {"soft": 0.9, "standard": 1.0, "full": 1.1},
+  "section_crash": {"pitch": 49, "vel": 0.9},
+  "roles": {
+    "e_drums": {
+      "title": "电子鼓组（house/electro）",
+      "gm_program": null,
+      "channel": 10,
+      "register": null,
+      "velocity_range": [85, 127],
+      "pan": 0.0,
+      "level_hint_db": 0,
+      "default": {"intro": "breakdown", "verse": "base", "pre": "build", "chorus": "drop", "bridge": "breakdown", "interlude": "base", "outro": "breakdown", "full": "base"},
+      "variants": {
+        "base": {
+          "desc": "four-on-the-floor：kick 全拍（1/5/9/13），clap 2/4 拍（5/13），closed hat 16 分全格，open hat 每拍后半（3/7/11/15，house 标志）",
+          "energy": 2,
+          "melody_offset": null,
+          "events": [
+            [1, 2, 0.95, "36"], [5, 2, 0.95, "36"], [9, 2, 0.95, "36"], [13, 2, 0.95, "36"],
+            [5, 2, 0.85, "39"], [13, 2, 0.85, "39"],
+            [1, 1, 0.50, "42"], [2, 1, 0.50, "42"], [3, 1, 0.50, "42"], [4, 1, 0.50, "42"],
+            [5, 1, 0.50, "42"], [6, 1, 0.50, "42"], [7, 1, 0.50, "42"], [8, 1, 0.50, "42"],
+            [9, 1, 0.50, "42"], [10, 1, 0.50, "42"], [11, 1, 0.50, "42"], [12, 1, 0.50, "42"],
+            [13, 1, 0.50, "42"], [14, 1, 0.50, "42"], [15, 1, 0.50, "42"], [16, 1, 0.50, "42"],
+            [3, 2, 0.78, "46"], [7, 2, 0.78, "46"], [11, 2, 0.78, "46"], [15, 2, 0.78, "46"]
+          ]
+        },
+        "drop": {
+          "desc": "drop 全能量：kick 全拍 + snare/clap 叠 2/4 + hat 16 分 + offbeat open hat；段落头 crash 由 section_crash 自动加",
+          "energy": 3,
+          "melody_offset": null,
+          "events": [
+            [1, 2, 0.98, "36"], [5, 2, 0.98, "36"], [9, 2, 0.98, "36"], [13, 2, 0.98, "36"],
+            [5, 2, 0.90, "38"], [13, 2, 0.90, "38"],
+            [5, 2, 0.80, "39"], [13, 2, 0.80, "39"],
+            [1, 1, 0.55, "42"], [2, 1, 0.55, "42"], [3, 1, 0.55, "42"], [4, 1, 0.55, "42"],
+            [5, 1, 0.55, "42"], [6, 1, 0.55, "42"], [7, 1, 0.55, "42"], [8, 1, 0.55, "42"],
+            [9, 1, 0.55, "42"], [10, 1, 0.55, "42"], [11, 1, 0.55, "42"], [12, 1, 0.55, "42"],
+            [13, 1, 0.55, "42"], [14, 1, 0.55, "42"], [15, 1, 0.55, "42"], [16, 1, 0.55, "42"],
+            [3, 2, 0.82, "46"], [7, 2, 0.82, "46"], [11, 2, 0.82, "46"], [15, 2, 0.82, "46"]
+          ]
+        },
+        "breakdown": {
+          "desc": "breakdown（intro/bridge）：无 kick，clap 2/4 + offbeat open hat 留空间给长和弦",
+          "energy": 1,
+          "melody_offset": null,
+          "events": [
+            [5, 2, 0.75, "39"], [13, 2, 0.75, "39"],
+            [3, 2, 0.70, "46"], [7, 2, 0.70, "46"], [11, 2, 0.70, "46"], [15, 2, 0.70, "46"]
+          ]
+        },
+        "build": {
+          "desc": "build：snare 16 分滚奏、力度逐格递增（0.5→1.0），接 drop",
+          "energy": 2,
+          "melody_offset": null,
+          "events": [
+            [1, 1, 0.50, "38"], [2, 1, 0.53, "38"], [3, 1, 0.57, "38"], [4, 1, 0.60, "38"],
+            [5, 1, 0.63, "38"], [6, 1, 0.67, "38"], [7, 1, 0.70, "38"], [8, 1, 0.73, "38"],
+            [9, 1, 0.77, "38"], [10, 1, 0.80, "38"], [11, 1, 0.83, "38"], [12, 1, 0.87, "38"],
+            [13, 1, 0.90, "38"], [14, 1, 0.93, "38"], [15, 1, 0.97, "38"], [16, 1, 1.0, "38"]
+          ]
+        }
+      }
+    },
+    "synth_bass": {
+      "title": "合成贝斯",
+      "gm_program": 38,
+      "register": ["E1", "G2"],
+      "velocity_range": [95, 120],
+      "pan": 0.0,
+      "level_hint_db": -2,
+      "default": {"intro": "long8", "verse": "offbeat", "pre": "offbeat", "chorus": "offbeat", "bridge": "long8", "interlude": "long8", "outro": "long8", "full": "offbeat"},
+      "variants": {
+        "offbeat": {
+          "desc": "offbeat bass（house 通行）：每拍后半（格 3/7/11/15）与 kick 完全互补",
+          "energy": 2,
+          "melody_offset": null,
+          "events": [[3, 2, 0.85, "root"], [7, 2, 0.85, "root"], [11, 2, 0.85, "root"], [15, 2, 0.85, "root"]]
+        },
+        "sixteen": {
+          "desc": "全 16 分律动（electro 段）：重音 1/5/9/13",
+          "energy": 3,
+          "melody_offset": null,
+          "events": [
+            [1, 1, 0.90, "root"], [2, 1, 0.70, "root"], [3, 1, 0.70, "root"], [4, 1, 0.70, "root"],
+            [5, 1, 0.90, "root"], [6, 1, 0.70, "root"], [7, 1, 0.70, "root"], [8, 1, 0.70, "root"],
+            [9, 1, 0.90, "root"], [10, 1, 0.70, "root"], [11, 1, 0.70, "root"], [12, 1, 0.70, "root"],
+            [13, 1, 0.90, "root"], [14, 1, 0.70, "root"], [15, 1, 0.70, "root"], [16, 1, 0.70, "root"]
+          ]
+        },
+        "long8": {
+          "desc": "8 分长音（breakdown/build 过渡）",
+          "energy": 1,
+          "melody_offset": null,
+          "events": [
+            [1, 2, 0.80, "root"], [3, 2, 0.80, "root"], [5, 2, 0.80, "root"], [7, 2, 0.80, "root"],
+            [9, 2, 0.80, "root"], [11, 2, 0.80, "root"], [13, 2, 0.80, "root"], [15, 2, 0.80, "root"]
+          ]
+        }
+      }
+    },
+    "synth_lead": {
+      "title": "合成器 Lead（drop 主 hook · 本流程里=旋律加倍可选角色）",
+      "gm_program": 81,
+      "register": ["C4", "C6"],
+      "velocity_range": [80, 115],
+      "pan": 0.0,
+      "level_hint_db": -6,
+      "default": {"intro": "off", "verse": "off", "pre": "off", "chorus": "unison", "bridge": "off", "interlude": "unison_high", "outro": "off", "full": "off"},
+      "variants": {
+        "unison": {
+          "desc": "drop 与旋律同度齐奏（厚度：detune 双轨为建议，v1 单轨）",
+          "energy": 2,
+          "melody_offset": 0,
+          "events": []
+        },
+        "unison_high": {
+          "desc": "+1 八度齐奏（间奏/冲高）",
+          "energy": 3,
+          "melody_offset": 12,
+          "events": []
+        },
+        "off": {
+          "desc": "不出现",
+          "energy": 1,
+          "melody_offset": null,
+          "events": [[1, 2, 0.5, "rest"]]
+        }
+      }
+    },
+    "synth_arp": {
+      "title": "琶音/Pluck（16 分律动层）",
+      "gm_program": 82,
+      "register": ["C5", "C7"],
+      "velocity_range": [70, 100],
+      "pan": -0.3,
+      "level_hint_db": -12,
+      "default": {"intro": "pulse8", "verse": "pulse8", "pre": "up16", "chorus": "up16", "bridge": "pulse8", "interlude": "up16", "outro": "pulse8", "full": "pulse8"},
+      "variants": {
+        "up16": {
+          "desc": "16 分琶音循环（根-五-八-三），重音 1/5/9/13",
+          "energy": 2,
+          "melody_offset": null,
+          "events": [
+            [1, 1, 0.78, "arp:0"], [2, 1, 0.70, "arp:2"], [3, 1, 0.70, "arp:0+12"], [4, 1, 0.70, "arp:1"],
+            [5, 1, 0.78, "arp:0"], [6, 1, 0.70, "arp:2"], [7, 1, 0.70, "arp:0+12"], [8, 1, 0.70, "arp:1"],
+            [9, 1, 0.78, "arp:0"], [10, 1, 0.70, "arp:2"], [11, 1, 0.70, "arp:0+12"], [12, 1, 0.70, "arp:1"],
+            [13, 1, 0.78, "arp:0"], [14, 1, 0.70, "arp:2"], [15, 1, 0.70, "arp:0+12"], [16, 1, 0.70, "arp:1"]
+          ]
+        },
+        "pulse8": {
+          "desc": "8 分脉冲（根-五交替，breakdown/衬底）",
+          "energy": 1,
+          "melody_offset": null,
+          "events": [
+            [1, 2, 0.65, "arp:0"], [3, 2, 0.65, "arp:2"], [5, 2, 0.65, "arp:0"], [7, 2, 0.65, "arp:2"],
+            [9, 2, 0.65, "arp:0"], [11, 2, 0.65, "arp:2"], [13, 2, 0.65, "arp:0"], [15, 2, 0.65, "arp:2"]
+          ]
+        },
+        "off": {
+          "desc": "不出现",
+          "energy": 1,
+          "melody_offset": null,
+          "events": [[1, 2, 0.5, "rest"]]
+        }
+      }
+    },
+    "synth_pad": {
+      "title": "合成器 Pad（breakdown/空间层）",
+      "gm_program": 89,
+      "register": ["C4", "C6"],
+      "velocity_range": [40, 70],
+      "pan": 0.0,
+      "level_hint_db": -20,
+      "default": {"intro": "sustain", "verse": "sustain", "pre": "sustain", "chorus": "sustain_high", "bridge": "sustain", "interlude": "sustain", "outro": "sustain", "full": "sustain"},
+      "variants": {
+        "sustain": {
+          "desc": "整小节长和弦（每 2–4 小节换和弦由和弦序列决定）",
+          "energy": 1,
+          "melody_offset": null,
+          "events": [[1, 16, 0.50, "chord"]]
+        },
+        "sustain_high": {
+          "desc": "drop 段叠 +1 八度高频层",
+          "energy": 2,
+          "melody_offset": null,
+          "events": [[1, 16, 0.55, "chord"], [1, 16, 0.40, "chord+12"]]
+        },
+        "off": {
+          "desc": "不出现",
+          "energy": 1,
+          "melody_offset": null,
+          "events": [[1, 2, 0.5, "rest"]]
+        }
+      }
+    }
+  },
+  "fills": {
+    "snare_roll": {
+      "desc": "build 末小节 snare 16 分滚奏渐强（v 0.55→1.0）接 drop",
+      "role": "e_drums",
+      "events": [
+        [0, 1, 1, 0.55, "38"], [0, 2, 1, 0.60, "38"], [0, 3, 1, 0.65, "38"], [0, 4, 1, 0.70, "38"],
+        [0, 5, 1, 0.75, "38"], [0, 6, 1, 0.80, "38"], [0, 7, 1, 0.85, "38"], [0, 8, 1, 0.88, "38"],
+        [0, 9, 1, 0.90, "38"], [0, 10, 1, 0.92, "38"], [0, 11, 1, 0.94, "38"], [0, 12, 1, 0.95, "38"],
+        [0, 13, 1, 0.96, "38"], [0, 14, 1, 0.97, "38"], [0, 15, 1, 0.98, "38"], [0, 16, 1, 1.0, "38"]
+      ]
+    },
+    "hat_lift": {
+      "desc": "末小节 offbeat open hat 加密（每拍后半）自然过渡",
+      "role": "e_drums",
+      "events": [
+        [0, 3, 2, 0.75, "46"], [0, 7, 2, 0.75, "46"], [0, 11, 2, 0.78, "46"], [0, 15, 2, 0.82, "46"]
+      ]
+    }
+  }
+}

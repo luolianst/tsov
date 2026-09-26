@@ -1,0 +1,248 @@
+{
+  "pack": "wotaiko-fast-6-8",
+  "meter": "6/8",
+  "grids_per_bar": 12,
+  "description": "高速术力口 6/8 的机读模式库（E4 段3 · Q14）：散文规格的结构化——角色 × 段型 × 变体 ID × 事件模板 + fills + 强度档缩放。16 分格制：6/8 每小节 12 格（八分格 n = 格 2n-1 / 2n）。drum pitches: kick=36 snare=38 clap=39 closed hat=42 open hat=46 crash=49 ride=51 bell=53 toms=41/43/45/47/48/50。",
+  "sources": [
+    "presets/arrangements/wotaiko-fast-6-8.json —— 各角色 pattern_notes 散文（本库为其机读化；prose 留原文件溯源）",
+    "tsov/agent/tools_compose.py::_DRUM_PATTERNS —— wotaiko_drums_base / wotaiko_drums_energy 两个历史鼓型，升格为本库 e_drums 的 base / energy 变体（逐格位一致，有对拍测试）"
+  ],
+  "energy_tiers": {
+    "1": {"label": "收", "vel_scale": 0.85},
+    "2": {"label": "标准", "vel_scale": 1.0},
+    "3": {"label": "满", "vel_scale": 1.12}
+  },
+  "strengths": {"soft": 0.9, "standard": 1.0, "full": 1.1},
+  "section_crash": {"pitch": 49, "vel": 0.9},
+  "roles": {
+    "piano": {
+      "title": "钢琴（主旋律/人声线 · 本流程里=旋律加倍可选角色）",
+      "gm_program": 0,
+      "register": ["G3", "C6"],
+      "velocity_range": [64, 112],
+      "pan": 0.0,
+      "level_hint_db": -4,
+      "default": {"intro": "comp", "verse": "off", "pre": "off", "chorus": "off", "bridge": "comp", "interlude": "comp", "outro": "comp", "full": "off"},
+      "variants": {
+        "comp": {
+          "desc": "和弦柱式铺底（附点拍头 1/7 重音、4/10 补——前奏/间奏钢琴独奏床）",
+          "energy": 1,
+          "melody_offset": null,
+          "events": [[1, 3, 0.64, "chord"], [4, 3, 0.58, "chord"], [7, 3, 0.64, "chord"], [10, 3, 0.58, "chord"]]
+        },
+        "unison": {
+          "desc": "与旋律同度齐奏（人声替代/加厚）",
+          "energy": 2,
+          "melody_offset": 0,
+          "events": []
+        },
+        "unison_low": {
+          "desc": "低八度齐奏（加厚低声部）",
+          "energy": 1,
+          "melody_offset": -12,
+          "events": []
+        },
+        "off": {
+          "desc": "不出现（让位）",
+          "energy": 1,
+          "melody_offset": null,
+          "events": [[1, 2, 0.5, "rest"]]
+        }
+      }
+    },
+    "synth_lead": {
+      "title": "合成器 Lead（齐奏/副旋律）",
+      "gm_program": 81,
+      "register": ["C4", "C6"],
+      "velocity_range": [70, 108],
+      "pan": 0.0,
+      "level_hint_db": -8,
+      "default": {"intro": "off", "verse": "off", "pre": "off", "chorus": "unison", "bridge": "off", "interlude": "unison_high", "outro": "off", "full": "off"},
+      "variants": {
+        "unison": {
+          "desc": "副歌与旋律同度齐奏（level 抬到 -5）",
+          "energy": 2,
+          "melody_offset": 0,
+          "events": []
+        },
+        "unison_high": {
+          "desc": "+1 八度齐奏（副歌冲高/间奏副旋律）",
+          "energy": 3,
+          "melody_offset": 12,
+          "events": []
+        },
+        "off": {
+          "desc": "不出现（主歌留白）",
+          "energy": 1,
+          "melody_offset": null,
+          "events": [[1, 2, 0.5, "rest"]]
+        }
+      }
+    },
+    "synth_pad": {
+      "title": "合成器 Pad（长音铺底）",
+      "gm_program": 89,
+      "register": ["C4", "C6"],
+      "velocity_range": [36, 68],
+      "pan": 0.0,
+      "level_hint_db": -18,
+      "default": {"intro": "sustain", "verse": "sustain", "pre": "sustain", "chorus": "sustain8", "bridge": "sustain", "interlude": "sustain", "outro": "sustain", "full": "sustain"},
+      "variants": {
+        "sustain": {
+          "desc": "整小节长和弦（三和弦展位，不写律动）",
+          "energy": 1,
+          "melody_offset": null,
+          "events": [[1, 12, 0.55, "chord"]]
+        },
+        "sustain8": {
+          "desc": "副歌叠 +1 八度层增厚",
+          "energy": 2,
+          "melody_offset": null,
+          "events": [[1, 12, 0.60, "chord"], [1, 12, 0.45, "chord+12"]]
+        },
+        "off": {
+          "desc": "不出现",
+          "energy": 1,
+          "melody_offset": null,
+          "events": [[1, 2, 0.5, "rest"]]
+        }
+      }
+    },
+    "synth_bass": {
+      "title": "合成贝斯（Synth Bass 1）",
+      "gm_program": 38,
+      "register": ["E1", "E3"],
+      "velocity_range": [88, 118],
+      "pan": 0.0,
+      "level_hint_db": -2,
+      "default": {"intro": "long", "verse": "pedal", "pre": "pedal", "chorus": "drive", "bridge": "long", "interlude": "pedal", "outro": "long", "full": "pedal"},
+      "variants": {
+        "pedal": {
+          "desc": "脚点型（主歌）：格 1/5/7/11 起音、每音持续到下一击（与 kick 咬合）",
+          "energy": 2,
+          "melody_offset": null,
+          "events": [[1, 4, 0.92, "root"], [5, 2, 0.90, "root"], [7, 4, 0.92, "root"], [11, 2, 0.90, "root"]]
+        },
+        "drive": {
+          "desc": "驱动型（副歌）：6 个八分格全弹、重音 1/7（经过音 v1 略）",
+          "energy": 3,
+          "melody_offset": null,
+          "events": [[1, 2, 0.92, "root"], [3, 2, 0.74, "root"], [5, 2, 0.80, "root"], [7, 2, 0.92, "root"], [9, 2, 0.74, "root"], [11, 2, 0.80, "root"]]
+        },
+        "long": {
+          "desc": "长音型（bridge/过渡）：每小节两个附点四分长音",
+          "energy": 1,
+          "melody_offset": null,
+          "events": [[1, 6, 0.85, "root"], [7, 6, 0.85, "root"]]
+        },
+        "long_oct": {
+          "desc": "长音型 + 第 2 拍八度跳进",
+          "energy": 2,
+          "melody_offset": null,
+          "events": [[1, 6, 0.85, "root"], [7, 6, 0.85, "octave"]]
+        }
+      }
+    },
+    "e_drums": {
+      "title": "电子鼓组（6/8 高速鼓型）",
+      "gm_program": null,
+      "channel": 10,
+      "register": null,
+      "velocity_range": [70, 127],
+      "pan": 0.0,
+      "level_hint_db": 0,
+      "default": {"intro": "sparse", "verse": "base", "pre": "base", "chorus": "energy", "bridge": "sparse", "interlude": "base", "outro": "sparse", "full": "base"},
+      "variants": {
+        "base": {
+          "desc": "主歌 base：kick 格1/5/7/11（1/7 重击、5/11 抬尾），snare 格7 backbeat，closed hat 八分（重音 1/7），open hat 格5/11",
+          "energy": 2,
+          "melody_offset": null,
+          "events": [
+            [1, 2, 0.95, "36"], [5, 2, 0.90, "36"], [7, 2, 0.95, "36"], [11, 2, 0.90, "36"],
+            [7, 2, 0.90, "38"],
+            [1, 2, 0.70, "42"], [3, 2, 0.62, "42"], [7, 2, 0.70, "42"], [9, 2, 0.62, "42"],
+            [5, 2, 0.75, "46"], [11, 2, 0.75, "46"]
+          ]
+        },
+        "energy": {
+          "desc": "副歌 energy：kick 同 base + 格12 双踩，snare 叠 clap，hat 换 ride + bell（格7），段头 crash 由 section_crash 自动加",
+          "energy": 3,
+          "melody_offset": null,
+          "events": [
+            [1, 2, 0.98, "36"], [5, 2, 0.92, "36"], [7, 2, 0.98, "36"], [11, 2, 0.92, "36"], [12, 1, 0.85, "36"],
+            [7, 2, 0.95, "38"], [7, 2, 0.78, "39"],
+            [1, 2, 0.74, "51"], [3, 2, 0.66, "51"], [5, 2, 0.70, "51"], [7, 2, 0.74, "51"], [9, 2, 0.66, "51"], [11, 2, 0.70, "51"],
+            [7, 1, 0.80, "53"]
+          ]
+        },
+        "sparse": {
+          "desc": "稀疏底（前奏/桥段）：kick 1/7 + 八分 closed hat，无 backbeat",
+          "energy": 1,
+          "melody_offset": null,
+          "events": [
+            [1, 2, 0.85, "36"], [7, 2, 0.85, "36"],
+            [1, 2, 0.55, "42"], [3, 2, 0.50, "42"], [5, 2, 0.55, "42"], [7, 2, 0.50, "42"], [9, 2, 0.55, "42"], [11, 2, 0.50, "42"],
+            [11, 2, 0.60, "46"]
+          ]
+        }
+      }
+    },
+    "e_guitar": {
+      "title": "电吉他（Clean 切分/副歌过载）",
+      "gm_program": 27,
+      "register": ["E2", "E5"],
+      "velocity_range": [78, 112],
+      "pan": -0.35,
+      "level_hint_db": -10,
+      "default": {"intro": "off", "verse": "skank", "pre": "skank", "chorus": "strum8", "bridge": "pm16", "interlude": "skank", "outro": "off", "full": "skank"},
+      "variants": {
+        "skank": {
+          "desc": "切分上拨（主歌）：格 3/5/9/11 与 kick 互补对答",
+          "energy": 2,
+          "melody_offset": null,
+          "events": [[3, 2, 0.70, "root5"], [5, 2, 0.75, "root5"], [9, 2, 0.70, "root5"], [11, 2, 0.75, "root5"]]
+        },
+        "strum8": {
+          "desc": "副歌八分全下扫（与 kick 对齐，闷音/开放交替 v1 从简）",
+          "energy": 3,
+          "melody_offset": null,
+          "events": [[1, 2, 0.85, "root5"], [3, 2, 0.70, "root5"], [5, 2, 0.70, "root5"], [7, 2, 0.85, "root5"], [9, 2, 0.70, "root5"], [11, 2, 0.70, "root5"]]
+        },
+        "pm16": {
+          "desc": "16 分哑音 riff（bridge）：全 12 格、重音 1/4/7/10",
+          "energy": 2,
+          "melody_offset": null,
+          "events": [
+            [1, 1, 0.80, "root5"], [2, 1, 0.60, "root5"], [3, 1, 0.60, "root5"], [4, 1, 0.80, "root5"],
+            [5, 1, 0.60, "root5"], [6, 1, 0.60, "root5"], [7, 1, 0.80, "root5"], [8, 1, 0.60, "root5"],
+            [9, 1, 0.60, "root5"], [10, 1, 0.80, "root5"], [11, 1, 0.60, "root5"], [12, 1, 0.60, "root5"]
+          ]
+        },
+        "off": {
+          "desc": "不出现",
+          "energy": 1,
+          "melody_offset": null,
+          "events": [[1, 2, 0.5, "rest"]]
+        }
+      }
+    }
+  },
+  "fills": {
+    "toms_down": {
+      "desc": "句尾 6 连 16 分 toms 下行（格 7-12：50→48→47→45→43→41）接下一段",
+      "role": "e_drums",
+      "events": [
+        [0, 7, 1, 0.80, "50"], [0, 8, 1, 0.80, "48"], [0, 9, 1, 0.80, "47"],
+        [0, 10, 1, 0.80, "45"], [0, 11, 1, 0.80, "43"], [0, 12, 1, 0.80, "41"]
+      ]
+    },
+    "snare_roll": {
+      "desc": "snare 16 分滚奏渐强（格 7-12，v 0.6→1.0）接段头",
+      "role": "e_drums",
+      "events": [
+        [0, 7, 1, 0.60, "38"], [0, 8, 1, 0.68, "38"], [0, 9, 1, 0.76, "38"],
+        [0, 10, 1, 0.84, "38"], [0, 11, 1, 0.92, "38"], [0, 12, 1, 1.0, "38"]
+      ]
+    }
+  }
+}

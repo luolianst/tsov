@@ -92,6 +92,16 @@ export const store = {
     busy: null,                // 'analyze' | 'suggest' | 'apply' | 'preview'
     loaded: false,
   },
+
+  /* M-V8 E4 段3：AI 配器（风格包/强度 → 生成批次 → 试听/进工程；真值 = 后端 arrange/） */
+  arrange: {
+    packs: [],                 // /arrange/packs（有模式库的风格包）
+    pack: '',                  // 选中风格包（生成必填）
+    strength: 'standard',      // 密度档 light | standard | rich
+    batch: null,               // 展示中的批次（generate / get 回填）
+    busy: null,                // 'generate' | 'preview' | 'apply'
+    loaded: false,
+  },
 };
 
 export function setError(msg) {
@@ -233,6 +243,12 @@ export function setStagingState(partial) {
 export function setTuneState(partial) {
   Object.assign(store.tune, partial || {});
   bus.dispatch('tune');
+}
+
+/* M-V8 E4 段3：配器镜像（同上；渲染在 arrange.js/staging.js） */
+export function setArrangeState(partial) {
+  Object.assign(store.arrange, partial || {});
+  bus.dispatch('arrange');
 }
 
 /** 当前谱内书签列表（只读引用；写走命令层）。 */
@@ -523,6 +539,19 @@ export function snapshot() {
       selected: Object.keys(store.tune.selected || {}).filter((k) => store.tune.selected[k]).length,
       hasFacts: !!store.tune.facts,
       reportStatus: (store.tune.report && store.tune.report.status) || null,
+    },
+    /* M-V8 E4 段3：配器快照（CDP 断言用） */
+    arrange: {
+      loaded: !!store.arrange.loaded,
+      busy: store.arrange.busy || null,
+      pack: store.arrange.pack || '',
+      strength: store.arrange.strength || 'standard',
+      nPacks: (store.arrange.packs || []).length,
+      batchTs: (store.arrange.batch && store.arrange.batch.batch_ts) || null,
+      batchState: (store.arrange.batch && store.arrange.batch.state) || null,
+      nTracks: ((store.arrange.batch && store.arrange.batch.tracks) || []).length,
+      nNotes: ((store.arrange.batch && store.arrange.batch.stats) || {}).notes || 0,
+      source: ((store.arrange.batch && store.arrange.batch.stats) || {}).source || null,
     },
     hasDiff: !!store.diff,
     error: store.error,

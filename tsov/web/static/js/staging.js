@@ -1,16 +1,21 @@
-/* staging.js —— 「AI」页签：审查中心 + AI 调参（M-V8 E4 段1/段2 · Q10.5/Q2–Q6）
+/* staging.js —— 「AI」页签：审查中心 + AI 调参 + AI 配器（M-V8 E4 段1/段2/段3 · Q10.5/Q2–Q6/Q14）
    - 工程上下文：agents.md 双层（工程 agents.md + 全局 agents-user.md）——「刷新」= 后端确定性重生成
    - AI 调参：analyze（事实包）→ suggest（双通道建议卡：标题/理由/前后值/证据）
      → 勾选应用（命令层事务 EditBatch）+ 自动对拍「应用小结」；卡试听 = 预览渲染（工程零改动）；
      意见框 = 带意见重生成；撤销 = 整批一次；丢弃 = 仅记处置（工程零触碰）
+   - AI 配器（段3·渲染在 arrange.js）：风格包/密度 → 生成初稿（LLM 只选 ID）→ 试听候选混音
+     → 进工程（命令层，幂等）或丢弃
    - 暂存区：AI/链产物默认先进暂存，人批才落地——列表 / 试听 / 采纳 / 丢弃
-   - 状态真值在后端（tsov/staging.py + tsov/tune/store.py）；前端镜像 store.staging / store.tune
-   - REST：staging / agents + tune（analyze/suggest/apply/preview/discard/list/get/file）+ undo
-   - __tsovState().staging / .tune 暴露给 CDP 断言 */
+   - 状态真值在后端（tsov/staging.py + tsov/tune/store.py + tsov/arrange/store.py）；
+     前端镜像 store.staging / store.tune / store.arrange
+   - REST：staging / agents + tune + arrange（各自全套）+ undo
+   - __tsovState().staging / .tune / .arrange 暴露给 CDP 断言 */
 
 import { bus } from './events.js';
 import { api } from './api.js';
 import { store, setError, setStagingState, setTuneState } from './state.js';
+import { renderArrangeBlock, refreshArrange, enterArrange, initArrange,
+         doArrangeApply, doArrangeDiscard, doArrangePreview } from './arrange.js';
 
 let pane = null;
 let busy = false;
@@ -84,6 +89,7 @@ function togglePlay(itemId, file) {
     audio.addEventListener('ended', () => { stopAudio(); renderStaging(); });
     audio.play().catch(() => { /* 浏览器拒绝自动播放等：静默 */ });
     playing = { itemId, file };
+    bus.dispatch('audio_started', { owner: 'staging' });   // 音频互斥（停调参/配器试听）
   } catch (e) { /* ignore */ }
   renderStaging();
 }
@@ -119,6 +125,7 @@ function playTune(url) {
     tuneAudio.addEventListener('ended', () => { stopTuneAudio(); renderStaging(); });
     tuneAudio.play().catch(() => { /* ignore */ });
     tunePlaying = { url };
+    bus.dispatch('audio_started', { owner: 'tune' });   // 音频互斥（停暂存/配器试听）
   } catch (e) { /* ignore */ }
   renderStaging();
 }
@@ -592,6 +599,13 @@ function itemCard(it) {
     if (m.applied) bits.push(`已应用 ${m.applied}`);
     if (m.pack) bits.push('包 ' + m.pack);
     if (m.has_report) bits.push('有对拍小结');
+  } else if (it.producer === 'arrange') {
+    const m = it.meta || {};
+    bits.push(`配器批次 ${fmtTs(m.batch_ts)}`);
+    bits.push(`${m.tracks || 0} 轨 / ${m.notes || 0} 音`);
+    if (m.pack) bits.push('包 ' + m.pack);
+    if (m.source) bits.push('来源 ' + ({ default: '默认策略', mixed: 'LLM+默认', llm: 'LLM 决策' }[m.source] || m.source));
+    if (!it.ready) bits.push('空稿（该包在该谱无落点）');
   } else {
     bits.push('链运行 ' + fmtTs(it.meta && it.meta.run_ts));
     const raw = it.meta && it.meta.notes_raw, proc = it.meta && it.meta.notes_processed;
@@ -618,6 +632,25 @@ function itemCard(it) {
       const no = el('button', 'stg-btn stg-discard', '✕ 丢弃');
       no.title = '仅记处置：工程不动、产物保留';
       no.addEventListener('click', () => doTuneDiscard(m.batch_ts, no));
+      acts.appendChild(ok);
+      acts.appendChild(no);
+    }
+  } else if (it.producer === 'arrange') {
+    const m = it.meta || {};
+    const pv = el('button', 'stg-btn stg-play', '▶ 试听预览');
+    pv.dataset.role = 'stg-arrange-preview';
+    pv.title = '渲染候选混音（现有工程 + 配器轨副本；工程零改动）';
+    pv.disabled = !it.ready;
+    pv.addEventListener('click', () => doArrangePreview(m.batch_ts, pv));
+    acts.appendChild(pv);
+    if (it.state === 'pending' && it.ready) {
+      const ok = el('button', 'stg-btn stg-adopt', `⇥ 进工程（${m.tracks || 0} 轨）`);
+      ok.dataset.role = 'stg-arrange-apply';
+      ok.title = '命令层事务落轨（幂等：重跑先删同名旧产物轨）';
+      ok.addEventListener('click', () => doArrangeApply(m.batch_ts, ok));
+      const no = el('button', 'stg-btn stg-discard', '✕ 丢弃');
+      no.title = '仅记处置：工程不动、产物保留';
+      no.addEventListener('click', () => doArrangeDiscard(m.batch_ts, no));
       acts.appendChild(ok);
       acts.appendChild(no);
     }
@@ -648,11 +681,12 @@ export function renderStaging() {
   head.appendChild(el('span', 'stg-title-main', 'AI 工作台'));
   head.appendChild(el('span', 'stg-sub', 'AI/链产物默认先进暂存，人批才落地'));
   const rf = el('button', 'stg-btn stg-refresh', '↻ 刷新');
-  rf.addEventListener('click', () => { refreshStaging(); refreshAgents(); refreshTune(); });
+  rf.addEventListener('click', () => { refreshStaging(); refreshAgents(); refreshTune(); refreshArrange(); });
   head.appendChild(rf);
   wrap.appendChild(head);
   wrap.appendChild(renderAgentsBlock());
   wrap.appendChild(renderTuneBlock());
+  wrap.appendChild(renderArrangeBlock());
 
   const lh = el('div', 'stg-head');
   const c = store.staging.counts || {};
@@ -723,6 +757,7 @@ export function enterStaging() {
     refreshStaging();
     refreshAgents();
     refreshTune();
+    enterArrange();
   }
 }
 
@@ -730,6 +765,17 @@ export function initStaging(paneEl) {
   pane = paneEl;
   bus.on('staging', renderStaging);
   bus.on('tune', renderStaging);
+  bus.on('arrange', renderStaging);
+  bus.on('refresh_staging', () => {   // 配器区等模块的「暂存区刷新」请求（避免模块互相 import）
+    if (store.project) refreshStaging();
+  });
+  bus.on('audio_started', (ev) => {   // 音频互斥：别家开播 → 停本模块的两路试听
+    const o = (ev && ev.owner) || '';
+    if (o !== 'staging') stopAudio();
+    if (o !== 'tune') stopTuneAudio();
+  });
+
+  initArrange();
   bus.on('state', () => {
     if (lastProject === store.project) return;
     lastProject = store.project;   // 工程切换：清镜像（页签可见时重拉）

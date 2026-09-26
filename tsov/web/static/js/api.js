@@ -160,4 +160,22 @@ export const api = {
     req('/api/projects/' + encodeURIComponent(name) + '/tune/' + encodeURIComponent(ts)),
   tuneFileUrl: (name, ts, file) =>
     '/api/projects/' + encodeURIComponent(name) + '/tune/' + encodeURIComponent(ts) + '/file?file=' + encodeURIComponent(file),
+
+  /* M-V8 E4 段3：配器（packs / generate / list / get / preview / apply / discard / file） */
+  arrangePacks: (name) =>
+    req('/api/projects/' + encodeURIComponent(name) + '/arrange/packs'),
+  arrangeGenerate: (name, body) =>
+    post('/api/projects/' + encodeURIComponent(name) + '/arrange/generate', body || {}),
+  arrangeList: (name) =>
+    req('/api/projects/' + encodeURIComponent(name) + '/arrange/list'),
+  arrangeGet: (name, ts) =>
+    req('/api/projects/' + encodeURIComponent(name) + '/arrange/' + encodeURIComponent(ts)),
+  arrangePreview: (name, ts) =>
+    post('/api/projects/' + encodeURIComponent(name) + '/arrange/preview', { batch_ts: ts }),
+  arrangeApply: (name, body) =>
+    post('/api/projects/' + encodeURIComponent(name) + '/arrange/apply', body || {}),
+  arrangeDiscard: (name, ts) =>
+    post('/api/projects/' + encodeURIComponent(name) + '/arrange/discard', { batch_ts: ts }),
+  arrangeFileUrl: (name, ts, file) =>
+    '/api/projects/' + encodeURIComponent(name) + '/arrange/' + encodeURIComponent(ts) + '/file?file=' + encodeURIComponent(file),
 };
