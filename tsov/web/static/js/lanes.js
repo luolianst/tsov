@@ -9,7 +9,7 @@ import { store, tempo, beatsPerBar, setSelection, toggleOverlay, setView, bookma
 import { pal, trackColors } from './theme.js';
 import { seekTo } from './playback.js';
 import { api } from './api.js';
-import { peaksGet } from './peaks.js';   /* E3 段1：波形峰值公共模块（原本地实现已抽走） */
+import { clipHitBand, beginAudioDrag, updateAudioDrag, finishAudioDrag, isDragging, dragPreviewOf, selOf, clearSel, splitClipAt, drawClipBlocks } from './audio_edit.js';   /* E6 段1 补：音频 clip 手势引擎（总谱/单轨共用） */
 
 const KEYS = 56;   // 左侧标签槽（与卷帘 KEYS_W 对齐）
 const FONT_UI = '11px "Microsoft YaHei UI","PingFang SC","MiSans","HarmonyOS Sans SC",system-ui,sans-serif';
@@ -70,166 +70,13 @@ function laneAt(y) {
 }
 
 /* ---- M-V8 E2/E6：音频素材（多 clip：波形 / 移动 / 修剪 / 淡入淡出 / 伸缩 / 切分） ----
-   手势：拖块=移动 ｜ 拖左右缘=修剪 ｜ 拖顶角=淡入/淡出 ｜ Alt+拖右缘=伸缩（0.5–2.0 保音高）
-        剪刀工具单击 / Alt+单击 = 切分（网格吸附；Alt=自由）
-   全部落盘经命令层 set_audio_clips / split_audio_clip（ADR-0017 同一动作路径）。 */
+   手势引擎/几何/命中/落盘已抽至 js/audio_edit.js（E6 段1 补：与单轨 roll 共用）。 */
 
-const EDGE = 6;          // 左右缘命中带宽（px）
-const CORNER = 11;       // 顶部角句柄带高（px）
-const MIN_SPAN = 0.02;   // clip 最短时间线长（秒）
-
-let drag = null;      // {ti, mode, idx, startX, alt, base, preview, moved}
-let selClip = null;   // 最近操作 clip {ti, idx}（高亮）
-
-/* E3 段1：波形峰值 → 公共模块 js/peaks.js（与单轨波形共用；未就绪返回 null 并触发拉取，拉回后经 bus 'peaks' 重绘） */
-
-function r6(x) { return Math.round(Number(x) * 1e6) / 1e6; }
-
-function fileDur(rel) {
-  const pv = peaksGet(rel);
-  return pv && pv.seconds ? pv.seconds : null;
-}
-
-/* clip 显示几何：{x0, w, span, srcSpan, dur}（span=null → 素材时长/区间未知） */
-function clipGeom(c) {
-  const x0 = xOf(c.start);
-  const dur = fileDur(c.file);
-  let srcSpan = null;
-  if (c.src_len != null) srcSpan = dur == null ? c.src_len : Math.min(c.src_len, Math.max(0, dur - c.src_offset));
-  else if (dur != null) srcSpan = Math.max(0, dur - c.src_offset);
-  const span = srcSpan == null ? null : srcSpan * (c.stretch || 1);
-  const w = span == null ? null : Math.max(2, span * store.view.pxPerSec);
-  return { x0, w, span, srcSpan, dur };
-}
-
-function spanOf(c) { return clipGeom(c).span; }
-
-/* 网格吸附（free=true 原样返回；否则节拍网格——单轨 Grid 值设过则沿用其比例） */
-function snapTime(t, free) {
-  t = Math.max(0, Number(t) || 0);
-  if (free) return t;
-  const beat = 60 / tempo();
-  const grid = (store.snapFrac && store.snapFrac > 0) ? beat * store.snapFrac : beat;
-  return Math.max(0, Math.round(t / grid) * grid);
-}
-
-/* 命中（含 zone）：move | trim-in | trim-out | fade-in | fade-out（Alt+右缘 → 由按下处升级 stretch） */
-function clipHit(ti, offX, offY) {
-  const trk = store.score && store.score.tracks[ti];
-  if (!trk || trk.kind !== 'audio') return null;
+/* 音频轨行内「clip 带」几何（与绘制同口径：行高内缩 ±pad） */
+function audioBandOf(ti) {
   const rh = rowH();
-  const y0 = rowY(ti) - scrollY;
   const pad = Math.max(3, rh * 0.10);
-  const yTop = y0 + pad;
-  const yBot = y0 + rh - pad;
-  const list = (drag && drag.ti === ti) ? drag.preview : audioClipsOf(trk);
-  for (let idx = list.length - 1; idx >= 0; idx--) {
-    const c = list[idx];
-    const g = clipGeom(c);
-    const w = g.w == null ? 3 * store.view.pxPerSec : g.w;   // 素材未知 → 3s 占位宽
-    const x0 = g.x0, x1 = x0 + w;
-    if (offX < x0 - 2 || offX > x1 + 2) continue;
-    if (offY < yTop - 2 || offY > yBot + 2) continue;
-    let zone = 'move';
-    if (Math.abs(offX - x0) <= EDGE) zone = 'trim-in';
-    if (Math.abs(offX - x1) <= EDGE) zone = 'trim-out';
-    if (offY <= yTop + CORNER) {
-      if (Math.abs(offX - x0) <= CORNER + 3) zone = 'fade-in';
-      else if (Math.abs(offX - x1) <= CORNER + 3) zone = 'fade-out';
-    }
-    return { idx, c, zone, w };
-  }
-  return null;
-}
-
-/* 切分（剪刀工具单击 / Alt+单击）：时间先吸附（Alt=自由）；细护栏在服务端 */
-async function splitClipAt(ti, idx, t0, free) {
-  const trk = store.score && store.score.tracks[ti];
-  if (!trk || !store.project) return;
-  const c = audioClipsOf(trk)[idx];
-  if (!c) return;
-  const at = r6(snapTime(t0, free));
-  if (at <= c.start + 0.002) { setError('切点须在片段内（>= 起点）'); return; }
-  try {
-    const r = await api.postBatch(store.project, '切分音频片段',
-      [{ op: 'split_audio_clip', track: ti, value: { clip_id: c.clip_id || '', at } }],
-      '剪刀：切分音频 @ ' + at.toFixed(3) + 's');
-    if (r.applied) bus.dispatch('toast', '已切分音频片段 @ ' + at.toFixed(2) + 's');
-    else setError('被拒：' + (r.errors || []).join('；'));
-  } catch (e) { setError(e.message); }
-}
-
-function beginAudioDrag(ti, hit, e) {
-  const trk = store.score.tracks[ti];
-  const base = audioClipsOf(trk).map((c) => Object.assign({}, c));
-  const mode = (e.altKey && hit.zone === 'trim-out') ? 'stretch' : hit.zone;
-  drag = { ti, mode, idx: hit.idx, startX: e.clientX, alt: !!e.altKey,
-           base, preview: base.map((c) => Object.assign({}, c)), moved: false };
-  selClip = { ti, idx: hit.idx };
-  canvas.style.cursor = 'grabbing';
-}
-
-function updateAudioDrag(e) {
-  const d = drag;
-  const b = d.base[d.idx];
-  const k = b.stretch || 1;
-  const dt = (e.clientX - d.startX) / store.view.pxPerSec;
-  if (Math.abs(dt) > 0.002) d.moved = true;
-  const c = Object.assign({}, b);
-  if (d.mode === 'move') {
-    c.start = r6(snapTime(b.start + dt, d.alt));
-  } else if (d.mode === 'trim-in') {
-    let dsrc = dt / k;
-    dsrc = Math.max(dsrc, -b.src_offset, -b.start / k);   // 源起点 ≥ 0 ｜ 时间线 ≥ 0
-    if (b.src_len != null) dsrc = Math.min(dsrc, b.src_len - MIN_SPAN);
-    c.src_offset = r6(b.src_offset + dsrc);
-    c.start = r6(Math.max(0, b.start + dsrc * k));
-    if (b.src_len != null) c.src_len = r6(Math.max(MIN_SPAN, b.src_len - dsrc));
-  } else if (d.mode === 'trim-out') {
-    const dur = fileDur(c.file);
-    let L = b.src_len == null ? (dur == null ? null : Math.max(0, dur - b.src_offset)) : b.src_len;
-    if (L == null) return;
-    L = L + dt / k;
-    if (dur != null) L = Math.min(L, Math.max(MIN_SPAN, dur - b.src_offset));
-    L = Math.max(MIN_SPAN, L);
-    c.src_len = r6(L);
-  } else if (d.mode === 'fade-in') {
-    const span = spanOf(b);
-    c.fade_in = r6(Math.max(0, Math.min(span == null ? 1e9 : span, b.fade_in + dt)));
-  } else if (d.mode === 'fade-out') {
-    const span = spanOf(b);
-    c.fade_out = r6(Math.max(0, Math.min(span == null ? 1e9 : span, b.fade_out - dt)));
-  } else if (d.mode === 'stretch') {
-    const dur = fileDur(c.file);
-    const srcSpan = b.src_len != null ? b.src_len : (dur == null ? null : Math.max(0, dur - b.src_offset));
-    if (srcSpan == null || srcSpan <= 0) return;
-    const span = srcSpan * k + dt;
-    c.stretch = r6(Math.max(0.5, Math.min(2.0, span / srcSpan)));
-  }
-  d.preview = d.base.map((x, i) => (i === d.idx ? c : x));
-  draw();
-}
-
-async function finishAudioDrag() {
-  const d = drag;
-  drag = null;
-  canvas.style.cursor = '';
-  if (!d || !d.moved || !store.project) { draw(); return; }
-  const clips = d.preview.map((c) => ({
-    clip_id: c.clip_id || '', file: c.file, start: r6(c.start), src_offset: r6(c.src_offset),
-    src_len: c.src_len == null ? null : r6(c.src_len), stretch: r6(c.stretch || 1),
-    fade_in: r6(c.fade_in || 0), fade_out: r6(c.fade_out || 0),
-  }));
-  const LABEL = {
-    move: '移动音频片段', 'trim-in': '修剪音频片段', 'trim-out': '修剪音频片段',
-    'fade-in': '调整淡入淡出', 'fade-out': '调整淡入淡出', stretch: '伸缩音频片段',
-  };
-  try {
-    const r = await api.postBatch(store.project, LABEL[d.mode] || '编辑音频片段',
-      [{ op: 'set_audio_clips', track: d.ti, value: { clips } }], null);
-    if (!r.applied) setError('被拒：' + (r.errors || []).join('；'));
-  } catch (e) { setError(e.message); }
-  draw();
+  return { yTop: rowY(ti) - scrollY + pad, hh: Math.max(8, rh - pad * 2 - 2) };
 }
 
 /* ---- M-V8 E1：书签小旗（轨道/文件夹层）+ 可见性（隐藏/文件夹折叠） ---- */
@@ -360,68 +207,20 @@ export function draw() {
     if (y0 > H) break;
     if (!trackVisible(ti)) continue;   // M-V8 E1：隐藏/文件夹折叠 → 不画音符
     const trk = sc.tracks[ti];
-    if (trk.kind === 'audio') {   /* M-V8 E2/E6：音频轨 → 多 clip 波形块
+    if (trk.kind === 'audio') {   /* M-V8 E2/E6：音频轨 → 多 clip 波形块（与单轨共用绘制引擎）
          拖块=移动 ｜ 拖缘=修剪 ｜ 顶角句柄=淡化 ｜ Alt+右缘=伸缩 ｜ 剪刀/Alt 单击=切分 */
-      const inDrag = drag && drag.ti === ti;
-      const list = inDrag ? drag.preview : audioClipsOf(trk);
-      const col = tc[ti % tc.length];
-      const yTop = y0 + pad;
-      const hh = inner;
-      list.forEach((c, idx) => {
-        const g = clipGeom(c);
-        const w = g.w == null ? 3 * v.pxPerSec : g.w;   /* 素材时长未知：占位宽（peaks 拉回后重绘） */
-        const x0 = g.x0, x1 = x0 + w;
-        if (x1 < KEYS || x0 > W) return;
-        const isSel = selClip && selClip.ti === ti && selClip.idx === idx;
-        ctx.fillStyle = col;
-        ctx.globalAlpha = inDrag ? 0.30 : (isSel ? 0.26 : 0.16);
-        ctx.fillRect(x0, yTop, w, hh);
-        ctx.globalAlpha = 1;
-        const pv = peaksGet(c.file);
-        if (g.srcSpan != null && g.dur && pv && pv.max && pv.max.length) {
-          /* 波形：源区间 [src_offset, +srcSpan) 映射到块内像素（min/max 竖线） */
-          const mid = yTop + hh / 2;
-          const amp = hh / 2 - 1.5;
-          const nB = pv.max.length;
-          const s0 = c.src_offset, s1 = c.src_offset + g.srcSpan;
-          const px = Math.max(1, Math.floor(w));
-          ctx.strokeStyle = col;
-          ctx.beginPath();
-          for (let i = 0; i < px; i++) {
-            const st = s0 + (i + 0.5) / px * (s1 - s0);
-            const b = Math.max(0, Math.min(nB - 1, Math.floor((st / g.dur) * nB)));
-            const xa = Math.round(x0 + i) + 0.5;
-            ctx.moveTo(xa, mid - pv.max[b] * amp);
-            ctx.lineTo(xa, mid - pv.min[b] * amp);
-          }
-          ctx.stroke();
-        } else {
-          ctx.strokeStyle = p.laneLabel;   /* 波形未就绪：虚线占位 */
-          ctx.setLineDash([3, 3]);
-          ctx.strokeRect(x0 + 0.5, yTop + 0.5, Math.max(2, w) - 1, hh - 1);
-          ctx.setLineDash([]);
-        }
-        /* 淡入/淡出斜线 + 顶部角句柄（拖拽入口） */
-        const fiPx = Math.min(w, (c.fade_in || 0) * v.pxPerSec);
-        const foPx = Math.min(w, (c.fade_out || 0) * v.pxPerSec);
-        ctx.strokeStyle = p.laneLabel;
-        if (fiPx > 0.5) {
-          ctx.beginPath(); ctx.moveTo(x0 + 0.5, yTop + hh - 0.5); ctx.lineTo(x0 + fiPx, yTop + 0.5); ctx.stroke();
-        }
-        if (foPx > 0.5) {
-          ctx.beginPath(); ctx.moveTo(x1 - foPx, yTop + 0.5); ctx.lineTo(x1 - 0.5, yTop + hh - 0.5); ctx.stroke();
-        }
-        ctx.fillStyle = p.keySep;
-        ctx.fillRect(x0, yTop, 5, 5);
-        ctx.fillRect(Math.max(x0 + 5, x1 - 5), yTop, 5, 5);
-        ctx.strokeStyle = p.keySep;
-        ctx.strokeRect(x0 + 0.5, yTop + 0.5, Math.max(2, w) - 1, hh - 1);
-        if (w > 64) {
-          const st = (c.stretch && Math.abs(c.stretch - 1) > 1e-6) ? (' ×' + Number(c.stretch).toFixed(2)) : '';
-          ctx.fillStyle = p.laneLabel;
-          ctx.font = FONT_UI;
-          ctx.fillText('🎵 ' + (trk.name || '素材') + st, x0 + 5, yTop + 12);
-        }
+      const prev = dragPreviewOf(ti);
+      const sel = selOf();
+      drawClipBlocks(ctx, {
+        list: prev || audioClipsOf(trk),
+        col: tc[ti % tc.length],
+        yTop: y0 + pad,
+        hh: inner,
+        selIdx: (sel && sel.ti === ti) ? sel.idx : null,
+        inDrag: !!prev,
+        label: (trk.name || '素材'),
+        p, v,
+        xLo: KEYS, xHi: W,
       });
       continue;
     }
@@ -521,7 +320,7 @@ export function init(el, opts) {
 
   canvas.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
-    if (drag) return;   // 拖动中不重入
+    if (isDragging()) return;   // 拖动中不重入
     const fl = flagAt(e.offsetX, e.offsetY);   // M-V8 E1：小旗 → 选中 + 跳转
     if (fl) { setSelBookmark(fl.i); seekTo(fl.b.start); return; }
     const ti = laneAt(e.offsetY);
@@ -530,7 +329,8 @@ export function init(el, opts) {
     if (e.ctrlKey || e.shiftKey || e.metaKey) { toggleOverlay(ti); return; }
     const trk = store.score && store.score.tracks[ti];
     if (trk && trk.kind === 'audio') {   /* M-V8 E2/E6：音频轨手势（移动/修剪/淡化/伸缩/切分） */
-      const hit = clipHit(ti, e.offsetX, e.offsetY);
+      const bd = audioBandOf(ti);
+      const hit = clipHitBand(ti, e.offsetX, e.offsetY, bd.yTop, bd.hh);
       if (hit) {
         const stretchHold = e.altKey && hit.zone === 'trim-out';
         if ((store.tool === 'scissors' || e.altKey) && !stretchHold) {
@@ -538,10 +338,11 @@ export function init(el, opts) {
           splitClipAt(ti, hit.idx, tOf(e.offsetX), e.altKey);
           return;
         }
-        beginAudioDrag(ti, hit, e);
+        beginAudioDrag(ti, hit, e, draw);
+        canvas.style.cursor = 'grabbing';
         return;
       }
-      selClip = null;
+      clearSel();
       setSelection(ti, []);
       return;
     }
@@ -550,7 +351,7 @@ export function init(el, opts) {
 
   /* M-V8 E1：小旗悬停提示 ｜ E6：音频块手势与光标反馈 */
   canvas.addEventListener('mousemove', (e) => {
-    if (drag) {   /* M-V8 E6：音频手势（预览跟手，松手提交） */
+    if (isDragging()) {   /* M-V8 E6：音频手势（预览跟手，松手提交） */
       updateAudioDrag(e);
       return;
     }
@@ -571,7 +372,8 @@ export function init(el, opts) {
     const trk = ti >= 0 && store.score ? store.score.tracks[ti] : null;
     let cur = '';
     if (trk && trk.kind === 'audio') {
-      const hit = clipHit(ti, e.offsetX, e.offsetY);
+      const bd = audioBandOf(ti);
+      const hit = clipHitBand(ti, e.offsetX, e.offsetY, bd.yTop, bd.hh);
       if (hit) {
         if (e.altKey && hit.zone === 'trim-out') cur = 'col-resize';
         else if (hit.zone === 'move') cur = (store.tool === 'scissors' || e.altKey) ? 'cell' : 'grab';
@@ -590,7 +392,7 @@ export function init(el, opts) {
   });
 
   /* M-V8 E2/E6：音频手势（松手提交） + 文件拖入导入 */
-  window.addEventListener('mouseup', () => { if (drag) finishAudioDrag(); });
+  window.addEventListener('mouseup', () => { if (isDragging()) finishAudioDrag(); });
   canvas.addEventListener('dragover', (e) => { e.preventDefault(); });
   canvas.addEventListener('drop', (e) => {
     e.preventDefault();

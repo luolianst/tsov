@@ -2,7 +2,7 @@
 
 import { api } from './api.js';
 import { bus, connectEvents } from './events.js';
-import { store, setState, setError, toast, fitView, setView, clearDiff, setAnnotations, clearAnnotations, setSnap, setViewMode, setSingleTrack, fitViewTrack, refTag, favSource, bookmarks, setSelBookmark, setLoopOn, splitPartner } from './state.js';
+import { store, setState, setError, toast, fitView, setView, clearDiff, setAnnotations, clearAnnotations, setSnap, setViewMode, setSingleTrack, fitViewTrack, refTag, favSource, bookmarks, setSelBookmark, setLoopOn, splitPartner, audioClipsOf } from './state.js';
 import * as roll from './roll.js';
 import * as timeline from './timeline.js';
 import * as dock from './dock.js';
@@ -387,9 +387,13 @@ function boot() {
     const inst = (tr && tr.instrument) || {};
     let info = '';
     if (tr) {
-      info = (tr.kind === 'audio')
-        ? ('音频轨 · ' + ((tr.audio && tr.audio.file) ? tr.audio.file.split('/').pop() : ''))
-        : (tr.notes.length + ' 音 · ' + (inst.program || 'default'));
+      if (tr.kind === 'audio') {
+        const cls = audioClipsOf(tr);
+        const fn = cls.length ? String(cls[0].file).split('/').pop() : '';
+        info = '音频轨 · ' + fn + (cls.length > 1 ? ' ×' + cls.length : '');
+      } else {
+        info = tr.notes.length + ' 音 · ' + (inst.program || 'default');
+      }
     }
     /* E3 段1：分屏对象提示（叠加：轨名） */
     const sp = splitPartner();
