@@ -11,7 +11,7 @@
 import { bus } from './events.js';
 import { api } from './api.js';
 import { store, setError } from './state.js';
-import { itemCard } from './staging.js';   // D 件：配器/链/已处置 → 复用完整操作区
+import { itemCard, refreshStaging } from './staging.js';   // D 件：配器/链/已处置 → 复用完整操作区；E 件：数据订阅保活
 
 const VIEW_KEY = 'tsov-rail-view';            // 切换态记忆（C 件 §5）
 const STATE_TEXT = { pending: '待处置', adopted: '已采纳', discarded: '已丢弃' };
@@ -69,7 +69,7 @@ function itemTs(it) {
 /* --------------------------------- 渲染 --------------------------------- */
 
 function renderRoundCard(rd, entries) {
-  const root = el('div', 'ac-group step-round' + (rd.any_stale ? ' stale' : ''));
+  const root = el('div', 'ac-group step-round' + ((rd.n_stale || 0) > 0 ? ' stale' : ''));   // E 件：后端字段=n_stale
   root.dataset.round = String(rd.round || '');
 
   const seqs = (rd.seqs || []).filter((s) => s != null && s > 0);
@@ -92,13 +92,13 @@ function renderRoundCard(rd, entries) {
   const stats = el('div', 'ac-stats');
   for (const [k, v] of Object.entries(rd.stats || {})) if (v) stats.appendChild(el('span', 'ac-stat', statText(k, v)));
 
-  if (rd.any_stale) root.appendChild(el('div', 'step-stale-flag', '（本轮已失效/撤销）'));
+  if ((rd.n_stale || 0) > 0) root.appendChild(el('div', 'step-stale-flag', '（本轮已失效/撤销）'));
 
   // 底部动作：撤销本轮（后端 action_undone 事件全链置灰后本视图刷新）
   const acts = el('div', 'ac-round-actions');
   const undo = el('button', 'ac-btn ac-undo', '撤销本轮');
   undo.title = '撤销本轮全部动作（其后动作将失效）';
-  if (!seqs.length || rd.any_stale) undo.disabled = true;
+  if (!seqs.length || (rd.n_stale || 0) > 0) undo.disabled = true;
   undo.addEventListener('click', async () => {
     if (!store.project || !seqs.length) return;
     undo.disabled = true;
@@ -182,6 +182,7 @@ async function buildItemBody(it) {
 
 let chipAudio = null;
 function playUrl(url) {
+  bus.dispatch('audio_started', { owner: 'steps' });
   if (chipAudio) { chipAudio.pause(); chipAudio = null; }
   chipAudio = new Audio(url);
   chipAudio.play().catch(() => {});
@@ -416,8 +417,17 @@ export function initStepsPanel() {
   });
   bus.on('agent_tool', scheduleRefresh);
   bus.on('agent_answer', scheduleRefresh);
+  bus.on('action_undone', scheduleRefresh);   // E 件：撤销本轮 → 全链置灰刷新
   bus.on('staging', scheduleRefresh);
   bus.on('state', scheduleRefresh);
+  /* E 件：接管原「AI」页签的数据订阅（initStaging 裁撤后的语义迁移） */
+  bus.on('chain', () => { if (store.project) { scheduleRefresh(); refreshStaging(); } });        // 链跑完 → 新产物
+  bus.on('tune_updated', () => { if (store.project) { scheduleRefresh(); refreshStaging(); } });  // 他通道（agent/REST）调参
+  bus.on('refresh_staging', () => { if (store.project) refreshStaging(); });                      // 配器区等刷新请求
+  bus.on('state', () => { if (store.project) refreshStaging(); });                                // store.staging 快照保活
+  bus.on('audio_started', (ev) => {   // 试听互斥（原 initStaging 语义）
+    if (((ev && ev.owner) || '') !== 'steps' && chipAudio) { try { chipAudio.pause(); } catch (e) { /* */ } chipAudio = null; }
+  });
   let saved = 'chat';
   try { saved = localStorage.getItem(VIEW_KEY) === 'steps' ? 'steps' : 'chat'; } catch (e) { /* */ }
   switchView(saved);
