@@ -235,6 +235,81 @@ def impact_of(pre: Any, post: Any, top: int = 5) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# 动作统计（对话产物流 A 件：一轮聚合卡的「修改音符 ×16」素材）
+# ---------------------------------------------------------------------------
+
+# 计数口径 = 受影响对象数（改 16 个音 = notes:16；批量 op 按对象数合计）。
+# 键：notes / track_add / track_del / track_edit / fx / param / other。
+_TRACK_TOOLS = ("create_track", "remove_track", "rename_track")
+
+
+def _notes_from_impact(impact: Any) -> int:
+    """impact.tracks 的 added+removed+changed 合计 = 受影响音符数。"""
+    if not isinstance(impact, dict):
+        return 0
+    total = 0
+    for t in impact.get("tracks") or []:
+        if isinstance(t, dict):
+            total += int(t.get("added") or 0) + int(t.get("removed") or 0) + int(t.get("changed") or 0)
+    return total
+
+
+def tool_stats(tool: str, args: dict | None, impact: dict | None = None) -> dict:
+    """一次写动作 → 结构化计数（供轮聚合与步骤流展示）。
+
+    归类以工具语义为主、impact 差算为辅；无法分类 → {"other": 1}。
+    永不抛出（脏参数/脏 impact 一律安全降级）。
+    """
+    a = args if isinstance(args, dict) else {}
+    st: dict[str, int] = {}
+
+    def bump(k: str, n: int = 1) -> None:
+        if n:
+            st[k] = st.get(k, 0) + int(n)
+
+    try:
+        if tool == "set_tempo":
+            if a.get("tempo") is not None:
+                bump("param")
+            if a.get("time_signature"):
+                bump("param")
+        elif tool == "set_track_mix":
+            if a.get("volume") is not None:
+                bump("param")
+            if a.get("pan") is not None:
+                bump("param")
+        elif tool == "apply_effect":
+            bump("fx")
+        elif tool == "create_track":
+            bump("track_add")
+        elif tool == "remove_track":
+            bump("track_del")
+        elif tool == "rename_track":
+            bump("track_edit")
+        elif tool == "write_notes":
+            notes = a.get("notes")
+            n = len(notes) if isinstance(notes, list) else _notes_from_impact(impact)
+            bump("notes", n)
+        elif tool in ("edit_score", "duplicate_bars", "apply_pattern", "voice_to_score"):
+            bump("notes", _notes_from_impact(impact))
+        else:
+            bump("other")
+        # 轨增删兜底（间接加/删轨——如 edit_score 里加一轨）；专用轨工具不重复计
+        if tool not in _TRACK_TOOLS and isinstance(impact, dict):
+            for t in impact.get("tracks") or []:
+                if not isinstance(t, dict):
+                    continue
+                ins = str(t.get("instrument") or "")
+                if ins == "轨新增":
+                    bump("track_add")
+                elif ins == "轨移除":
+                    bump("track_del")
+    except Exception:  # noqa: BLE001 统计永不炸掉动作日志
+        return st or {"other": 1}
+    return st or {"other": 1}
+
+
+# ---------------------------------------------------------------------------
 # 动作快照日志（批B B1-2 · 动作级撤销；Q44 弱留存窗口的原型）
 # ---------------------------------------------------------------------------
 

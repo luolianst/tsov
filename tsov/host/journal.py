@@ -47,6 +47,7 @@ class ActionJournal:
             e.setdefault("round", str(e.get("session_id") or "-"))
             e.setdefault("stale", False)
             e.setdefault("undone", False)
+            e.setdefault("stats", {})
         self.cursor = max(0, min(self.cursor, len(self.entries)))
         self._seq = max([int(e.get("seq", 0)) for e in self.entries], default=0)
 
@@ -75,7 +76,7 @@ class ActionJournal:
                post: str | None = None, tool: str | None = None, args: str | None = None,
                impact: dict | None = None, session_id: str | None = None,
                turn: int | None = None, round: str | None = None,
-               summary: str | None = None) -> dict:
+               summary: str | None = None, stats: dict | None = None) -> dict:
         """追加条目；游标之后若有条目 → 先标 stale（分歧分支）。"""
         for e in self.entries[self.cursor:]:
             e["stale"] = True
@@ -86,6 +87,7 @@ class ActionJournal:
             "impact": impact or ({"text": summary} if summary else {"text": ""}),
             "session_id": session_id, "turn": turn,
             "round": round or (str(session_id) if session_id else None),
+            "stats": stats or {},
             "ts": time.time(), "stale": False, "undone": False,
         }
         self.entries.append(entry)

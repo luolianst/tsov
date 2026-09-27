@@ -11,6 +11,39 @@ from ..models import SettingsIn, WindowJumpIn
 from ..state import WebState
 
 
+def _rounds(entries: list[dict]) -> list[dict]:
+    """按对话轮（round）聚合 agent 写动作（对话产物流 A 件）。
+
+    条目顺序即轮内发生顺序；stats 为轮内计数合计；label_counts 便于卡面归纳。
+    """
+    out: list[dict] = []
+    idx: dict[str, int] = {}
+    for e in entries:
+        if e.get("source") != "agent":
+            continue
+        rk = str(e.get("round") or e.get("session_id") or "-")
+        if rk not in idx:
+            idx[rk] = len(out)
+            out.append({"round": rk, "seqs": [], "label_counts": {}, "stats": {},
+                        "ts_first": e.get("ts"), "ts_last": e.get("ts"),
+                        "n": 0, "n_stale": 0})
+        agg = out[idx[rk]]
+        agg["seqs"].append(int(e.get("seq") or 0))
+        lbl = str(e.get("label") or e.get("tool") or "")
+        if lbl:
+            agg["label_counts"][lbl] = agg["label_counts"].get(lbl, 0) + 1
+        for k, v in (e.get("stats") or {}).items():
+            try:
+                agg["stats"][k] = agg["stats"].get(k, 0) + int(v)
+            except (TypeError, ValueError):
+                continue
+        agg["n"] += 1
+        if e.get("stale"):
+            agg["n_stale"] += 1
+        agg["ts_last"] = e.get("ts")
+    return out
+
+
 def register(app: FastAPI) -> None:
     def st() -> WebState:
         return app.state.tsov
@@ -43,10 +76,14 @@ def register(app: FastAPI) -> None:
 
     @app.get("/api/projects/{name}/agent-actions")
     def agent_actions(name: str, limit: int = 60) -> dict:
-        """动作快照日志（窗口内最近 limit 条；供前端回放与失效置灰）。"""
+        """动作快照日志（窗口内最近 limit 条；供前端回放与失效置灰）。
+
+        对话产物流（A 件）：附 rounds —— 按对话轮聚合的统计块（向后兼容）。
+        """
         proj = st().get_project(name)
         j = proj.journal
-        return {"entries": j.entries[-max(1, int(limit)):]}
+        entries = j.entries[-max(1, int(limit)):]
+        return {"entries": entries, "rounds": _rounds(entries)}
 
     # ---------------- 快照窗口 / 留存设置（M-V7 D2，ADR-0019） ----------------
 

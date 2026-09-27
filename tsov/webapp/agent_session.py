@@ -17,7 +17,7 @@ from pathlib import Path
 from ..core.score import Score
 from ..host.state import ProjectState
 from ..web_actions import (READ_TOOLS, SCORE_WRITING_TOOLS, ActionJournal,
-                           impact_of, summarize_args, tool_label)
+                           impact_of, summarize_args, tool_label, tool_stats)
 from . import config
 from .helpers import project_state
 from .state import WebState
@@ -346,7 +346,8 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
                     entry = journal.append(source="agent", label=tool_label(tool_name),
                                            session_id=session_id, turn=turn, round=round_key,
                                            tool=tool_name, args=summarize_args(tool_name, targs),
-                                           pre=pre_hash, post=post_hash, impact=impact)
+                                           pre=pre_hash, post=post_hash, impact=impact,
+                                           stats=tool_stats(tool_name, targs, impact))
                 bus.publish(
                     project_name,
                     "agent_tool",
