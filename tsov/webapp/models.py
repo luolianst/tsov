@@ -51,12 +51,17 @@ class PlayIn(BaseModel):
 
 
 class ExportIn(BaseModel):
-    """导出矩阵选项（修正轮2：UI 导出弹窗 → host export_matrix）。"""
+    """导出矩阵选项（修正轮2：UI 导出弹窗 → host export_matrix）。
+
+    E6 段2：bit_depth 16/24/32f（默认 16）；range=[起, 止] 秒 → 音频产物选段导出（MIDI 维持全曲）。
+    """
     mix: bool = True
     stems: bool = True
     buses: bool = False
     midi: bool = True
     midi_stems: bool = False
+    bit_depth: int | str = 16
+    range: list[float] | None = None
 
 
 class ChatIn(BaseModel):

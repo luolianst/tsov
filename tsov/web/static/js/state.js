@@ -11,6 +11,7 @@ export const store = {
   score: null,                 // Score JSON（ADR-0005 schema）
   summary: '',
   duration: 0,                 // M-V8 E6：总时长（含音频 clip 尾 +1s 释放；服务端 score_duration 口径）
+  savedAt: null,               // M-V8 E6 段2：score.json 落盘时间（epoch 秒；顶栏保存徽章）
   gitLog: [],
   history: { can_undo: false, can_redo: false },
 
@@ -139,6 +140,7 @@ export function setState(s, opts) {
   store.score = s.score;
   store.summary = s.summary || '';
   store.duration = Number(s.duration) || 0;   /* M-V8 E6：含音频 clip 尾（fit/时长用） */
+  store.savedAt = Number(s.saved_at) || null; /* M-V8 E6 段2：保存徽章（服务端 score.json mtime） */
   store.gitLog = s.git_log || [];
   store.history = s.history || { can_undo: false, can_redo: false };
   if (keep && store.score && store.score.tracks[keep.track]) {
@@ -502,6 +504,7 @@ export function snapshot() {
     score: store.score,               // ADR-0005 schema（大对象，按需取字段）
     summary: store.summary,
     duration: store.duration || 0,    /* M-V8 E6：总时长（含音频尾，服务端口径） */
+    savedAt: store.savedAt || null,   /* M-V8 E6 段2：落盘时间（CDP 断言保存徽章用） */
     gitLog: store.gitLog,
     history: store.history,
     selection: { track: store.selection.track, indices: store.selection.indices.slice() },

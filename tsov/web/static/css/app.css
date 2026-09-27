@@ -141,6 +141,12 @@ select:hover, input:hover { border-color: var(--border-strong); }
 /* 修正轮2.2：◐/⚙ 必须并排（原本是块级堆叠 → 各占一行）；并钉在顶栏右端 */
 .tb-right { display: flex; align-items: center; gap: 5px; flex: none; margin-left: auto; }
 .tb-right button { flex: none; }
+/* M-V8 E6 段2：保存状态徽章 */
+.save-state { font-size: 11px; color: var(--muted); white-space: nowrap; margin-right: 2px; }
+.save-state.saving { color: var(--accent); }
+/* M-V8 E6 段2：导出弹窗位深行 */
+.dlg-row { display: flex; align-items: center; gap: 8px; }
+.dlg-row label { color: var(--muted); font-size: var(--fs-sm); }
 #topbar button { white-space: nowrap; }
 #project-select { max-width: 300px; }
 #cmp-base { max-width: 240px; }

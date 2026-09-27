@@ -78,6 +78,7 @@
   </div>
 
   <div class="tb-right">
+    <span id="save-state" class="save-state" title="工程保存状态">—</span>
     <button id="btn-theme" title="切换深/浅（母版双态）">◐</button>
     <div class="menu-wrap">
       <button id="btn-menu-set" class="menu-btn" title="设置（输出 / 主题 / 版本留存）">⚙</button>
@@ -260,6 +261,14 @@
       <label class="ck"><input type="checkbox" id="ex-buses"> 总线 stems（buses/，工程有总线时）</label>
       <label class="ck"><input type="checkbox" id="ex-midi" checked> MIDI Type1（多轨 .mid）</label>
       <label class="ck"><input type="checkbox" id="ex-midi-stems"> 每轨 MIDI（midi-stems/）</label>
+      <div class="dlg-row"><label for="ex-depth">位深</label>
+        <select id="ex-depth">
+          <option value="16">16-bit（默认 · PCM_16）</option>
+          <option value="24">24-bit（PCM_24）</option>
+          <option value="32f">32-bit float（FLOAT）</option>
+        </select>
+      </div>
+      <label class="ck"><input type="checkbox" id="ex-range" disabled> 仅导出选段（循环区间）<span id="ex-range-hint" class="muted small"></span></label>
       <div class="dlg-hint">产物目录：<code>output/&lt;工程&gt;/exports/&lt;时间戳&gt;/</code>（wav/mid 不入库）</div>
       <div id="ex-result" class="dlg-result" hidden></div>
     </div>

@@ -123,7 +123,10 @@ def register(app: FastAPI) -> None:
             report = engine.export(session, out_dir,
                                    mix=body.mix, buses=body.buses, stems=body.stems,
                                    midi=body.midi, midi_stems=body.midi_stems,
+                                   bit_depth=body.bit_depth, range=body.range,
                                    cache=StemStore(proj.root))
+        except ValueError as e:   # E6 段2：位深/选段参数非法 → 400（契约 §五 {"error": ...}）
+            raise HTTPException(400, str(e))
         finally:
             session.close()
         return report

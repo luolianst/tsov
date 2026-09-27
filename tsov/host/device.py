@@ -28,13 +28,13 @@ def mix_graph(session: HostSession, samplerate: int | None = None) -> np.ndarray
     return render_buses(session, samplerate=samplerate, stereo=False)
 
 
-def write_wav(audio: np.ndarray, path, samplerate: int = 44100) -> str:
-    """音频 → WAV（PCM_16）。"""
+def write_wav(audio: np.ndarray, path, samplerate: int = 44100, subtype: str = "PCM_16") -> str:
+    """音频 → WAV（默认 PCM_16；E6 段2：subtype 可 PCM_24 / FLOAT〔32f〕）。"""
     import soundfile as sf
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    sf.write(str(path), audio, samplerate, subtype="PCM_16")
+    sf.write(str(path), audio, samplerate, subtype=subtype)
     return str(path)
 
 

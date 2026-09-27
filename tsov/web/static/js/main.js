@@ -492,10 +492,40 @@ function boot() {
     }
   });
 
+  /* ---- M-V8 E6 段2：保存状态徽章（每次编辑即写盘；异常中断可经「回滚」恢复） ---- */
+  const saveEl = $('save-state');
+  let saveDirty = 0;
+  function renderSaved() {
+    if (saveDirty > 0) { saveEl.textContent = '保存中…'; saveEl.classList.add('saving'); return; }
+    saveEl.classList.remove('saving');
+    const at = store.savedAt;
+    if (!at) { saveEl.textContent = '—'; return; }
+    const d = new Date(at * 1000);
+    const z = (n) => String(n).padStart(2, '0');
+    saveEl.textContent = '已保存 ' + z(d.getHours()) + ':' + z(d.getMinutes()) + ':' + z(d.getSeconds());
+    saveEl.title = '每次编辑即写盘（score.json）· 异常中断可用「版本/回滚」恢复';
+  }
+  bus.on('state', renderSaved);
+  bus.on('save_begin', () => { saveDirty += 1; renderSaved(); });
+  bus.on('save_done', (d) => {
+    saveDirty = Math.max(0, saveDirty - 1);
+    if (d && d.ok && d.saved_at) store.savedAt = Number(d.saved_at) || store.savedAt;
+    renderSaved();
+  });
+  renderSaved();
+
   /* ---- 导出弹窗（三级；接 host export_matrix） ---- */
   const dlgExport = $('dlg-export');
   function openExport() {
     if (!store.project) { setError('先打开一个工程'); return; }
+    /* E6 段2：选段 = 循环区间（无循环则禁用；先用标尺右键拖出区间） */
+    const hasLoop = !!(store.loop && store.loop.end - store.loop.start > 1e-3);
+    const rangeEl = $('ex-range');
+    rangeEl.disabled = !hasLoop;
+    if (!hasLoop) rangeEl.checked = false;
+    $('ex-range-hint').textContent = hasLoop
+      ? '（' + store.loop.start.toFixed(2) + ' – ' + store.loop.end.toFixed(2) + ' s）'
+      : '（先右键在标尺拖出循环区间）';
     $('ex-result').hidden = true;
     $('ex-result').textContent = '';
     dlgExport.hidden = false;
@@ -509,10 +539,14 @@ function boot() {
       const r = await api.exportProject(store.project, {
         mix: $('ex-mix').checked, stems: $('ex-stems').checked, buses: $('ex-buses').checked,
         midi: $('ex-midi').checked, midi_stems: $('ex-midi-stems').checked,
+        bit_depth: $('ex-depth').value,
+        range: ($('ex-range').checked && store.loop) ? [store.loop.start, store.loop.end] : null,
       });
       const files = r.files || [];
       $('ex-result').hidden = false;
-      $('ex-result').textContent = '✓ 已导出 ' + files.length + ' 个文件 → ' + r.out_dir + '\n' +
+      $('ex-result').textContent = '✓ 已导出 ' + files.length + ' 个文件 → ' + r.out_dir +
+        (r.range ? '\n· 选段 ' + r.range[0] + ' – ' + r.range[1] + ' s（音频产物）' : '') +
+        '\n· 位深 ' + (r.bit_depth || 'PCM_16') + '\n' +
         files.map((f) => '· ' + f).join('\n');
       toast('导出完成：' + files.length + ' 个文件');
     } catch (e) {

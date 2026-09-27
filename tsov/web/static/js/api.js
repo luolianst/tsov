@@ -34,6 +34,7 @@ export const api = {
   getState: (name) => req('/api/projects/' + encodeURIComponent(name) + '/state'),
   postBatch: (name, label, commands, commitMessage) => {
     const desc = label || ('命令层：' + (commands || []).map((c) => c.op).join(' + '));
+    bus.dispatch('save_begin', { name });   /* M-V8 E6 段2：保存徽章「保存中…」 */
     return post('/api/projects/' + encodeURIComponent(name) + '/batch',
       { label: label || '', commands, commit_message: commitMessage || null }).then((r) => {
         /* 批B B1-4：成功落盘的用户手动操作 → 缓冲（下条消息回流给 agent） */
@@ -42,7 +43,11 @@ export const api = {
           /* M-V7 D1：手势落盘成功 → 通知播放层「松手即听」（缓存重拼） */
           bus.dispatch('batch_applied', { name });
         }
+        bus.dispatch('save_done', { name, ok: true, saved_at: (r && r.saved_at) || null });
         return r;
+      }, (e) => {
+        bus.dispatch('save_done', { name, ok: false });
+        throw e;
       });
   },
   undo: (name) => post('/api/projects/' + encodeURIComponent(name) + '/undo'),

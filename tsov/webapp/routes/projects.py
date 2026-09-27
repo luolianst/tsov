@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException, Request
 from ...core.score import Instrument, Score, Track
 from ...host import EditBatch, Project
 from ..agent_session import _retention_tick
-from ..helpers import _score_from_dict, project_state
+from ..helpers import _score_from_dict, project_state, saved_at_of
 from ..models import BatchIn, ImportIn, ProjectCreate, RollbackIn, TitleIn
 from ..state import WebState, _default_project_name, _resolve_import_source, _validate_project_name
 
@@ -137,6 +137,7 @@ def register(app: FastAPI) -> None:
             _retention_tick(st(), name)   # M-V7 D2：写操作触发留存检查（定时档惰性）
         except Exception:  # noqa: BLE001 留存钩子失败不影响主流程
             pass
+        result["saved_at"] = saved_at_of(proj)   # M-V8 E6 段2：保存徽章直读（不等 SSE）
         return result
 
     @app.post("/api/projects/{name}/undo")

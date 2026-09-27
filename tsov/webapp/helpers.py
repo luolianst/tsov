@@ -20,7 +20,18 @@ def project_state(proj: Project) -> dict:
         "summary": proj.summary(),
         # M-V8 E6：总时长（含音频 clip 尾 +1s 释放；前端 fit/时长显示用——音频轨一等公民）
         "duration": score_duration(proj.score, proj.root),
+        # M-V8 E6 段2：保存状态可见性——score.json 落盘时间（epoch 秒；顶栏「已保存 hh:mm:ss」）
+        "saved_at": saved_at_of(proj),
     }
+
+
+def saved_at_of(proj: Project) -> float | None:
+    """工程落盘时间（score.json mtime → epoch 秒）；未落盘返 None。"""
+    try:
+        p = Path(proj.root) / "score.json"
+        return p.stat().st_mtime if p.exists() else None
+    except OSError:
+        return None
 
 
 def score_duration(score: Score, root=None) -> float:

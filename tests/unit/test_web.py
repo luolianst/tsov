@@ -104,7 +104,7 @@ def test_project_create_list_state(env):
     r = env["client"].get("/api/projects/p1/state")
     assert r.status_code == 200
     s = r.json()
-    assert set(s) == {"project", "score", "selection", "history", "git_log", "summary", "duration"}
+    assert set(s) == {"project", "score", "selection", "history", "git_log", "summary", "duration", "saved_at"}
     assert len(s["score"]["tracks"][0]["notes"]) == 3
     assert s["history"] == {"can_undo": False, "can_redo": False}
     assert any("init" in ln for ln in s["git_log"])
@@ -865,6 +865,35 @@ def test_export_matrix_endpoint(env):
     assert any(f.endswith(".mid") for f in files)
     out = Path(body["out_dir"])
     assert out.is_dir() and all(Path(f).is_file() for f in files)
+
+
+@pytest.mark.skipif(not _HAS_SF, reason="缺 vendor/soundfonts/FluidR3_GM.sf2")
+def test_export_bit_depth_and_range_endpoint(env):
+    """E6 段2：导出位深（24-bit 实测文件头）+ 选段（循环区间 [起, 止]）；非法参数 400。"""
+    import soundfile as sf
+
+    from tsov.core.score import Instrument, Note, Score, Track
+
+    c = env["client"]
+    score = Score(
+        title="exp2", tempo=120.0, key_candidates=[],
+        tracks=[Track(name="melody", instrument=Instrument(program="piano"),
+                      notes=[Note(start=0.0, end=2.0, pitch_midi=60, pitch_hz=261.6, velocity=0.8)])],
+    ).to_dict()
+    c.post("/api/projects", json={"name": "expproj2", "score": score})
+    r = c.post("/api/projects/expproj2/export",
+               json={"mix": True, "stems": False, "buses": False, "midi": False, "midi_stems": False,
+                     "bit_depth": "24", "range": [0.2, 1.2]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["bit_depth"] == "PCM_24" and body["range"] == [0.2, 1.2]
+    info = sf.info(body["mix"])
+    assert info.subtype == "PCM_24" and abs(info.duration - 1.0) < 0.01
+    # 非法：位深 / 选段 → 400 {"error": ...}
+    r = c.post("/api/projects/expproj2/export", json={"bit_depth": "12"})
+    assert r.status_code == 400 and "error" in r.json()
+    r = c.post("/api/projects/expproj2/export", json={"range": [1.5, 1.0]})
+    assert r.status_code == 400 and "error" in r.json()
 
 
 def test_agent_actions_list_and_undo(env):
