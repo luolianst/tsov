@@ -481,6 +481,50 @@ body.chat-folded #rail-chat { display: flex; }
 .actcard.undone { opacity: .55; border-left-color: var(--faint); }
 .actcard.stale { opacity: .45; }
 .actcard.stale .ac-impact, .actcard.stale .ac-receipt { text-decoration: line-through; }
+
+/* ---- 对话产物流 C 件：右栏双 tab + 步骤视图（合流 feed） ---- */
+#sp-tabs { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; }
+.sp-tab {
+  cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
+  font-size: var(--fs-sm); color: var(--muted); background: transparent;
+  border: 1px solid transparent; border-radius: var(--radius-note); padding: 2px 8px;
+}
+.sp-tab:hover { color: var(--text); }
+.sp-tab.active { color: var(--text); border-color: var(--border-strong); background: var(--bg-raise); }
+.sp-badge {
+  min-width: 15px; height: 15px; line-height: 15px; text-align: center;
+  font-size: 10px; padding: 0 3px; border-radius: 999px;
+  background: var(--accent); color: var(--on-accent);
+}
+#steps-view { display: none; flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px; }
+#chat-panel.view-steps #steps-view { display: block; }
+#chat-panel.view-steps #chat-log,
+#chat-panel.view-steps #chat-chips,
+#chat-panel.view-steps #ann-queue,
+#chat-panel.view-steps #chat-input-row,
+#chat-panel.view-steps #import-row { display: none; }
+.steps-feed { display: flex; flex-direction: column; gap: 8px; }
+.step-empty { color: var(--faint); font-size: var(--fs-xs); padding: 18px 6px; text-align: center; }
+.step-round { display: flex; flex-direction: column; gap: 4px; }
+.step-round.stale { opacity: .45; }
+.step-stale-flag { font-size: var(--fs-xs); color: var(--faint); }
+.step-details { display: flex; flex-direction: column; gap: 5px; margin: 2px 0; }
+.step-entry { padding: 4px 7px; }
+.step-entry.stale { opacity: .5; text-decoration: line-through; }
+.step-item {
+  display: flex; align-items: center; gap: 7px; min-width: 0;
+  border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: var(--radius-agent); padding: 6px 9px; background: var(--bg-raise);
+}
+.step-item.stg-pending { background: var(--accent-soft); }
+.step-item.stg-adopted, .step-item.stg-discarded { opacity: .6; }
+.step-item-title { font-size: var(--fs-sm); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step-item-sub { font-size: var(--fs-xs); color: var(--muted); }
+.step-item-ts { margin-left: auto; font-size: var(--fs-xs); color: var(--faint); font-family: var(--font-mono); }
+.step-earlier { display: flex; flex-direction: column; gap: 4px; }
+.step-earlier-head { align-self: flex-start; cursor: pointer; background: transparent; border: none; font-size: var(--fs-xs); color: var(--muted); padding: 0 2px; }
+.step-earlier-head:hover { color: var(--text); }
+.step-earlier-body { display: flex; flex-direction: column; gap: 5px; }
 .toolcard summary { cursor: pointer; padding: 6px 10px; font-size: var(--fs-sm); color: var(--text); font-family: var(--font-mono); user-select: none; }
 .toolcard pre {
   margin: 0; padding: 8px 10px;

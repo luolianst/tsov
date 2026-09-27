@@ -177,7 +177,10 @@
   <div id="rail-chat" class="rail right" title="展开对话面板"><span>◀ 对话</span></div>
   <aside id="chat-panel">
     <div id="chat-head">
-      <div class="panel-title">对话框 · 语义编辑</div>
+      <div id="sp-tabs" title="右栏视图：对话 / 步骤（选择记忆到 localStorage）">
+        <button class="sp-tab active" data-view="chat">对话</button>
+        <button class="sp-tab" data-view="steps">步骤<span id="sp-badge" class="sp-badge" hidden>0</span></button>
+      </div>
       <div id="chat-head-btns">
         <button id="btn-fold-chat" class="fold-btn" title="收起面板（收成窄边条）">▶</button>
         <button id="btn-new-session" title="结束当前对话线程；下一轮起新会话（历史 JSONL 保留）">🆕<span class="btn-txt"> 新会话</span></button>
@@ -191,6 +194,7 @@
       <button id="btn-import-cancel">✕</button>
     </div>
     <div id="chat-log"></div>
+    <div id="steps-view" hidden></div>
     <div id="chat-chips">
       <select id="quick-cmd" title="快捷命令：选中即执行（LLM 语义命令 / 命令层直编）">
         <option value="">快捷命令…</option>

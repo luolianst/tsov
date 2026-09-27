@@ -13,6 +13,7 @@ import * as chat from './chat.js';
 import * as playback from './playback.js';
 import * as tools from './tools.js';
 import * as autoroll from './autoroll.js';
+import { initStepsPanel } from './steps.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -1132,6 +1133,8 @@ function boot() {
 
   bus.on('error', showError);
   bus.on('toast', showToast);
+
+  initStepsPanel();   // 对话产物流 C 件：右栏双 tab（对话|步骤）+ 步骤视图
 
   loadProjects(false);
 }

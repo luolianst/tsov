@@ -595,7 +595,9 @@ export function snapshot() {
     steps: store.steps
       ? { count: store.steps.count || 0,
           rounds: (store.steps.rounds || []).map((r) => Object.assign({}, r,
-            { stats: Object.assign({}, r.stats), seqs: (r.seqs || []).slice() })) }
+            { stats: Object.assign({}, r.stats), seqs: (r.seqs || []).slice() })),
+          /* C 件：步骤视图快照（服务端合流 feed 计数 + DOM 实测计数；CDP 断言用） */
+          feed: store.steps.feed ? Object.assign({}, store.steps.feed) : null }
       : null,
     error: store.error,
   };
