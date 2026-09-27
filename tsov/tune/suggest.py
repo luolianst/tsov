@@ -142,7 +142,7 @@ _SYSTEM_PROMPT = (
     "2) suggestions：你自己的模式识别型建议（掩蔽/空间拥挤/音色冲突/效果链）——宁缺毋滥，没把握就不写。\n"
     "JSON 形状：{\"reasons\":[{\"i\":0,\"reason\":\"...\"}],\"suggestions\":[...]}\n"
     "suggestion 只允许以下四形（选其一）：\n"
-    "- {\"kind\":\"level\",\"track\":N,\"delta_db\":-3.0,...}：delta_db ∈ [-6,6]，负=降\n"
+    "- {\"kind\":\"level\",\"track\":N,\"delta_db\":-3.0,...}：delta_db ∈ [-6,6]，负=提升（例：-3.0 = 比现值提高约 3 dB；正数=降低）\n"
     "- {\"kind\":\"pan\",\"track\":N,\"pan\":-0.4,...}：pan ∈ [-1,1]\n"
     "- {\"kind\":\"effect\",\"track\":N,\"preset\":\"<预设名>\",...}：预设从 effect_presets 选\n"
     "- {\"kind\":\"effect\",\"track\":N,\"effect\":{\"type\":\"highpass\",\"params\":{...}},...}："

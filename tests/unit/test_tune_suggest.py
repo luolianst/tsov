@@ -132,6 +132,20 @@ def test_validate_llm_accepts_all_shapes():
     assert valid[4]["effect"]["set_params"]["index"] == 0
 
 
+def test_llm_prompt_sign_convention_matches_internal():
+    """提示词口径必须与内部一致（负=提升/正=降）——曾写反成「负=降」，实链路方向反转。
+
+    背景：_vol_after / apply / det 通道的全体口径是「负=提升」；LLM 提示词曾写「负=降」，
+    LLM 照错的写（如「补 +4.8 dB」得 +4.8）→ 代码按内部口径应用 → 实为衰减（反向）。
+    """
+    assert "负=提升" in suggest._SYSTEM_PROMPT
+    assert "负=降" not in suggest._SYSTEM_PROMPT
+    # 行为侧同向锁：正数 → 衰减（after_volume < 1）
+    raw = [{"kind": "level", "track": 0, "delta_db": 3.0, "reason": "r"}]
+    valid, dropped = suggest.validate_llm_suggestions(raw, _facts_llm())
+    assert dropped == [] and valid[0]["values"]["after_volume"] < 1.0
+
+
 def test_validate_llm_rejects_keep_raw_and_why():
     raw = [
         {"kind": "warp", "track": 0, "reason": "r"},
