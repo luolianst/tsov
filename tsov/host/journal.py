@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -32,6 +33,7 @@ class ActionJournal:
         self.dir.mkdir(parents=True, exist_ok=True)
         self.entries: list[dict] = []
         self.cursor = 0
+        self._lock = threading.RLock()   # 会话线程与 HTTP 线程共享（B 件单例化）
         try:
             data = json.loads(self.index_path.read_text(encoding="utf-8"))
             if isinstance(data, dict) and isinstance(data.get("entries"), list):
@@ -78,23 +80,24 @@ class ActionJournal:
                turn: int | None = None, round: str | None = None,
                summary: str | None = None, stats: dict | None = None) -> dict:
         """追加条目；游标之后若有条目 → 先标 stale（分歧分支）。"""
-        for e in self.entries[self.cursor:]:
-            e["stale"] = True
-        self._seq += 1
-        entry = {
-            "seq": self._seq, "source": source, "label": label or tool or "",
-            "tool": tool, "args": args, "pre": pre, "post": post,
-            "impact": impact or ({"text": summary} if summary else {"text": ""}),
-            "session_id": session_id, "turn": turn,
-            "round": round or (str(session_id) if session_id else None),
-            "stats": stats or {},
-            "ts": time.time(), "stale": False, "undone": False,
-        }
-        self.entries.append(entry)
-        self.cursor = len(self.entries)
-        self._trim()
-        self._save()
-        return entry
+        with self._lock:
+            for e in self.entries[self.cursor:]:
+                e["stale"] = True
+            self._seq += 1
+            entry = {
+                "seq": self._seq, "source": source, "label": label or tool or "",
+                "tool": tool, "args": args, "pre": pre, "post": post,
+                "impact": impact or ({"text": summary} if summary else {"text": ""}),
+                "session_id": session_id, "turn": turn,
+                "round": round or (str(session_id) if session_id else None),
+                "stats": stats or {},
+                "ts": time.time(), "stale": False, "undone": False,
+            }
+            self.entries.append(entry)
+            self.cursor = len(self.entries)
+            self._trim()
+            self._save()
+            return entry
 
     def get(self, seq: int) -> dict | None:
         for e in self.entries:
@@ -104,12 +107,13 @@ class ActionJournal:
 
     def mark_stale_from(self, seq: int, undone: bool = True) -> None:
         """撤销 #seq → 其后（含自身）动作标记失效（前端置灰的依据）。"""
-        for e in self.entries:
-            if int(e.get("seq", 0)) >= int(seq):
-                e["stale"] = True
-                if int(e.get("seq", 0)) == int(seq):
-                    e["undone"] = undone
-        self._save()
+        with self._lock:
+            for e in self.entries:
+                if int(e.get("seq", 0)) >= int(seq):
+                    e["stale"] = True
+                    if int(e.get("seq", 0)) == int(seq):
+                        e["undone"] = undone
+            self._save()
 
     # ---- 游标（undo/redo/动作撤销） ----
     def can_undo(self) -> bool:
@@ -131,26 +135,29 @@ class ActionJournal:
         """游标后退一步 → 该位置快照；无处可退 → None。"""
         if not self.can_undo():
             return None
-        self.cursor -= 1
-        self._save()
+        with self._lock:
+            self.cursor -= 1
+            self._save()
         return self.snapshot_at(self.cursor)
 
     def redo(self) -> dict | None:
         """游标前进一步（前方条目已失效则拒绝）→ 该位置快照；无路可进 → None。"""
         if not self.can_redo():
             return None
-        self.cursor += 1
-        self._save()
+        with self._lock:
+            self.cursor += 1
+            self._save()
         return self.snapshot_at(self.cursor)
 
     def jump(self, seq: int) -> dict | None:
         """动作级撤销（批B 动作卡）：跳到 #seq 动作前 —— 返回快照；其后（含自身）标失效。"""
-        for i, e in enumerate(self.entries):
-            if int(e.get("seq", 0)) == int(seq):
-                self.cursor = i
-                self.mark_stale_from(seq)
-                self._save()
-                return self.snapshot_at(i)
+        with self._lock:
+            for i, e in enumerate(self.entries):
+                if int(e.get("seq", 0)) == int(seq):
+                    self.cursor = i
+                    self.mark_stale_from(seq)
+                    self._save()
+                    return self.snapshot_at(i)
         return None
 
     def jump_to_cursor(self, cursor: int) -> dict | None:
@@ -165,8 +172,9 @@ class ActionJournal:
         snap = self.snapshot_at(k)
         if snap is None:
             return None
-        self.cursor = k
-        self._save()
+        with self._lock:
+            self.cursor = k
+            self._save()
         return {"cursor": k, "snapshot": snap}
 
     def window(self) -> dict:
@@ -215,10 +223,11 @@ class ActionJournal:
         self._save()
 
     def _save(self) -> None:
-        try:
-            self.index_path.write_text(
-                json.dumps({"entries": self.entries, "cursor": self.cursor},
-                           ensure_ascii=False, indent=1),
-                encoding="utf-8")
-        except OSError:
-            pass
+        with self._lock:
+            try:
+                self.index_path.write_text(
+                    json.dumps({"entries": self.entries, "cursor": self.cursor},
+                               ensure_ascii=False, indent=1),
+                    encoding="utf-8")
+            except OSError:
+                pass

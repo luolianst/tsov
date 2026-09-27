@@ -119,7 +119,13 @@ function sysMsg(msg) {
    - 单轮写卡 >3 张 → 折叠为"本轮 N 个动作"（复述单 Q2 默认） */
 
 const MAX_VISIBLE_CARDS = 3;
-const groups = new Map();   // turn -> { root, cards, readNode, readLabels, head }
+// 轮键 -> 聚合卡组（对话产物流 B 件：一「轮」= 一次用户消息触发的执行回合）
+const groups = new Map();
+function groupKey(rec) {
+  if (rec && rec.round != null && rec.round !== '') return 'r:' + rec.round;
+  const t = (rec && rec.turn != null) ? rec.turn : 0;
+  return 't:' + t;
+}
 const staleSeqs = new Set();    // 失效动作 seq（后端日志权威 + action_undone 事件增量）
 const undoneSeqs = new Set();   // 被撤销的动作 seq（红点：自身被撤）
 
@@ -142,30 +148,107 @@ function receiptLine(obs) {
   return t.length > 96 ? t.slice(0, 95) + '…' : t;
 }
 
-function groupFor(turn) {
-  const t = (turn == null) ? 0 : turn;
-  let g = groups.get(t);
+function groupFor(key) {
+  const k = String(key);
+  let g = groups.get(k);
   if (g) return g;
   const root = el('actgroup');
-  root.dataset.turn = String(t);
+  root.dataset.round = k;
   logEl.appendChild(root);
-  g = { turn: t, root, cards: 0, readNode: null, readLabels: [], head: null };
-  groups.set(t, g);
+  g = { key: k, root, cards: 0, readNode: null, readLabels: [], head: null,
+        statsNode: null, actionsNode: null, stats: {}, seenTracks: new Set(),
+        seqs: [], firstRec: null };
+  groups.set(k, g);
   return g;
 }
 
+const STAT_LABELS = { notes: '修改音符', track_add: '轨道', track_del: '轨道', track_edit: '轨名',
+                      fx: '效果器', param: '参数', other: '动作' };
+
+/** 计数 → 卡面文案（修改音符 ×16 · 轨道 +2 · 效果器 +1 …） */
+function statText(k, v) {
+  const name = STAT_LABELS[k] || k;
+  if (k === 'track_add') return name + ' +' + v;
+  if (k === 'track_del') return name + ' \u2212' + v;
+  if (k === 'fx') return name + ' +' + v;
+  return name + ' \u00d7' + v;
+}
+
 function updateGroupHead(g) {
-  const folded = g.root.classList.contains('folded');
   if (!g.head) {
     g.head = document.createElement('button');
     g.head.className = 'ac-group-head';
     g.head.addEventListener('click', () => {
-      const f = g.root.classList.toggle('folded');
-      g.head.textContent = '本轮 ' + g.cards + ' 个动作 ' + (f ? '▸' : '▾');
+      g.root.classList.toggle('collapsed');
+      updateGroupHead(g);
     });
     g.root.prepend(g.head);
   }
-  g.head.textContent = '本轮 ' + g.cards + ' 个动作 ' + (folded ? '▸' : '▾');
+  const collapsed = g.root.classList.contains('collapsed');
+  g.head.textContent = '本轮变更 · ' + g.cards + ' 个动作 ' + (collapsed ? '\u25b8' : '\u25be');
+}
+
+/** 统计行（对话产物流 B 件：同类合并计数） */
+function updateGroupStats(g) {
+  const keys = Object.keys(g.stats).filter((k) => g.stats[k]);
+  if (!keys.length) return;
+  if (!g.statsNode) {
+    g.statsNode = el('ac-stats');
+    g.root.insertBefore(g.statsNode, g.head.nextSibling);
+  }
+  g.statsNode.innerHTML = '';
+  for (const k of keys) g.statsNode.appendChild(text('ac-stat', statText(k, g.stats[k])));
+}
+
+/** 底部动作行（[查看 diff][撤销本轮]）——始终垫底 */
+function ensureRoundActions(g) {
+  if (!g.actionsNode) {
+    g.actionsNode = el('ac-round-actions');
+    const diff = document.createElement('button');
+    diff.className = 'ac-btn'; diff.textContent = '查看 diff';
+    diff.title = '跳转并标记本轮改动范围';
+    diff.addEventListener('click', () => viewRoundDiff(g));
+    const undo = document.createElement('button');
+    undo.className = 'ac-btn ac-undo'; undo.textContent = '撤销本轮';
+    undo.title = '撤销本轮全部动作（其后动作将失效）';
+    undo.addEventListener('click', () => doRoundUndo(g, undo));
+    g.actionsNode.appendChild(diff);
+    g.actionsNode.appendChild(undo);
+  }
+  g.root.appendChild(g.actionsNode);
+}
+
+/** 撤销本轮：跳到该轮最小 seq 之前（后端 action_undone 事件负责全链置灰） */
+async function doRoundUndo(g, btn) {
+  const seqs = g.seqs.filter((s) => s != null && s > 0);
+  if (!store.project || !seqs.length) return;
+  btn.disabled = true;
+  try {
+    const min = Math.min.apply(null, seqs);
+    const r = await api.actionUndo(store.project, min);
+    toast('已撤销本轮（#' + min + ' 起）：' + g.cards + ' 个动作' + (refTag(r) ? ' ' + refTag(r) : ''));
+  } catch (e) {
+    setError('撤销本轮失败：' + e.message);
+    btn.disabled = false;
+  }
+}
+
+/** 查看 diff：标记 + 跳转该轮改动范围（三色叠层=最新轮由 diff_applied 自动叠加） */
+function viewRoundDiff(g) {
+  const tracks = Array.from(g.seenTracks);
+  if (!tracks.length) { toast('本轮无谱面改动'); return; }
+  addAgentTracks(tracks);
+  focusImpact({ impact: { tracks: tracks.map((i) => ({ index: i })) } });
+}
+
+/** 轮聚合快照（__tsovState().steps 素材） */
+function syncStepsSnapshot() {
+  const rounds = [];
+  for (const g of groups.values()) {
+    rounds.push({ key: g.key, n: g.cards, read: g.readLabels.length,
+                  stats: Object.assign({}, g.stats), seqs: g.seqs.slice() });
+  }
+  store.steps = { rounds, count: rounds.length };
 }
 
 function buildActionCard(rec) {
@@ -223,22 +306,35 @@ function buildActionCard(rec) {
 
 /** 渲染一条动作记录（live 事件与 renderAll 回放共用） */
 function appendActionRec(rec) {
-  const g = groupFor(rec.turn);
+  const g = groupFor(groupKey(rec));
   if (rec.read_only) {
     g.readLabels.push(rec.label || rec.tool || '工具');
     if (!g.readNode) { g.readNode = text('ac-readrow', ''); g.root.appendChild(g.readNode); }
     g.readNode.textContent = '只读 ×' + g.readLabels.length + '：' + g.readLabels.join(' · ');
+    if (g.actionsNode) g.root.appendChild(g.actionsNode);   // 动作行垫底
+    syncStepsSnapshot();
     return;
   }
   const card = buildActionCard(rec);
   g.cards += 1;
+  if (!g.firstRec) g.firstRec = rec;
+  if (rec.seq != null && rec.seq > 0) g.seqs.push(Number(rec.seq));
+  for (const k of Object.keys(rec.stats || {})) {
+    const v = Number(rec.stats[k]) || 0;
+    if (v) g.stats[k] = (g.stats[k] || 0) + v;
+  }
+  for (const t of ((rec.impact && rec.impact.tracks) || [])) {
+    if (t && t.index != null) g.seenTracks.add(t.index);
+  }
   if (g.cards > MAX_VISIBLE_CARDS) {
     card.classList.add('over');
-    updateGroupHead(g);
     if (!g.root.classList.contains('folded')) g.root.classList.add('folded');
   }
   g.root.appendChild(card);
-  if (g.head) updateGroupHead(g);
+  updateGroupHead(g);
+  updateGroupStats(g);
+  ensureRoundActions(g);
+  syncStepsSnapshot();
 }
 
 /** 动作级撤销（批B B1-2 服务端接口；seq 由快照日志提供，无 seq 不显示按钮） */
@@ -248,7 +344,7 @@ async function doActionUndo(rec, btn) {
   try {
     const r = await api.actionUndo(store.project, rec.seq);
     toast('已撤销动作 #' + rec.seq + '：' + (rec.label || rec.tool) + (refTag(r) ? ' ' + refTag(r) : ''));
-    markStaleFrom(rec.turn, rec.action_id);
+    markStaleFrom(groupKey(rec), rec.action_id);
   } catch (e) {
     setError('撤销失败：' + e.message);
     btn.disabled = false;
@@ -275,8 +371,8 @@ async function refreshActionStale() {
 }
 
 /** 撤销后：同轮其后动作卡置灰（链式失效提示；同时记入集合供重渲染保持） */
-function markStaleFrom(turn, actionId) {
-  const g = groups.get(turn == null ? 0 : turn);
+function markStaleFrom(key, actionId) {
+  const g = groups.get(String(key));
   if (!g) return;
   let seen = false;
   for (const node of g.root.querySelectorAll('.actcard')) {
@@ -300,6 +396,7 @@ function focusImpact(rec) {
 function renderAll() {
   logEl.innerHTML = '';
   groups.clear();                       // 批B：动作分组跟着重建
+  store.steps = { rounds: [], count: 0 };   // 对话产物流 B 件：轮快照随重建
   const arr = logs[currentProject] || [];
   for (const r of arr) {
     if (r.kind === 'sys') { logEl.appendChild(text('msg sys', r.text)); continue; }
@@ -444,6 +541,8 @@ function wireEvents() {
       tool_call_id: d.tool_call_id || null,
       action_id: d.action_id || null,
       turn: (d.turn == null) ? 0 : d.turn,
+      round: d.round || null,
+      stats: d.stats || {},
       label: d.label || d.tool,
       summary: d.summary || '',
       impact: d.impact || null,

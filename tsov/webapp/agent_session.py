@@ -218,7 +218,7 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
     proj = state.get_project(project_name)
     root = proj.root
     edited_path = root / config.EDITED_SCORE_NAME
-    journal = ActionJournal(root)   # 快照窗口（M-V7 D2：动作级撤销 + 弱留存双口径）
+    journal = proj.journal   # 快照窗口——与工程共享单例（防双实例全量覆盖丢账）
     round_key = f"{session_id}:{int(time.time())}"   # 本对话轮标识（agent 窗口淘汰口径）
     # 清掉上一轮残留——只采用「本轮」的编辑结果
     try:
@@ -341,13 +341,14 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
                 post_snap = _read_json_safe(edited_path)
                 post_hash = journal.snapshot(post_snap)
                 impact = impact_of(pre_snap, post_snap) if (post_snap and tool_name in SCORE_WRITING_TOOLS) else None
+                tstats = tool_stats(tool_name, targs, impact) if tool_name in SCORE_WRITING_TOOLS else {}
                 entry = None
                 if impact is not None and impact.get("text") and tool_name in SCORE_WRITING_TOOLS:
                     entry = journal.append(source="agent", label=tool_label(tool_name),
                                            session_id=session_id, turn=turn, round=round_key,
                                            tool=tool_name, args=summarize_args(tool_name, targs),
                                            pre=pre_hash, post=post_hash, impact=impact,
-                                           stats=tool_stats(tool_name, targs, impact))
+                                           stats=tstats)
                 bus.publish(
                     project_name,
                     "agent_tool",
@@ -356,6 +357,8 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
                         # ---- 动作卡 v2 字段（批B B1-1；旧字段保留 = SSE 兼容）----
                         "tool_call_id": tc.get("id"),
                         "turn": turn,
+                        "round": round_key,     # 对话产物流 B 件：轮聚合键
+                        "stats": tstats,        # 对话产物流 B 件：结构化计数
                         "action_id": f"{session_id}:{turn}:{tc.get('id') or tool_count}",
                         "label": tool_label(tool_name),
                         "summary": summarize_args(tool_name, targs),

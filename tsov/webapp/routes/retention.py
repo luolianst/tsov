@@ -19,8 +19,8 @@ def _rounds(entries: list[dict]) -> list[dict]:
     out: list[dict] = []
     idx: dict[str, int] = {}
     for e in entries:
-        if e.get("source") != "agent":
-            continue
+        if e.get("source") != "agent" or not e.get("tool"):
+            continue   # 会话任务条目（tool=None）不进轮聚合
         rk = str(e.get("round") or e.get("session_id") or "-")
         if rk not in idx:
             idx[rk] = len(out)

@@ -31,9 +31,12 @@ def _ws():
 def test_tool_stats_notes_by_args_and_impact():
     assert tool_stats("write_notes", {"notes": [1, 2, 3]}, None) == {"notes": 3}
     impact = {"tracks": [{"added": 2, "removed": 1, "changed": 3}]}
-    assert tool_stats("duplicate_bars", {}, impact) == {"notes": 6}
-    assert tool_stats("edit_score", {}, impact) == {"notes": 6}
-    assert tool_stats("voice_to_score", {}, impact) == {"notes": 6}
+    assert tool_stats("duplicate_bars", {}, impact) == {"notes": 5}    # max(2,1)+3
+    assert tool_stats("edit_score", {}, impact) == {"notes": 5}
+    assert tool_stats("voice_to_score", {}, impact) == {"notes": 5}
+    # 整轨移调：+32/-32 视为重写对 → 32（非 64）
+    transpose = {"tracks": [{"added": 32, "removed": 32, "changed": 0}]}
+    assert tool_stats("edit_score", {}, transpose) == {"notes": 32}
 
 
 def test_tool_stats_track_fx_param():
@@ -89,12 +92,12 @@ def test_journal_stats_field_and_compat():
 
 def test_rounds_aggregation():
     entries = [
-        {"seq": 1, "source": "agent", "round": "r1", "label": "改谱",
+        {"seq": 1, "source": "agent", "round": "r1", "label": "改谱", "tool": "edit_score",
          "stats": {"notes": 4}, "ts": 100.0, "stale": False},
-        {"seq": 2, "source": "agent", "round": "r1", "label": "加效果",
+        {"seq": 2, "source": "agent", "round": "r1", "label": "加效果", "tool": "apply_effect",
          "stats": {"fx": 1}, "ts": 101.0, "stale": False},
         {"seq": 3, "source": "user", "label": "手势", "ts": 102.0},   # user 不进聚合
-        {"seq": 4, "source": "agent", "round": "r2", "label": "改谱",
+        {"seq": 4, "source": "agent", "round": "r2", "label": "改谱", "tool": "edit_score",
          "stats": {"notes": 2, "param": 1}, "ts": 103.0, "stale": True},
     ]
     rs = _rounds(entries)
@@ -107,7 +110,7 @@ def test_rounds_aggregation():
 
 
 def test_rounds_dirty_stats_tolerated():
-    entries = [{"seq": 1, "source": "agent", "round": "r",
+    entries = [{"seq": 1, "source": "agent", "round": "r", "tool": "edit_score",
                 "stats": {"notes": "x", "fx": 2}, "ts": 1.0}]
     rs = _rounds(entries)
     assert rs[0]["stats"] == {"fx": 2}
@@ -116,3 +119,52 @@ def test_rounds_dirty_stats_tolerated():
 def test_rounds_empty():
     assert _rounds([]) == []
     assert _rounds([{"seq": 1, "source": "user"}]) == []
+
+
+def test_rounds_skips_task_entries():
+    """会话任务条目（tool=None 的「agent：任务」）不进轮聚合。"""
+    entries = [{"seq": 1, "source": "agent", "round": None, "label": "agent：任务",
+                "tool": None, "stats": {}, "ts": 1.0}]
+    assert _rounds(entries) == []
+
+
+# ---------------------------------------------------------------------------
+# 单例化回归（Z 案：会话实例与工程实例互相覆盖 → 丢账）
+# ---------------------------------------------------------------------------
+
+
+def test_journal_single_instance_and_apply_no_lost_update():
+    """agent 会话与工程采用共享同一 journal：先写条目不被采用覆盖（修复前会丢）。"""
+    import shutil
+
+    from tsov.core.score import Score
+    from tsov.host.project import Project
+
+    ws = Path("output") / f"steps-{uuid.uuid4().hex[:10]}"
+    if ws.exists():
+        rmtree_force(ws)
+    try:
+        shutil.copytree("output/e4s2-demo", ws,
+                        ignore=shutil.ignore_patterns(".agent-actions"))
+        proj = Project.open(ws)
+        j = proj.journal
+        assert proj.journal is j   # 同工程单例
+        j.append(source="agent", label="改谱", tool="edit_score", round="r1",
+                  stats={"notes": 1})
+        # 采用（agent_session 修复后与上面同一入口）：
+        new_score = Score.from_dict({**proj.score.to_dict(), "title": "会话改过"})
+        res = proj.apply_score(new_score, "agent：测试", source="agent")
+        assert res["ok"] is True
+        # 外部重载校验：先写条目仍在盘上
+        j2 = ActionJournal(ws)
+        labels = [e.get("label") for e in j2.entries]
+        assert "改谱" in labels and "agent：测试" in labels
+    finally:
+        rmtree_force(ws)
+
+
+def test_agent_session_reuses_project_journal_source_guard():
+    """回归守护：agent_session 必须复用 proj.journal（防双实例全量覆盖丢账）。"""
+    src = Path("tsov/webapp/agent_session.py").read_text(encoding="utf-8")
+    assert "journal = proj.journal" in src
+    assert "journal = ActionJournal(root)" not in src

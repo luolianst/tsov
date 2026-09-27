@@ -591,6 +591,12 @@ export function snapshot() {
       source: ((store.arrange.batch && store.arrange.batch.stats) || {}).source || null,
     },
     hasDiff: !!store.diff,
+    /* 对话产物流 B 件：步骤流快照（对话内嵌轮聚合；CDP 断言用） */
+    steps: store.steps
+      ? { count: store.steps.count || 0,
+          rounds: (store.steps.rounds || []).map((r) => Object.assign({}, r,
+            { stats: Object.assign({}, r.stats), seqs: (r.seqs || []).slice() })) }
+      : null,
     error: store.error,
   };
 }

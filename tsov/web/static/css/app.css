@@ -467,6 +467,17 @@ body.chat-folded #rail-chat { display: flex; }
   content: '✦'; margin-left: 5px; font-size: 9px; color: var(--agent); vertical-align: 1px;
 }
 .actgroup.folded .actcard.over { display: none; }     /* 折叠：只留前 3 张 */
+/* 对话产物流 B 件：轮聚合卡（统计行 / 底部动作 / 手动折叠） */
+.ac-stats { display: flex; flex-wrap: wrap; gap: 4px; padding: 1px 2px; }
+.ac-stat {
+  font-size: var(--fs-xs); color: var(--text); font-family: var(--font-mono);
+  border: 1px solid var(--border); border-radius: var(--radius-note);
+  padding: 0 6px; line-height: 1.7;
+}
+.ac-round-actions { display: flex; gap: 6px; padding: 1px 2px; }
+.actgroup.collapsed .actcard,
+.actgroup.collapsed .ac-readrow,
+.actgroup.collapsed .ac-round-actions { display: none; }
 .actcard.undone { opacity: .55; border-left-color: var(--faint); }
 .actcard.stale { opacity: .45; }
 .actcard.stale .ac-impact, .actcard.stale .ac-receipt { text-decoration: line-through; }

@@ -244,13 +244,19 @@ _TRACK_TOOLS = ("create_track", "remove_track", "rename_track")
 
 
 def _notes_from_impact(impact: Any) -> int:
-    """impact.tracks 的 added+removed+changed 合计 = 受影响音符数。"""
+    """impact.tracks → 受影响音符数。
+
+    口径：逐轨 changed + max(added, removed)——同轨等量增删视为「重写对」
+    （如整轨移调 32 音：der 算为 +32/-32，实际用户感知 = 32 个音被修改，计 32 非 64）。
+    """
     if not isinstance(impact, dict):
         return 0
     total = 0
     for t in impact.get("tracks") or []:
-        if isinstance(t, dict):
-            total += int(t.get("added") or 0) + int(t.get("removed") or 0) + int(t.get("changed") or 0)
+        if not isinstance(t, dict):
+            continue
+        added, removed = int(t.get("added") or 0), int(t.get("removed") or 0)
+        total += int(t.get("changed") or 0) + max(added, removed)
     return total
 
 
