@@ -78,6 +78,8 @@ export const api = {
   windowJump: (name, cursor) => post('/api/projects/' + encodeURIComponent(name) + '/window/jump', { cursor }),
   deleteFavorite: (name, tag) =>
     req('/api/projects/' + encodeURIComponent(name) + '/favorites?tag=' + encodeURIComponent(tag), { method: 'DELETE' }),
+  /* M-V8 E6 段3：删除工程（安全删 → .trash） */
+  deleteProject: (name) => req('/api/projects/' + encodeURIComponent(name), { method: 'DELETE' }),
   getSettings: (name) => req('/api/projects/' + encodeURIComponent(name) + '/settings'),
   setSettings: (name, patch) => post('/api/projects/' + encodeURIComponent(name) + '/settings', patch),
   setGlobalSettings: (patch) => post('/api/settings', patch),

@@ -17,6 +17,7 @@
     <div id="menu-file" class="menu-pop" hidden>
       <button class="mi" id="mi-new">新建工程…</button>
       <button class="mi" id="mi-rename">重命名工程…</button>
+      <button class="mi mi-danger" id="mi-delete">删除当前工程…<span class="mi-sub">移入 .trash · 可找回</span></button>
       <button class="mi" id="mi-import">导入工程…<span class="mi-sub">score.json 回流</span></button>
       <button class="mi" id="mi-import-audio">导入音频素材…<span class="mi-sub">参考轨 / 原曲对照</span></button>
       <input type="file" id="audio-file-input" accept="audio/*,.flac,.mp3,.wav,.m4a,.ogg,.opus,.aiff" hidden>
@@ -78,6 +79,7 @@
   </div>
 
   <div class="tb-right">
+    <button id="btn-keys" title="快捷键速查（?）">?</button>
     <span id="save-state" class="save-state" title="工程保存状态">—</span>
     <button id="btn-theme" title="切换深/浅（母版双态）">◐</button>
     <div class="menu-wrap">
@@ -276,6 +278,29 @@
       <button id="ex-cancel">关闭</button>
       <button id="ex-run" class="primary">开始导出</button>
     </div>
+  </div>
+</div>
+
+<div id="dlg-del" class="dlg-wrap" hidden>
+  <div class="dlg">
+    <div class="dlg-hd">删除工程</div>
+    <div class="dlg-body">
+      <div>将把工程 <b id="del-name">—</b> 移入 <code>output/.trash/</code>：从列表移除，文件完整保留（可手动找回）。</div>
+      <div class="dlg-hint">二次确认 · 安全删（非物理删除）· 打开中的工程会被安全关闭。</div>
+      <div id="del-result" class="dlg-result" hidden></div>
+    </div>
+    <div class="dlg-ft">
+      <button id="del-cancel">取消</button>
+      <button id="del-run" class="danger">删除工程</button>
+    </div>
+  </div>
+</div>
+
+<div id="dlg-keys" class="dlg-wrap" hidden>
+  <div class="dlg dlg-keys">
+    <div class="dlg-hd">快捷键速查</div>
+    <div class="dlg-body" id="keys-body"></div>
+    <div class="dlg-ft"><button id="keys-close">关闭</button></div>
   </div>
 </div>
 

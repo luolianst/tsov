@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import threading
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -95,6 +97,31 @@ class WebState:
             return (self.project_root(name) / "score.json").is_file()
         except HTTPException:
             return False
+
+    def delete_project(self, name: str) -> str:
+        """删除工程（M-V8 E6 段3）：安全删——整目录移入 `output/.trash/<name>-<ts>/`（可手动找回）。
+
+        打开中的工程先摘句柄（注册表 / 对话会话 / 处理链）——防后续惰性写盘把目录重建。
+        列表与导入候选天然跳过 `.trash`（列表只认一级目录、候选跳过隐藏目录）。
+        """
+        root = self.project_root(name)
+        if not (root / "score.json").is_file():
+            raise HTTPException(404, f"工程不存在：{name!r}")
+        with self.projects_lock:
+            self.projects.pop(name, None)
+        self.chat_sessions.pop(name, None)
+        with self.chains_lock:
+            self.chains.pop(name, None)
+        trash = self.output_dir / ".trash"
+        trash.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        dest = trash / f"{name}-{ts}"
+        n = 2
+        while dest.exists():   # 同秒重复删（或残留同名）防撞
+            dest = trash / f"{name}-{ts}-{n}"
+            n += 1
+        shutil.move(str(root), str(dest))
+        return str(dest)
 
     def get_project(self, name: str) -> Project:
         """懒加载 Project 单例（Project.open 自动补 git init / 基线提交）。"""

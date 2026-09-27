@@ -117,6 +117,12 @@ def register(app: FastAPI) -> None:
     def get_state(name: str) -> dict:
         return project_state(st().get_project(name))
 
+    @app.delete("/api/projects/{name}")
+    def delete_project(name: str) -> dict:
+        """删除工程（M-V8 E6 段3）：安全删——移入 `output/.trash/`（可手动找回）；打开中先安全关句柄。"""
+        dest = st().delete_project(name)
+        return {"ok": True, "name": name, "trashed_to": dest}
+
     @app.post("/api/projects/{name}/batch")
     def apply_batch(name: str, body: BatchIn) -> dict:
         proj = st().get_project(name)

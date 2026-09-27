@@ -465,6 +465,8 @@ function boot() {
       closeMenus(null);
       if (!$('dlg-export').hidden) { $('dlg-export').hidden = true; return; }
       if (!$('dlg-fav').hidden) { $('dlg-fav').hidden = true; return; }
+      if (!$('dlg-del').hidden) { $('dlg-del').hidden = true; return; }
+      if (!$('dlg-keys').hidden) { $('dlg-keys').hidden = true; return; }
       if (tools.cancelTool()) return;   // M-V8 E5：工具非智能指针 → 先回智能指针
       backToLanes();
       return;
@@ -473,6 +475,8 @@ function boot() {
     const tgt = e.target || {};
     const tag = (tgt.tagName || '').toUpperCase();
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tgt.isContentEditable) return;
+    /* M-V8 E6 段3：? = 快捷键浮层开关（无工程也可查） */
+    if (e.key === '?') { e.preventDefault(); toggleKeys(); return; }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (!store.project) return;
     if (e.key === ' ') {
@@ -513,6 +517,102 @@ function boot() {
     renderSaved();
   });
   renderSaved();
+
+  /* ---- M-V8 E6 段3：删除工程（安全删 → output/.trash；二次确认） ---- */
+  const dlgDel = $('dlg-del');
+  function openDelete() {
+    if (!store.project) { setError('先打开一个工程'); return; }
+    $('del-name').textContent = store.project;
+    const res = $('del-result');
+    res.hidden = true; res.textContent = '';
+    dlgDel.hidden = false;
+  }
+  $('mi-delete').addEventListener('click', () => { closeMenus(null); openDelete(); });
+  $('del-cancel').addEventListener('click', () => { dlgDel.hidden = true; });
+  $('del-run').addEventListener('click', async () => {
+    if (!store.project) return;
+    const name = store.project;
+    const btn = $('del-run');
+    btn.disabled = true; btn.textContent = '删除中…';
+    try {
+      await api.deleteProject(name);
+      dlgDel.hidden = true;
+      toast('已删除「' + name + '」→ .trash（可找回）');
+      await loadProjects(false);   /* 当前工程已不在列表 → 自动打开最近一个 */
+      if (!store.projects.length) location.reload();   /* 一个不剩 → 冷启动空态 */
+    } catch (e) {
+      const res = $('del-result');
+      res.hidden = false; res.textContent = '✗ ' + e.message;
+    } finally {
+      btn.disabled = false; btn.textContent = '删除工程';
+    }
+  });
+
+  /* ---- M-V8 E6 段3：快捷键浮层（纯展示；内容 = 已实现键位全景） ---- */
+  const dlgKeys = $('dlg-keys');
+  const KEYMAP = [
+    ['播放 / 定位（全局）', [
+      ['Space', '播放 / 暂停'],
+      ['Home', '回到起点'],
+      ['L', '循环开 / 关（先划区间）'],
+      ['M / Shift+M', '建书签旗 / 项目记号'],
+    ]],
+    ['工具（单轨详情）', [
+      ['1 – 5', '智能 / 范围 / 剪刀 / 胶水 / 橡皮'],
+      ['Esc', '回智能指针 · 关菜单 · 退出单轨'],
+      ['按住 Alt', '临时剪刀'],
+      ['← / →', '微推一格（Shift = 一小节）'],
+      ['Ctrl+C / X / V / D', '复制 / 剪切 / 粘贴 / 再制'],
+    ]],
+    ['鼠标（时间轴 / 卷帘）', [
+      ['标尺左键单击 / 拖动', '定位播放起点'],
+      ['标尺右键拖动', '划 / 调循环区间'],
+      ['双击轨道头', '进单轨；双击音频波段 = 试听'],
+      ['Ctrl / Shift + 单击轨道头', '多选对照（叠加显示）'],
+      ['拖动 clip / 音符', '移动；拖音符左右缘 = 改时长'],
+      ['拖 clip 左 / 右缘', '修剪入点 / 出点'],
+      ['拖 clip 上缘两角', '淡入 / 淡出'],
+      ['Alt + 拖 clip 右缘', '时间伸缩（0.5×–2×）'],
+      ['剪刀单击 / Alt + 单击', '切分'],
+      ['Ctrl + 滚轮', '时间缩放（Alt + 滚轮 = 纵向滚动）'],
+    ]],
+    ['本浮层', [
+      ['?', '打开 / 关闭速查'],
+    ]],
+  ];
+  function buildKeys() {
+    const body = $('keys-body');
+    body.innerHTML = '';
+    let n = 0;
+    for (const [group, rows] of KEYMAP) {
+      const h = document.createElement('div');
+      h.className = 'k-group';
+      h.textContent = group;
+      body.appendChild(h);
+      for (const [k, desc] of rows) {
+        const row = document.createElement('div');
+        row.className = 'k-row';
+        const kb = document.createElement('kbd');
+        kb.textContent = k;
+        const dd = document.createElement('span');
+        dd.textContent = desc;
+        row.appendChild(kb); row.appendChild(dd);
+        body.appendChild(row);
+        n += 1;
+      }
+    }
+    dlgKeys.dataset.rows = String(n);
+    return n;
+  }
+  function toggleKeys(force) {
+    const show = force === undefined ? dlgKeys.hidden : !!force;
+    if (show) buildKeys();
+    dlgKeys.hidden = !show;
+    return show;
+  }
+  $('btn-keys').addEventListener('click', () => toggleKeys());
+  $('keys-close').addEventListener('click', () => toggleKeys(false));
+  window.__tsovKeys = { toggle: toggleKeys, count: () => Number(dlgKeys.dataset.rows) || 0 };   // CDP 实测用
 
   /* ---- 导出弹窗（三级；接 host export_matrix） ---- */
   const dlgExport = $('dlg-export');

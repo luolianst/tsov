@@ -896,6 +896,47 @@ def test_export_bit_depth_and_range_endpoint(env):
     assert r.status_code == 400 and "error" in r.json()
 
 
+def test_delete_project_safe_trash(env):
+    """E6 段3：删除工程=安全删（移入 .trash）+ 列表消失 + 打开中防呆 + 找回 + 候选跳过 .trash。"""
+    c = env["client"]
+    d = env["dir"]
+    c.post("/api/projects", json={"name": "delproj"})
+    # 打开中（进注册表）并做一次编辑
+    r = c.post("/api/projects/delproj/batch",
+               json={"commands": [{"op": "set_tempo", "track": 0, "value": {"tempo": 123.0}}]})
+    assert r.json()["applied"] == 1
+
+    r = c.delete("/api/projects/delproj")
+    assert r.status_code == 200, r.text
+    dest = Path(r.json()["trashed_to"])
+    assert dest.is_dir() and (dest / "score.json").is_file()
+    assert dest.parent == (d / ".trash")
+
+    # 列表消失 + state 404
+    names = [p["name"] for p in c.get("/api/projects").json()["projects"]]
+    assert "delproj" not in names
+    assert c.get("/api/projects/delproj/state").status_code == 404
+    # 打开中防呆：删除后任何写动作 404（不会把目录重建回来）
+    assert c.post("/api/projects/delproj/batch", json={"commands": []}).status_code == 404
+    assert not (d / "delproj").exists()
+    # 二次删除 404
+    assert c.delete("/api/projects/delproj").status_code == 404
+
+    # 导入候选跳过 .trash（放一个二级 json 引它上钩）
+    (d / ".trash" / "junk.json").write_text('{"title": "x"}', encoding="utf-8")
+    cands = c.get("/api/import-candidates").json()["candidates"]
+    assert all(".trash" not in str(cand.get("path") or "") for cand in cands)
+
+    # 找回演练：整目录移回 → 列表再现（手动找回路径）
+    import shutil as _sh
+
+    _sh.move(str(dest), str(d / "delproj"))
+    names = [p["name"] for p in c.get("/api/projects").json()["projects"]]
+    assert "delproj" in names
+    st = c.get("/api/projects/delproj/state").json()
+    assert st["score"]["tempo"] == 123.0   # 内容原样（编辑未丢）
+
+
 def test_agent_actions_list_and_undo(env):
     """批B B1-2 + M-V7 D2：动作日志列表 + 动作级撤销（窗口回跳，零 commit；后续置灰）。"""
     from tsov.host.journal import ActionJournal

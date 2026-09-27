@@ -147,6 +147,17 @@ select:hover, input:hover { border-color: var(--border-strong); }
 /* M-V8 E6 段2：导出弹窗位深行 */
 .dlg-row { display: flex; align-items: center; gap: 8px; }
 .dlg-row label { color: var(--muted); font-size: var(--fs-sm); }
+/* M-V8 E6 段3：删除工程（危险项）/ 快捷键浮层 */
+.mi.mi-danger { color: #C0392B; }
+.dlg-ft .danger { background: #C0392B; border-color: #C0392B; color: #fff; }
+.dlg-ft .danger:hover { filter: brightness(1.08); }
+.dlg-ft .primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.dlg-keys .dlg-body { min-width: 430px; max-height: 70vh; }
+.k-group { margin: 10px 0 4px; font-size: var(--fs-xs); letter-spacing: .08em; color: var(--muted); border-bottom: 1px solid var(--border); padding-bottom: 3px; }
+.k-group:first-child { margin-top: 0; }
+.k-row { display: flex; align-items: baseline; gap: 12px; padding: 3px 0; }
+.k-row kbd { flex: none; min-width: 150px; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--foreground); background: var(--bg-hover); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; text-align: center; }
+.k-row span { font-size: var(--fs-sm); }
 #topbar button { white-space: nowrap; }
 #project-select { max-width: 300px; }
 #cmp-base { max-width: 240px; }
