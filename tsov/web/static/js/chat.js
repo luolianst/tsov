@@ -5,6 +5,7 @@
 
 import { api } from './api.js';
 import { bus } from './events.js';
+import { renderAgentsBlock, refreshAgents } from './staging.js';   // D 件：工程上下文折叠条
 import { store, setAgentBusy, clearDiff, toast, setError, clearAnnotations, refTag, favSource,
          setSelection, setSingleTrack, addAgentTracks, clearAgentTracks,
          peekUserActions, clearUserActions } from './state.js';
@@ -15,52 +16,62 @@ const MAX_LOGS = 400;
 let logEl, inputEl, sendBtn;
 let undoRoundBtn, rollbackSel, rollbackBtn, stopBtn, newSessionBtn;
 let importBtn, importRow, importSelect, importConfirm, importCancel;
-let quickSel, quickRunBtn, cmpSel;
+let cmpSel;
 
-/* 快捷命令（数据驱动：加命令只改这里；value 前缀 msg| 走 LLM / cmd| 走命令层直编） */
-const QUICK_CMDS = [
-  { group: 'LLM 语义编辑', items: [
-    { value: 'msg|改成 D 多利亚调式并渲染试听', label: '改成 D 多利亚调式' },
-    { value: 'msg|把旋律整体升 2 个半音', label: '整体 +2 半音' },
-  ]},
-  { group: '命令层直编（非 LLM）', items: [
-    { value: 'cmd|transpose+2', label: '整体 +2 半音（命令层）' },
-  ]},
-];
-
-function renderQuickCmds() {
-  if (!quickSel) return;
-  quickSel.innerHTML = '';
-  const ph = document.createElement('option');
-  ph.value = '';
-  ph.textContent = '快捷命令…';
-  quickSel.appendChild(ph);
-  for (const g of QUICK_CMDS) {
-    const og = document.createElement('optgroup');
-    og.label = g.group;
-    for (const it of g.items) {
-      const o = document.createElement('option');
-      o.value = it.value;
-      o.textContent = it.label;
-      og.appendChild(o);
+/* D 件：AI 动作 chips（快捷命令改造——结构化触发，确定性 REST 不经 LLM；
+   参数走默认，要改就在对话里说） */
+async function runAiChip(name, btn) {
+  if (!store.project) { setError('先打开一个工程'); return; }
+  const old = btn.textContent;
+  btn.disabled = true;
+  try {
+    if (name === 'analyze') {
+      btn.textContent = '分析中…';
+      const r = await api.tuneAnalyze(store.project, store.tune.pack || '');
+      const f = (r && r.facts) || {};
+      const st = f.structure || {}, lv = f.levels || {};
+      const bits = [];
+      if (st.tracks) bits.push(st.tracks.length + ' 轨');
+      if (lv.mix_peak_dbfs != null) bits.push('混音峰值 ' + lv.mix_peak_dbfs + ' dBFS');
+      if (lv.clipping) bits.push('⚠ 削波');
+      sysMsg('🔍 分析电平（只读）：' + (bits.join(' · ') || '事实包已就绪（结构 / 电平 / 逐段 / 频谱 / 目标）'));
+    } else if (name === 'suggest') {
+      btn.textContent = '生成中…';
+      const r = await api.tuneSuggest(store.project, { pack: store.tune.pack || null, context: '' });
+      const n = ((((r || {}).batch) || {}).suggestions || []).length;
+      toast('＋ 调参建议：批次已生成（' + n + ' 条）→ 步骤流「待处置」');
+    } else if (name === 'arrange') {
+      btn.textContent = '生成中…';
+      let pk = store.arrange.pack;
+      if (!pk) {
+        const rp = await api.arrangePacks(store.project);
+        const list = (rp && rp.packs) || [];
+        pk = (list[0] && list[0].pack) || '';
+      }
+      if (!pk) { setError('没有可用风格包（presets/arrangements 为空）'); return; }
+      const r = await api.arrangeGenerate(store.project, { pack: pk, strength: 'standard', context: '' });
+      const st2 = (((r || {}).batch) || {}).stats || {};
+      toast('＋ 配器初稿（包 ' + pk + ' · 标准档）：' + (st2.tracks || 0) + ' 轨 / ' + (st2.notes || 0) + ' 音 → 步骤流「待处置」');
+    } else if (name === 'chain') {
+      bus.dispatch('focus-chain');
+      toast('已定位「链」页签——选好入参后点「运行全链」');
     }
-    quickSel.appendChild(og);
-  }
+  } catch (e) { setError(String((e && e.message) || e)); }
+  finally { btn.disabled = false; btn.textContent = old; }
 }
 
-function runQuickCmd(value) {
-  if (!value) return;
-  if (quickSel) quickSel.value = '';   // 复位，允许重复执行同一命令
-  if (value.startsWith('msg|')) { send(value.slice(4)); return; }
-  if (value === 'cmd|transpose+2') {
-    if (!store.project) { setError('先打开一个工程'); return; }
-    api.postBatch(store.project, '+2', [{ op: 'transpose', track: 0, index: null, value: 2 }], '命令层 demo：+2 半音')
-      .then((r) => {
-        if (r.applied) toast('命令层：已 +2 半音 ' + refTag(r));
-        else setError('命令被拒：' + (r.errors || []).join('；'));
-      })
-      .catch((err) => setError(err.message));
-  }
+/* D 件：工程上下文折叠条（自 AI 页签迁来；默认收起） */
+let engCtxBody = null;
+let engCtxSeq = 0;   // 并发渲染去重（初始 + state 事件可能同时触发）
+async function renderEngCtx() {
+  if (!engCtxBody) return;
+  const seq = ++engCtxSeq;
+  engCtxBody.innerHTML = '';
+  if (!store.project) { engCtxBody.appendChild(text('msg', '未打开工程')); return; }
+  await refreshAgents().catch(() => {});
+  if (seq !== engCtxSeq) return;   // 过期渲染丢弃
+  engCtxBody.innerHTML = '';
+  engCtxBody.appendChild(renderAgentsBlock());
 }
 
 /* ---------------- 消息记录（按工程持久化） ---------------- */
@@ -759,11 +770,13 @@ export function init(opts) {
   importSelect = opts.importSelect;
   importConfirm = opts.importConfirm;
   importCancel = opts.importCancel;
-  quickSel = opts.quickSel;
-  quickRunBtn = opts.quickRunBtn;
   cmpSel = opts.cmpSel;
 
-  renderQuickCmds();
+  /* D 件：工程上下文折叠条挂载 */
+  engCtxBody = document.getElementById('eng-ctx-body');
+  renderEngCtx();
+  bus.on('state', renderEngCtx);
+  bus.on('agents_synced', renderEngCtx);
 
   sendBtn.addEventListener('click', () => send(inputEl.value));
   inputEl.addEventListener('keydown', (e) => {
@@ -803,8 +816,10 @@ export function init(opts) {
   importConfirm.addEventListener('click', confirmImport);
   importCancel.addEventListener('click', () => { importRow.hidden = true; });
 
-  opts.chipsEl.addEventListener('change', (e) => runQuickCmd(e.target.value));
-  if (quickRunBtn) quickRunBtn.addEventListener('click', () => runQuickCmd(quickSel ? quickSel.value : ''));
+  opts.chipsEl.addEventListener('click', (e) => {
+    const chip = e.target.closest('.chip');
+    if (chip && chip.dataset.chip) runAiChip(chip.dataset.chip, chip);
+  });
 
   wireEvents();
   bus.on('state', refreshRollbackOptions);

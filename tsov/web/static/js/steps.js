@@ -11,6 +11,7 @@
 import { bus } from './events.js';
 import { api } from './api.js';
 import { store, setError } from './state.js';
+import { itemCard } from './staging.js';   // D 件：配器/链/已处置 → 复用完整操作区
 
 const VIEW_KEY = 'tsov-rail-view';            // 切换态记忆（C 件 §5）
 const STATE_TEXT = { pending: '待处置', adopted: '已采纳', discarded: '已丢弃' };
@@ -18,6 +19,7 @@ const KIND_TEXT = { chain: '处理链', tune: '调参', arrange: '配器' };
 // 口径与 chat.js 一致（B 件；重构可抽公共模块）
 const STAT_LABELS = { notes: '修改音符', track_add: '轨道', track_del: '轨道', track_edit: '轨名',
                       fx: '效果器', param: '参数', other: '动作' };
+const TUNE_KIND_TEXT = { level: '电平', pan: '声像', effect: '效果链' };
 
 let panelEl = null;
 let viewEl = null;
@@ -132,6 +134,7 @@ function entryRow(e) {
 
 function renderItemRow(it) {
   const state = it.state || 'pending';
+  const box = el('div', 'step-itembox');
   const row = el('div', 'step-item stg-' + state);
   row.dataset.itemId = it.id || '';
   row.appendChild(el('span', 'stg-badge stg-badge-' + state, STATE_TEXT[state] || state));
@@ -141,7 +144,137 @@ function renderItemRow(it) {
   row.appendChild(el('span', 'step-item-sub', sub));
   const t = itemTs(it);
   if (t) row.appendChild(el('span', 'step-item-ts', new Date(t * 1000).toTimeString().slice(0, 8)));
-  return row;
+  const arrow = el('span', 'step-item-arrow', '\u25b8');
+  row.appendChild(arrow);
+
+  /* D 件：点开 = 操作区（懒渲染一次） */
+  const body = el('div', 'step-itembody');
+  body.hidden = true;
+  let loaded = false;
+  row.addEventListener('click', async () => {
+    body.hidden = !body.hidden;
+    arrow.textContent = body.hidden ? '\u25b8' : '\u25be';
+    if (body.hidden || loaded) return;
+    loaded = true;
+    const tip = el('div', 'stg-sub', '加载中…');
+    body.appendChild(tip);
+    try {
+      const node = await buildItemBody(it);
+      body.innerHTML = '';
+      body.appendChild(node);
+    } catch (e) {
+      body.innerHTML = '';
+      body.appendChild(el('div', 'stg-sub', '展开失败：' + ((e && e.message) || e)));
+    }
+  });
+  box.appendChild(row);
+  box.appendChild(body);
+  return box;
+}
+
+/* ---------------- D 件：产物卡操作区 ---------------- */
+
+/** 待处置调参 = 建议勾选壳（REST：tune get/preview/apply）；其余复用 itemCard */
+async function buildItemBody(it) {
+  if (it.producer === 'tune' && it.state === 'pending') return buildTuneBody(it);
+  return itemCard(it);
+}
+
+let chipAudio = null;
+function playUrl(url) {
+  if (chipAudio) { chipAudio.pause(); chipAudio = null; }
+  chipAudio = new Audio(url);
+  chipAudio.play().catch(() => {});
+}
+
+async function buildTuneBody(it) {
+  const ts = (it.meta && it.meta.batch_ts) || '';
+  if (!ts) return itemCard(it);
+  const r = await api.tuneGet(store.project, ts);
+  const b = (r && r.batch) || r || {};
+  const sels = b.suggestions || [];
+  if (!sels.length) return itemCard(it);
+
+  const wrap = el('div', 'tune-wrap');
+  const selected = {};
+  for (const s of sels) selected[s.id] = true;   // 默认全选（同 AI 页签 defaultSelected 口径）
+
+  const list = el('div', 'tune-list');
+  for (const s of sels) {
+    const card = el('div', 'tune-card sel tune-k-' + s.kind);
+    card.dataset.suggId = s.id;
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = true;
+    cb.dataset.role = 'steps-tune-check';
+    cb.addEventListener('change', () => {
+      selected[s.id] = cb.checked;
+      card.classList.toggle('sel', cb.checked);
+    });
+    card.appendChild(cb);
+    const cbody = el('div', 'tune-card-body');
+    const hd = el('div', 'stg-hd');
+    hd.appendChild(el('span', 'tune-kind', TUNE_KIND_TEXT[s.kind] || s.kind || ''));
+    hd.appendChild(el('span', 'stg-title', s.title || s.id));
+    cbody.appendChild(hd);
+    if (s.reason) cbody.appendChild(el('div', 'tune-reason', s.reason));
+    const acts = el('div', 'stg-acts');
+    const pv = el('button', 'stg-btn stg-play', '▶ 试听');
+    pv.dataset.role = 'steps-tune-preview';
+    pv.title = '在副本上试跑渲染（工程零改动）';
+    pv.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      pv.disabled = true;
+      pv.textContent = '渲染中…';
+      try {
+        const rr = await api.tunePreview(store.project, ts, s.id);
+        playUrl(rr.url);
+      } catch (e) { setError('试听失败：' + ((e && e.message) || e)); }
+      finally { pv.disabled = false; pv.textContent = '▶ 试听'; }
+    });
+    acts.appendChild(pv);
+    cbody.appendChild(acts);
+    card.appendChild(cbody);
+    list.appendChild(card);
+  }
+  wrap.appendChild(list);
+
+  const foot = el('div', 'stg-acts');
+  const all = el('button', 'stg-btn', '全选');
+  all.addEventListener('click', () => {
+    for (const s of sels) selected[s.id] = true;
+    for (const cb of list.querySelectorAll('input[type=checkbox]')) cb.checked = true;
+    for (const c of list.querySelectorAll('.tune-card')) c.classList.add('sel');
+  });
+  const none = el('button', 'stg-btn', '全不选');
+  none.addEventListener('click', () => {
+    for (const s of sels) selected[s.id] = false;
+    for (const cb of list.querySelectorAll('input[type=checkbox]')) cb.checked = false;
+    for (const c of list.querySelectorAll('.tune-card')) c.classList.remove('sel');
+  });
+  const okBtn = el('button', 'stg-btn stg-adopt', '⇥ 应用选中');
+  okBtn.dataset.role = 'steps-tune-apply';
+  okBtn.title = '命令层事务 + 自动对拍；可整批撤销';
+  okBtn.addEventListener('click', async () => {
+    const ids = Object.keys(selected).filter((k) => selected[k]);
+    if (!ids.length) { setError('未勾选任何建议'); return; }
+    okBtn.disabled = true;
+    okBtn.textContent = '应用中…';
+    try {
+      const rr = await api.tuneApply(store.project, { batch_ts: ts, ids });
+      bus.dispatch('toast', '已应用 ' + ((rr.applied || []).length || ids.length) + ' 条建议（对拍小结；可整批撤销）');
+      setTimeout(() => refreshSteps(), 500);
+    } catch (e) {
+      setError('应用失败：' + ((e && e.message) || e));
+      okBtn.disabled = false;
+      okBtn.textContent = '⇥ 应用选中';
+    }
+  });
+  foot.appendChild(all);
+  foot.appendChild(none);
+  foot.appendChild(okBtn);
+  wrap.appendChild(foot);
+  return wrap;
 }
 
 function renderFeed() {

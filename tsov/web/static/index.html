@@ -193,13 +193,17 @@
       <button id="btn-import-confirm">载入</button>
       <button id="btn-import-cancel">✕</button>
     </div>
+    <details id="eng-ctx">
+      <summary>工程上下文（agents.md）</summary>
+      <div id="eng-ctx-body"></div>
+    </details>
     <div id="chat-log"></div>
     <div id="steps-view" hidden></div>
     <div id="chat-chips">
-      <select id="quick-cmd" title="快捷命令：选中即执行（LLM 语义命令 / 命令层直编）">
-        <option value="">快捷命令…</option>
-      </select>
-      <button id="btn-quick-run" title="执行当前选中的快捷命令">执行</button>
+      <button class="chip" data-chip="analyze" title="只读：事实包（结构/电平/逐段/频谱/目标），结果进对话、不出卡不进流">＋ 分析电平</button>
+      <button class="chip" data-chip="suggest" title="POST /tune/suggest（默认口径）→ 步骤流调参卡（待处置）">＋ 调参建议</button>
+      <button class="chip" data-chip="arrange" title="POST /arrange/generate（默认包/标准档）→ 步骤流配器卡（待处置）">＋ 配器初稿</button>
+      <button class="chip" data-chip="chain" title="聚焦 dock「链」页签（跑链有入参选择，保持在链面板内发起）">＋ 跑处理链</button>
     </div>
     <div id="ann-queue" hidden>
       <span class="muted small">待发送标注：</span>
@@ -227,7 +231,6 @@
     <button class="dock-tab" data-pane="mix">混音台</button>
     <button class="dock-tab" data-pane="rec">录音</button>
     <button class="dock-tab" data-pane="chain">链</button>
-    <button class="dock-tab" data-pane="ai">AI</button>
     <span class="dh-spacer"></span>
     <span class="dh-hint" id="dock-hint"></span>
     <button id="dock-fold" title="折叠/展开（记忆到 localStorage）" style="border:none;background:none;font-size:12px">▾ 收起</button>
@@ -239,7 +242,6 @@
     <div class="dock-pane" id="dock-mix"></div>
     <div class="dock-pane" id="dock-rec"></div>
     <div class="dock-pane" id="dock-chain"></div>
-    <div class="dock-pane" id="dock-ai"></div>
   </div>
 </section>
 

@@ -525,6 +525,26 @@ body.chat-folded #rail-chat { display: flex; }
 .step-earlier-head { align-self: flex-start; cursor: pointer; background: transparent; border: none; font-size: var(--fs-xs); color: var(--muted); padding: 0 2px; }
 .step-earlier-head:hover { color: var(--text); }
 .step-earlier-body { display: flex; flex-direction: column; gap: 5px; }
+
+/* ---- 对话产物流 D 件：chips / 工程上下文折叠条 / 产物卡操作区 ---- */
+#chat-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 7px 10px; border-top: 1px solid var(--border); }
+.chip {
+  font: inherit; font-size: var(--fs-sm); padding: 2px 9px;
+  border: 1px solid var(--border); background: transparent; color: var(--muted);
+  cursor: pointer; border-radius: var(--radius-note);
+}
+.chip:hover { color: var(--accent); border-color: var(--accent); }
+.chip:disabled { opacity: .5; cursor: default; }
+#eng-ctx { border-bottom: 1px solid var(--border); }
+#eng-ctx > summary { cursor: pointer; font-size: var(--fs-xs); color: var(--muted); padding: 5px 10px; user-select: none; }
+#eng-ctx > summary:hover { color: var(--text); }
+#eng-ctx-body { padding: 2px 10px 8px; }
+#eng-ctx-body .stg-ctx { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.step-itembox { display: flex; flex-direction: column; gap: 4px; }
+.step-itembody { padding: 4px 2px 2px; }
+.step-item { cursor: pointer; }
+.step-item:hover { border-color: var(--border-strong); }
+.step-item-arrow { color: var(--faint); font-size: var(--fs-xs); margin-left: 4px; }
 .toolcard summary { cursor: pointer; padding: 6px 10px; font-size: var(--fs-sm); color: var(--text); font-family: var(--font-mono); user-select: none; }
 .toolcard pre {
   margin: 0; padding: 8px 10px;

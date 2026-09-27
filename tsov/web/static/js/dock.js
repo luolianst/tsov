@@ -6,12 +6,10 @@ import { api } from './api.js';
 import { store, setError, refTag } from './state.js';
 import { themeName, trackColors } from './theme.js';
 import { initChain, enterChain } from './chain.js';
-import { initStaging, enterStaging } from './staging.js';
 
 let dockEl = null, chanPane = null, fxPane = null, srcPane = null, mixPane = null, hintEl = null;
 let recPane = null;
 let chainPane = null;
-let stagingPane = null;
 let meta = { programs: [], effect_kinds: [] };
 let metaLoaded = false;
 /* M-V8 E5 段2：效果目标（当前轨 / 各总线 / master） */
@@ -569,21 +567,19 @@ export function init(el) {
   mixPane = dockEl.querySelector('#dock-mix');
   recPane = dockEl.querySelector('#dock-rec');
   chainPane = dockEl.querySelector('#dock-chain');
-  stagingPane = dockEl.querySelector('#dock-ai');
   hintEl = dockEl.querySelector('#dock-hint');
 
   /* tab 切换 */
   const tabs = Array.from(dockEl.querySelectorAll('.dock-tab'));
-  const panes = { chan: chanPane, fx: fxPane, src: srcPane, mix: mixPane, rec: recPane, chain: chainPane,
-                    ai: stagingPane };
+  const panes = { chan: chanPane, fx: fxPane, src: srcPane, mix: mixPane, rec: recPane, chain: chainPane };
   const activateTab = (name) => {
     for (const x of tabs) x.classList.toggle('active', x.dataset.pane === name);
     for (const k of Object.keys(panes)) panes[k].classList.toggle('active', k === name);
     if (name === 'rec') renderRec();   // E2 段 3：录音面板懒渲染
     if (name === 'chain') enterChain();   // E3 段 2：处理链面板懒渲染
-    if (name === 'ai') enterStaging();    // E4 段 1：AI 页签（暂存区 + 工程上下文）
   };
   for (const t of tabs) t.addEventListener('click', () => activateTab(t.dataset.pane));
+  bus.on('focus-chain', () => activateTab('chain'));   // D 件：chips「＋跑处理链」聚焦链页签
   /* E3 段2：「转乐谱」入口（录音面板按钮 / 音频轨右键）→ 切处理链 tab（#3 验收；链 = 预设默认挂载） */
   bus.on('voice2score', () => {
     activateTab('chain');
@@ -606,7 +602,6 @@ export function init(el) {
   if (btn) btn.textContent = folded ? '▸ 展开' : '▾ 收起';
 
   initChain(chainPane);   // E3 段2：处理链面板（自挂 bus；tab 打开时懒渲染）
-  initStaging(stagingPane);   // E4 段1：AI 页签（暂存区 + 工程上下文；自挂 bus）
   bus.on('state', renderAll);
   bus.on('selection', renderAll);
   bus.on('viewmode', renderAll);   // 修正轮2：总谱 ↔ 单轨切换 → 通道条跟随上下文

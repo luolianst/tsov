@@ -289,8 +289,6 @@ function boot() {
     importConfirm: $('btn-import-confirm'),
     importCancel: $('btn-import-cancel'),
     chipsEl: $('chat-chips'),
-    quickSel: $('quick-cmd'),
-    quickRunBtn: $('btn-quick-run'),
     cmpSel: $('cmp-base'),
   });
   playback.init({

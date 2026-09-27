@@ -186,6 +186,7 @@ async function doSyncAgents(btn) {
     const r = await api.agentsSync(store.project);
     setStagingState({ agents: await api.agentsGet(store.project) });
     bus.dispatch('toast', '工程上下文已刷新（agents.md ' + (r.project && r.project.created ? '新建' : '更新') + '）');
+    bus.dispatch('agents_synced');   // D 件：对话顶部折叠条重渲染
   } catch (e) {
     setError(String((e && e.message) || e));
   } finally {
@@ -355,7 +356,7 @@ async function doPreview(batch, s, btn) {
 
 /* ---------------- 渲染 ---------------- */
 
-function renderAgentsBlock() {
+export function renderAgentsBlock() {
   const wrap = el('div', 'stg-ctx');
   const a = store.staging.agents;
   wrap.appendChild(el('span', 'stg-title-main', '工程上下文'));
@@ -583,7 +584,7 @@ function renderTuneBlock() {
 
 /* ---------- 暂存区卡片 ---------- */
 
-function itemCard(it) {
+export function itemCard(it) {
   const card = el('div', 'stg-card stg-' + it.state);
   card.dataset.itemId = it.id;   // CDP 验收定向选择器（E4 段1）
   const hd = el('div', 'stg-hd');
