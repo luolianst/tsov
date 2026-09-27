@@ -91,7 +91,8 @@ def test_clip_source_places_samples(wd):
     out = src.render([], SR, int(2.0 * SR))
     i0, n = SR, len(sig)
     assert np.allclose(out[:i0], 0.0, atol=1e-7)
-    assert np.allclose(out[i0 : i0 + n], sig, atol=1e-6)
+    assert np.allclose(out[i0 : i0 + n, 0], sig, atol=1e-6)
+    assert np.allclose(out[i0 : i0 + n, 1], sig, atol=1e-6)   # mono 素材 → 双声道复制
     assert np.allclose(out[i0 + n :], 0.0, atol=1e-7)
     assert src.clip_end == pytest.approx(1.5, abs=1e-9)
 

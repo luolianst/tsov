@@ -18,6 +18,8 @@ def project_state(proj: Project) -> dict:
         "history": {"can_undo": proj.can_undo, "can_redo": proj.can_redo},
         "git_log": proj.log(20),
         "summary": proj.summary(),
+        # M-V8 E6：总时长（含音频 clip 尾 +1s 释放；前端 fit/时长显示用——音频轨一等公民）
+        "duration": score_duration(proj.score, proj.root),
     }
 
 
@@ -34,15 +36,22 @@ def score_duration(score: Score, root=None) -> float:
         for t in score.tracks:
             if str(getattr(t, "kind", "midi") or "midi") != "audio":
                 continue
-            rel = str((getattr(t, "audio", None) or {}).get("file") or "")
-            if not rel:
-                continue
-            try:
-                info = sf.info(str(base / rel))
-                off = float((getattr(t, "audio", None) or {}).get("offset") or 0.0)
-                ends.append(off + float(info.frames) / float(info.samplerate))
-            except Exception:  # noqa: BLE001 —— 文件缺失/损坏：时长忽略（load 时报错）
-                continue
+            for cl in t.audio_clips():  # E6：多 clip；src_len=null → 到文件尾
+                rel = str(cl.get("file") or "")
+                if not rel:
+                    continue
+                try:
+                    info = sf.info(str(base / rel))
+                    dur = float(info.frames) / float(info.samplerate)
+                    span = dur - float(cl.get("src_offset") or 0.0)
+                    if cl.get("src_len") is not None:
+                        span = min(float(cl["src_len"]), span)
+                    ends.append(
+                        float(cl.get("start") or 0.0)
+                        + max(0.0, span) * float(cl.get("stretch") or 1.0)
+                    )
+                except Exception:  # noqa: BLE001 —— 文件缺失/损坏：时长忽略（load 时报错）
+                    continue
     return round(max(ends) + 1.0, 3) if ends else 1.0  # 含 1s 释放尾（与 mix_graph 一致）
 
 

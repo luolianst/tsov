@@ -22,6 +22,63 @@ def parse_time_signature(sig: str | None) -> tuple[int, int]:
     return num, den
 
 
+def _audio_clip_id(file: str, start: float, src_offset: float) -> str:
+    """旧形态（{file, offset}）迁移时派生确定性 clip id（同输入 → 同 id，跨加载稳定）。"""
+    import hashlib
+
+    blob = f"{file}|{start:.6f}|{src_offset:.6f}".encode("utf-8")
+    return "c" + hashlib.sha1(blob).hexdigest()[:7]
+
+
+def normalize_audio_clips(audio: dict | None) -> list[dict]:
+    """Track.audio → 规范化 clip 列表（M-V8 E6 音频编辑刀）。
+
+    - 新形态 ``{"clips": [...]}``：逐条补齐缺省字段（数值化；clip_id 缺失时按内容派生）。
+    - 旧形态 ``{"file": …, "offset": …}``（E2 第一刀单 clip/轨）：迁移为单 clip
+      ``{src_offset: 0, src_len: None, stretch: 1, fade_in: 0, fade_out: 0}``。
+    - ``src_len=None`` 语义 =「到文件尾」——core 层不读文件，实际时长由渲染层按文件截断。
+    - 空/未知 → []。
+    """
+    a = dict(audio or {})
+    raw = a.get("clips")
+    out: list[dict] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            src_len = item.get("src_len")
+            clip = {
+                "clip_id": str(item.get("clip_id") or ""),
+                "file": str(item.get("file") or ""),
+                "start": float(item.get("start") or 0.0),
+                "src_offset": float(item.get("src_offset") or 0.0),
+                "src_len": None if src_len is None else float(src_len),
+                "stretch": float(item["stretch"]) if item.get("stretch") is not None else 1.0,
+                "fade_in": float(item.get("fade_in") or 0.0),
+                "fade_out": float(item.get("fade_out") or 0.0),
+            }
+            if not clip["clip_id"]:
+                clip["clip_id"] = _audio_clip_id(clip["file"], clip["start"], clip["src_offset"])
+            out.append(clip)
+        return out
+    rel = str(a.get("file") or "")
+    if rel:
+        start = float(a.get("offset") or 0.0)
+        out.append(
+            {
+                "clip_id": _audio_clip_id(rel, start, 0.0),
+                "file": rel,
+                "start": start,
+                "src_offset": 0.0,
+                "src_len": None,
+                "stretch": 1.0,
+                "fade_in": 0.0,
+                "fade_out": 0.0,
+            }
+        )
+    return out
+
+
 @dataclass
 class Effect:
     type: str  # "reverb" / "compressor" / ...
@@ -93,6 +150,10 @@ class Track:
             audio=dict(data.get("audio") or {}),
             sends={str(k): float(v) for k, v in (data.get("sends") or {}).items()},
         )
+
+    def audio_clips(self) -> list[dict]:
+        """规范化音频 clip 列表（M-V8 E6；兼容第一刀 {file, offset} 单字段形态）。"""
+        return normalize_audio_clips(self.audio)
 
 
 @dataclass

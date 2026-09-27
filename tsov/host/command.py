@@ -28,6 +28,9 @@
   与手绘/agent 同一动作路径
 - M-V8 E4 段2 增补（2026-09-26）：set_effect_params（部分更新既有链中第 k 个效果的参数：
   index 定位 + params 合并 + validate_effect 全量复验）——调参建议「改既有效果」同径落地
+- M-V8 E6 段1 增补（2026-09-27 音频编辑刀）：set_audio_clips（音频轨 clip 组整替——切片/修剪/
+  移动/淡入淡出/伸缩统一原子落点；src_len=null 表示到文件尾；stretch∈[0.5,2]；fade_in/fade_out 秒）
+  / split_audio_clip（时间线 at 秒切分指定 clip：左段保原 id、右段新 id、接缝零间隙）——与 UI 手势同径
 - 事务协议：EditBatch.apply(score) 在深拷贝上逐条执行——非法命令被拒绝并记录 error，
   合法命令全部生效（部分应用 + 错误清单）；apply 前不脏原 Score。
 - 该命令层 = M-V2 起 agent 工具与 Web UI 共用的编辑通道（docs/05 接口契约）。
@@ -37,6 +40,7 @@ from __future__ import annotations
 
 import copy
 import re
+import uuid
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
@@ -154,6 +158,11 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
     # M-V8 E2：音频轨字段（offset/file；只作用于音频轨）
     if c.op == "set_audio_track":
         return _apply_set_audio_track(score, track, c)
+    # M-V8 E6 段1：音频编辑刀（clip 组整替 / 语义切分——只作用于音频轨）
+    if c.op == "set_audio_clips":
+        return _apply_set_audio_clips(score, track, c)
+    if c.op == "split_audio_clip":
+        return _apply_split_audio_clip(score, track, c)
     if c.op == "set_track_mix":
         return _apply_set_track_mix(score, track, c)
     # M-V8 E3 段3：批量写音符（链产物落轨；轨级批量替换）
@@ -1125,13 +1134,42 @@ def _apply_add_audio_track(score: Score, c: EditCommand) -> str | None:
 
 
 def _apply_set_audio_track(score: Score, track, c: EditCommand) -> str | None:
-    """track = 索引；value = {offset?, file?}——只作用于音频轨（kind=="audio"）。"""
+    """track = 索引；value = {offset?, file?}——只作用于音频轨（kind=="audio"）。
+
+    E6：轨道已是 clip 形态时——offset/file 映射到唯一 clip（多 clip → 拒绝，请用 set_audio_clips）。
+    """
     if str(getattr(track, "kind", "midi") or "midi") != "audio":
         return f"set_audio_track 只作用于音频轨（track {c.track} 是 MIDI 轨）"
     v = c.value
     if not isinstance(v, dict):
         return "set_audio_track value 需 {offset?, file?}"
     audio = dict(getattr(track, "audio", None) or {})
+    if "clips" in audio:
+        clips = track.audio_clips()
+        if len(clips) != 1:
+            return f"set_audio_track 该轨道为多 clip（{len(clips)} 条），请用 set_audio_clips"
+        cl = dict(clips[0])
+        changed = False
+        if "offset" in v:
+            try:
+                off = float(v["offset"])
+            except (TypeError, ValueError):
+                return f"set_audio_track offset 非法：{v['offset']!r}"
+            if off < 0:
+                return f"set_audio_track offset 不能为负：{off}"
+            cl["start"] = round(off, 6)
+            changed = True
+        if "file" in v:
+            rel = str(v.get("file") or "").strip().replace("\\", "/")
+            err = _audio_track_path_guard(rel)
+            if err:
+                return f"set_audio_track {err}"
+            cl["file"] = rel
+            changed = True
+        if not changed:
+            return "set_audio_track 无可改字段（offset / file）"
+        track.audio = {"clips": [cl]}
+        return None
     changed = False
     if "offset" in v:
         try:
@@ -1152,4 +1190,139 @@ def _apply_set_audio_track(score: Score, track, c: EditCommand) -> str | None:
     if not changed:
         return "set_audio_track 无可改字段（offset / file）"
     track.audio = audio
+    return None
+
+
+# ---------------------------------------------------------------------------
+# M-V8 E6 段1：音频编辑刀（clip 组整替 / 语义切分）
+# ---------------------------------------------------------------------------
+
+
+def _validate_clip(v: dict, idx: int) -> tuple[dict | None, str | None]:
+    """单条 clip 字段校验 → (规范化 clip, 错误文本)。"""
+    rel = str(v.get("file") or "").strip().replace("\\", "/")
+    err = _audio_track_path_guard(rel)
+    if err:
+        return None, f"clips[{idx}] {err}"
+
+    def _num(key: str, default: float, *, lo: float | None = None, hi: float | None = None) -> float:
+        raw = v.get(key)
+        if raw is None:
+            val = default
+        else:
+            try:
+                val = float(raw)
+            except (TypeError, ValueError):
+                raise ValueError(f"clips[{idx}] {key} 非法：{raw!r}") from None
+        if lo is not None and val < lo:
+            raise ValueError(f"clips[{idx}] {key} 越界（≥{lo}）：{val}")
+        if hi is not None and val > hi:
+            raise ValueError(f"clips[{idx}] {key} 越界（≤{hi}）：{val}")
+        return val
+
+    try:
+        start = _num("start", 0.0, lo=0.0)
+        src_offset = _num("src_offset", 0.0, lo=0.0)
+        stretch = _num("stretch", 1.0, lo=0.5, hi=2.0)
+        fade_in = _num("fade_in", 0.0, lo=0.0)
+        fade_out = _num("fade_out", 0.0, lo=0.0)
+        src_len = None
+        if v.get("src_len") is not None:
+            src_len = _num("src_len", 0.0, lo=1e-4)
+    except ValueError as exc:
+        return None, str(exc)
+    clip_id = str(v.get("clip_id") or "").strip()
+    if len(clip_id) > 64:
+        return None, f"clips[{idx}] clip_id 过长（≤64 字符）"
+    return (
+        {
+            "clip_id": clip_id,
+            "file": rel,
+            "start": round(start, 6),
+            "src_offset": round(src_offset, 6),
+            "src_len": None if src_len is None else round(src_len, 6),
+            "stretch": round(stretch, 6),
+            "fade_in": round(fade_in, 6),
+            "fade_out": round(fade_out, 6),
+        },
+        None,
+    )
+
+
+def _apply_set_audio_clips(score: Score, track, c: EditCommand) -> str | None:
+    """track=索引；value={clips:[…]}——整组替换音频轨 clip 列表（E6：切片/修剪/移动/淡化/伸缩统一原子落点）。
+
+    clip = {clip_id?, file, start≥0, src_offset≥0, src_len(null=到文件尾,>0),
+    stretch∈[0.5,2], fade_in≥0, fade_out≥0}；空数组 = 清空（静音轨）。
+    """
+    if str(getattr(track, "kind", "midi") or "midi") != "audio":
+        return f"set_audio_clips 只作用于音频轨（track {c.track} 是 MIDI 轨）"
+    v = c.value
+    if not isinstance(v, dict) or not isinstance(v.get("clips"), list):
+        return "set_audio_clips value 需 {clips: [...]}"
+    out: list[dict] = []
+    seen: set[str] = set()
+    for i, item in enumerate(v["clips"]):
+        if not isinstance(item, dict):
+            return f"set_audio_clips clips[{i}] 需为对象"
+        clip, err = _validate_clip(item, i)
+        if err:
+            return f"set_audio_clips {err}"
+        if not clip["clip_id"]:
+            clip["clip_id"] = uuid.uuid4().hex[:8]
+        if clip["clip_id"] in seen:
+            return f"set_audio_clips clip_id 重复：{clip['clip_id']!r}"
+        seen.add(clip["clip_id"])
+        out.append(clip)
+    track.audio = {"clips": out}
+    return None
+
+
+def _apply_split_audio_clip(score: Score, track, c: EditCommand) -> str | None:
+    """track=索引；value={clip_id, at}——时间线 at 秒处切分 clip（E6；接缝零间隙）。
+
+    左段保留原 clip_id 与 fade_in、源区间 [src_offset, +Δ/k]；右段新 id、继承 fade_out、
+    源区间顺移（已知 src_len 时按剩余收缩；null 保持「到文件尾」）。at 须 ∈ (start+1ms, end−1ms)（src_len=null 时仅校验下界）。
+    """
+    if str(getattr(track, "kind", "midi") or "midi") != "audio":
+        return f"split_audio_clip 只作用于音频轨（track {c.track} 是 MIDI 轨）"
+    v = c.value
+    if not isinstance(v, dict):
+        return "split_audio_clip value 需 {clip_id, at}"
+    clip_id = str(v.get("clip_id") or "").strip()
+    try:
+        at = float(v.get("at"))
+    except (TypeError, ValueError):
+        return f"split_audio_clip at 非法：{v.get('at')!r}"
+    clips = track.audio_clips()
+    if clip_id:
+        idx = next((i for i, cl in enumerate(clips) if cl["clip_id"] == clip_id), None)
+    elif len(clips) == 1:  # UI 便捷：空 id = 唯一 clip（旧形态未迁移/单片段轨道）
+        idx = 0
+    else:
+        return "split_audio_clip 多 clip 轨道须指定 clip_id"
+    if idx is None:
+        return f"split_audio_clip 未找到 clip：{clip_id!r}"
+    cl = clips[idx]
+    k = float(cl["stretch"]) or 1.0
+    start = float(cl["start"])
+    if at <= start + 0.001:
+        return f"split_audio_clip 切点须在 clip 起点之后：at={at} start={start}"
+    if cl["src_len"] is not None:
+        end = start + float(cl["src_len"]) * k
+        if at >= end - 0.001:
+            return f"split_audio_clip 切点须在 clip 终点之前：at={at} end={end}"
+    left_src = (at - start) / k
+    left = dict(cl)
+    left["src_len"] = round(left_src, 6)
+    left["fade_out"] = 0.0
+    right = dict(cl)
+    right["clip_id"] = uuid.uuid4().hex[:8]
+    right["start"] = round(at, 6)
+    right["src_offset"] = round(float(cl["src_offset"]) + left_src, 6)
+    if cl["src_len"] is not None:  # 已知长度：右段按剩余源区间收缩（null = 到文件尾，保持）
+        right["src_len"] = round(float(cl["src_len"]) - left_src, 6)
+    right["fade_in"] = 0.0
+    clips[idx : idx + 1] = [left, right]
+    track.audio = {"clips": clips}
     return None

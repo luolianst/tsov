@@ -104,7 +104,7 @@ def test_project_create_list_state(env):
     r = env["client"].get("/api/projects/p1/state")
     assert r.status_code == 200
     s = r.json()
-    assert set(s) == {"project", "score", "selection", "history", "git_log", "summary"}
+    assert set(s) == {"project", "score", "selection", "history", "git_log", "summary", "duration"}
     assert len(s["score"]["tracks"][0]["notes"]) == 3
     assert s["history"] == {"can_undo": False, "can_redo": False}
     assert any("init" in ln for ln in s["git_log"])

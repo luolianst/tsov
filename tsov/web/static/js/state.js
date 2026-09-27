@@ -10,6 +10,7 @@ export const store = {
   projects: [],
   score: null,                 // Score JSON（ADR-0005 schema）
   summary: '',
+  duration: 0,                 // M-V8 E6：总时长（含音频 clip 尾 +1s 释放；服务端 score_duration 口径）
   gitLog: [],
   history: { can_undo: false, can_redo: false },
 
@@ -137,6 +138,7 @@ export function setState(s, opts) {
   store.project = s.project;
   store.score = s.score;
   store.summary = s.summary || '';
+  store.duration = Number(s.duration) || 0;   /* M-V8 E6：含音频 clip 尾（fit/时长用） */
   store.gitLog = s.git_log || [];
   store.history = s.history || { can_undo: false, can_redo: false };
   if (keep && store.score && store.score.tracks[keep.track]) {
@@ -413,6 +415,8 @@ export function scoreBounds() {
       }
     }
   }
+  /* M-V8 E6：音频 clip 尾并入内容界（服务端 duration 含 +1s 释放尾 → 减回）——纯音频工程 fit/时长正确 */
+  if (store.duration > 1) tEnd = Math.max(tEnd, store.duration - 1.0);
   if (lo > hi) { lo = 60; hi = 72; }
   return { lo, hi, tEnd };
 }
@@ -464,6 +468,31 @@ export function noteUserAction(text) {
 export function peekUserActions() { return userActions.slice(-10); }
 export function clearUserActions() { userActions.length = 0; }
 
+/* ---------------- M-V8 E6 段1：音频 clip 规范化（与后端读时迁移同口径） ----------------
+   旧形态 {file, offset} → 单 clip；id 缺失 = ''（提交时由服务端补；旧轨道 id 稳定后随状态回填）。 */
+export function audioClipsOf(trk) {
+  const a = (trk && trk.audio) || {};
+  if (Array.isArray(a.clips)) {
+    return a.clips.map((c) => ({
+      clip_id: c.clip_id || '',
+      file: c.file || '',
+      start: +c.start || 0,
+      src_offset: +c.src_offset || 0,
+      src_len: (c.src_len == null) ? null : +c.src_len,
+      stretch: (c.stretch == null) ? 1 : +c.stretch,
+      fade_in: +c.fade_in || 0,
+      fade_out: +c.fade_out || 0,
+    }));
+  }
+  if (a.file) {
+    return [{
+      clip_id: '', file: a.file, start: +a.offset || 0, src_offset: 0,
+      src_len: null, stretch: 1, fade_in: 0, fade_out: 0,
+    }];
+  }
+  return [];
+}
+
 /* ---------------- 批B（ADR-0017）：只读可编程面 ----------------
    window.__tsovState() —— 返回当前前端状态快照（只读，调用即取新值）。
    用途：CDP 实测断言 / 外部 agent（MCP 线）观察宿主状态；不提供写入口（写走命令层）。 */
@@ -472,6 +501,7 @@ export function snapshot() {
     project: store.project,
     score: store.score,               // ADR-0005 schema（大对象，按需取字段）
     summary: store.summary,
+    duration: store.duration || 0,    /* M-V8 E6：总时长（含音频尾，服务端口径） */
     gitLog: store.gitLog,
     history: store.history,
     selection: { track: store.selection.track, indices: store.selection.indices.slice() },
@@ -504,6 +534,10 @@ export function snapshot() {
     split: splitState(),   /* M-V8 E3 段1：单轨分屏快照（CDP 断言用） */
     /* M-V8 E5 段2：自动化 lane / 电平表快照（CDP 断言用） */
     automation: { open: store.autoLane.open, param: store.autoLane.param },
+    /* M-V8 E6 段1：音频轨 clip 规范快照（CDP 断言用；旧 {file, offset} → 单 clip 同口径） */
+    audio: (store.score && Array.isArray(store.score.tracks) ? store.score.tracks : [])
+      .map((t, i) => ((t && t.kind === 'audio') ? { ti: i, name: t.name || '', clips: audioClipsOf(t) } : null))
+      .filter(Boolean),
     meter: Object.assign({}, store.meter),
     /* M-V8 E3 段2：处理链快照（CDP 断言用；steps 浅拷贝防外部持引用） */
     chain: {

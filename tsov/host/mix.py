@@ -62,9 +62,17 @@ def render_track_source(ht, samplerate: int, n_frames: int) -> np.ndarray:
     """轨内**前段**（可缓存，ADR-0018）：音源合成 → 效果链（居中双单声道输入）。
 
     返回 (n_frames, 2) float32；不含推子/自动化/声像（这些由 `apply_track_mix` 在混音期应用）。
+
+    M-V8 E6：音源返回 (n,) mono 时按既有口径复制双声道；返回 (n,2)（如音频轨，
+    立体声保真）时直接用其 L/R（>2 声道取前两路）。
     """
     buf = np.asarray(ht.source.render(ht.notes, samplerate, n_frames), dtype=np.float32)
-    stereo = np.stack([buf, buf], axis=1).astype(np.float32)
+    if buf.ndim == 1:
+        stereo = np.stack([buf, buf], axis=1).astype(np.float32)
+    elif buf.shape[1] == 1:
+        stereo = np.repeat(buf, 2, axis=1).astype(np.float32)
+    else:
+        stereo = np.ascontiguousarray(buf[:, :2], dtype=np.float32)
     fx = getattr(ht.track.instrument, "effects", None) or []
     if fx:
         stereo = apply_effect_chain(stereo, samplerate, fx)
