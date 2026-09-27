@@ -20,7 +20,7 @@ from typing import Iterable
 import numpy as np
 
 from ..core.notes import Note
-from ..midi.export import GM_PROGRAMS, is_drum_track, program_number  # noqa: F401  约定即文档
+from ..midi.export import DRUM_BANK, GM_PROGRAMS, is_drum_track, program_number  # noqa: F401  约定即文档
 
 
 class SoundSource(abc.ABC):
@@ -81,7 +81,7 @@ class SF2Source(SoundSource):
             raise RuntimeError(f"SoundFont 加载失败：{soundfont}")
         self.program = program
         self._channel = 9 if is_drum_track(program) else 0
-        self._synth.program_select(self._channel, self._sfid, 0, program_number(self.program))
+        self._select_program()
         self._ticks = 0  # 累计已渲染样本数（相位对齐用）
         # 离线渲染确定性：FluidSynth 的 reverb/chorus 缓冲无法清的 API（system_reset 也不清），
         # 多遍渲染会互相串尾音 → 缺省关闭；需要混响走效果链层（EffectProcessor，后续）
@@ -89,6 +89,17 @@ class SF2Source(SoundSource):
         if not self.fx:
             self._synth.set_reverb_level(0.0)
             self._synth.set_chorus_level(0.0)
+
+    def _select_program(self) -> None:
+        """选预设：打击乐 → GM 鼓组（bank 128 / preset 0 Standard Kit）；其余 → bank 0。
+
+        bug 教训（2026-09-27）：鼓轨曾走 `program_select(ch9, bank=0, preset=0)`——
+        bank0/preset0 即大钢琴，把通道 9 的默认鼓组顶掉 →「内置 drum 实为钢琴」。
+        """
+        if is_drum_track(self.program):
+            self._synth.program_select(self._channel, self._sfid, DRUM_BANK, 0)
+        else:
+            self._synth.program_select(self._channel, self._sfid, 0, program_number(self.program))
 
     def render(self, notes: Iterable[Note], samplerate: int, n_frames: int) -> np.ndarray:
         notes = list(notes)
@@ -148,7 +159,7 @@ class SF2Source(SoundSource):
         pad = (-self._ticks) % _FLUID_BLOCK
         if pad:
             self._pull(pad)
-        self._synth.program_select(self._channel, self._sfid, 0, program_number(self.program))
+        self._select_program()
 
     def close(self) -> None:
         self._synth.delete()

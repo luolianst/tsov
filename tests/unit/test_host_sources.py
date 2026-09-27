@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 
 from tsov.core.notes import Note
-from tsov.host.instrument import SFZSource, VST3Source, _parse_sfz, make_source
+from tsov.host.instrument import SF2Source, SFZSource, VST3Source, _parse_sfz, make_source
 
 from unit._cleanup import rmtree_force
 
@@ -37,6 +37,13 @@ def _dominant_hz(seg: np.ndarray, sr: int = 44100) -> float:
     spec = np.abs(np.fft.rfft(seg * np.hanning(len(seg))))
     freqs = np.fft.rfftfreq(len(seg), 1.0 / sr)
     return float(freqs[int(np.argmax(spec))])
+
+
+def _centroid_hz(seg: np.ndarray, sr: int = 44100) -> float:
+    seg = seg - float(seg.mean())
+    spec = np.abs(np.fft.rfft(seg * np.hanning(len(seg))))
+    freqs = np.fft.rfftfreq(len(seg), 1.0 / sr)
+    return float((spec * freqs).sum() / max(spec.sum(), 1e-12))
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +99,51 @@ def test_sfz_parse_subset_and_key_alias():
         assert regions[1]["lokey"] == 100 and regions[1]["sample"] == "b.wav"
     finally:
         rmtree_force(d)   # 清理：.git/objects 只读属性 → chmod 强删（见 _cleanup.py）
+
+
+# ---------------------------------------------------------------------------
+# SF2（FluidSynth）——关键回归：打击乐仓库位
+# ---------------------------------------------------------------------------
+
+
+def _sf2_available() -> bool:
+    try:
+        from tsov.render.fluidsynth_backend import _load_fluidsynth, default_soundfont
+
+        _load_fluidsynth()
+        return bool(default_soundfont())
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(not _sf2_available(), reason="FluidSynth DLL 或 SoundFont 缺失")
+def test_sf2_drums_use_percussion_bank():
+    """回归（2026-09-27）：「内置 drum 实为钢琴」——drums 必须选 GM bank128 鼓组。
+
+    bug 形态：曾对鼓轨 program_select(ch9, bank=0, preset=0) → bank0/preset0=大钢琴，
+    drums 与 piano 渲染逐样本相关 ≈1.0。修复后 hihat（note 42）质心 ≈10.5kHz。
+    再犯即红：质心暴跌（≈1.2kHz）且与钢琴高度相关。
+    """
+    from tsov.render.fluidsynth_backend import default_soundfont
+
+    sr = 44100
+    n = int(0.9 * sr)
+
+    src_d = SF2Source(default_soundfont(), program="drums")
+    try:
+        out_d = np.asarray(src_d.render([_note(0.0, 0.5, 42)], sr, n), dtype=np.float64)
+    finally:
+        src_d.close()
+    src_p = SF2Source(default_soundfont(), program="piano")
+    try:
+        out_p = np.asarray(src_p.render([_note(0.0, 0.5, 42)], sr, n), dtype=np.float64)
+    finally:
+        src_p.close()
+
+    cd = _centroid_hz(out_d)
+    corr = float(np.corrcoef(out_d, out_p)[0, 1])
+    assert cd > 5000.0, f"鼓质心 {cd:.0f}Hz 不像打击乐（hihat 应 ≈10kHz，钢琴 ≈1.2kHz）"
+    assert abs(corr) < 0.5, f"drums 与 piano 相关 {corr:.2f}——鼓音源疑似又变回钢琴"
 
 
 # ---------------------------------------------------------------------------

@@ -56,6 +56,10 @@ GM_PROGRAMS = {
 # 打击乐 note（GM channel 9）
 DRUM_NOTES = {"kick": 36, "snare": 38, "hihat": 42, "crash": 49}
 
+# GM 打击乐 bank：channel 9 的鼓组在 bank 128（bank 0 / preset 0 = 大钢琴——
+# 2026-09-27 修复前，SF2Source 曾对鼓轨显式选 bank0 →「内置 drum 实为钢琴」）
+DRUM_BANK = 128
+
 # 琴键写法 → (key_number)。大调 = 主音半音序号；小调 = 12 + 主音半音序号
 _PITCH_CLASS = {
     "c": 0, "c#": 1, "db": 1, "d": 2, "d#": 3, "eb": 3, "e": 4, "f": 5,
