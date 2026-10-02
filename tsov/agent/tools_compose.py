@@ -457,7 +457,11 @@ def tool_export_midi(args: dict) -> str:
 
 
 def tool_read_text(args: dict) -> str:
-    """读取仓库内的文本文件原文（预设/技能/文档/配置；限仓库内、≤400KB）。"""
+    """读取仓库内文本文件（预设/技能/文档/配置；限仓库内、≤400KB）。
+
+    三种读法：默认整读（60K 字符截断）；`match` 子串筛选（返回带行号的命中行，最多 50 条）；
+    `offset`/`limit` 按行读段（1-based，limit 默认 200）。大文件：先 match 定位行号，再按段读原文。
+    """
     root = Path(__file__).resolve().parents[2]  # 仓库根
     p = Path(str(args["path"]))
     if not p.is_absolute():
@@ -473,6 +477,40 @@ def tool_read_text(args: dict) -> str:
     if size > 400_000:
         raise ValueError(f"文件过大（{size} bytes > 400KB）：{rel}（换用更小的文件或只看片段）")
     text = p.read_text(encoding="utf-8", errors="replace")
+
+    match = args.get("match")
+    if match:
+        needle = str(match).lower()
+        lines = text.splitlines()
+        hits = [i + 1 for i, ln in enumerate(lines) if needle in ln.lower()]
+        if not hits:
+            return f"文件 {rel}（共 {len(lines)} 行）：未找到包含 {str(match)!r} 的行。"
+        shown = hits[:50]
+        body = "\n".join(f"L{n}: {lines[n - 1][:300]}" for n in shown)
+        extra = f"、仅列前 50" if len(hits) > 50 else ""
+        return (f"文件 {rel}（共 {len(lines)} 行，命中 {len(hits)} 行{extra}）：\n{body}"
+                f"\n（用 offset/limit 读取对应行段原文）")
+
+    offset = args.get("offset")
+    limit = args.get("limit")
+    if offset is not None or limit is not None:
+        lines = text.splitlines()
+        total = len(lines)
+        start = max(1, int(offset)) if offset is not None else 1
+        if start > total:
+            return f"文件 {rel}（共 {total} 行）：offset {start} 超出文件行数。"
+        count = max(1, int(limit)) if limit is not None else 200
+        budget, used, out, end = 30_000, 0, [], start - 1
+        for i in range(start, min(start + count - 1, total) + 1):
+            piece = f"L{i}: {lines[i - 1][:500]}"
+            if used + len(piece) + 1 > budget:
+                break
+            out.append(piece)
+            used += len(piece) + 1
+            end = i
+        more = "" if end >= total else f"；还有 {total - end} 行，可续读 offset={end + 1}"
+        return f"文件 {rel}（共 {total} 行，显示 L{start}-L{end}{more}）：\n" + "\n".join(out)
+
     cap = 60_000
     cut = f"\n…（截断：全文 {size} bytes，此处显示前 {cap} 字符）" if len(text) > cap else ""
     return f"文件 {rel}（{size} bytes）：\n{text[:cap]}{cut}"
@@ -625,8 +663,12 @@ def register_compose_tools(registry: ToolRegistry) -> None:
 
     registry.register(ToolSpec(
         name="read_text",
-        description="读取仓库内文本文件原文（预设 json / 技能 md / 文档；≤400KB，超长截断）",
+        description=("读取仓库内文本文件（预设 json / 技能 md / 文档；≤400KB，默认整读截断 60K 字符）。"
+                     "大文件：先 match=子串 定位（返回带行号命中行），再 offset/limit 按行读段（1-based，limit 默认 200）"),
         parameters={"type": "object", "properties": {
             "path": {"type": "string", "description": "仓库内相对路径或绝对路径（如 presets/arrangements/wotaiko-fast-6-8.json）"},
+            "match": {"type": "string", "description": "可选：子串筛选（不区分大小写），返回命中行与行号（最多 50 条）"},
+            "offset": {"type": "integer", "description": "可选：起始行号（1-based）"},
+            "limit": {"type": "integer", "description": "可选：读取行数（默认 200）"},
         }, "required": ["path"]},
         handler=tool_read_text))

@@ -266,6 +266,21 @@ def test_read_text_tool():
         tc.tool_read_text({"path": "C:/Windows/win.ini"})  # 仓库外拒读
 
 
+def test_read_text_match_and_offset():
+    """大文件导航：match 定位行号 → offset/limit 按行读段（知识卡包检索用，2026-10-02 增）。"""
+    path = "presets/arrangements/wotaiko-fast-6-8.json"
+    m = tc.tool_read_text({"path": path, "match": "instruments"})
+    assert "命中" in m and "instruments" in m and "L" in m
+    seg = tc.tool_read_text({"path": path, "offset": 1, "limit": 3})
+    first = seg.splitlines()[0]
+    assert "显示 L1-L" in first
+    assert seg.splitlines()[1].startswith("L1: ")
+    none = tc.tool_read_text({"path": path, "match": "zzz-not-there-zzz"})
+    assert "未找到" in none
+    over = tc.tool_read_text({"path": path, "offset": 99999})
+    assert "超出" in over
+
+
 def test_load_score_rejects_non_score():
     """任务1/2 实测坑：load_score 读预设 json → KeyError: 'tempo' 天书报错 → 现给指引。"""
     from tsov.agent.tools import tool_load_score
