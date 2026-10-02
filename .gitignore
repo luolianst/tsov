@@ -56,3 +56,7 @@ temp/
 tsov-settings.json
 # 用户级全局偏好（本机档，同 settings；不入库）
 agents-user.md
+
+# 知识库投放（geyun 教材拆书产物 · 内部参考，不入公开仓；本地保留）
+knowledge/
+skills/电子簇-knowledge.md
