@@ -156,9 +156,21 @@ class ChainRunner:
         return None
 
     def source_audio_path(self) -> Path:
-        """源音频绝对路径（工程 audio/ 内）。"""
+        """源音频绝对路径（工程 audio/ 内）。
+
+        E6 兼容：轨道被 clip 编辑（拖动/切片）后 audio 为 ``{"clips": [...]}`` 形态——
+        单片段取该片段的文件引用；多片段暂不支持（明确报错，避免取错素材）。
+        """
         t = self.proj.score.tracks[self.source_track]
-        rel = str((t.audio or {}).get("file") or "")
+        audio = t.audio or {}
+        rel = str(audio.get("file") or "")
+        if not rel and "clips" in audio:
+            clips = [c for c in t.audio_clips() if c.get("file")]
+            if len(clips) > 1:
+                raise ValueError(
+                    f"音频轨 {self.source_track} 为多片段（{len(clips)} 段）——"
+                    "链暂不支持多片段源（先合并为单段再跑）")
+            rel = str((clips[0].get("file") if clips else "") or "")
         if not rel:
             raise ValueError(f"音频轨 {self.source_track} 没有 file 字段")
         path = (self.proj.root / rel).resolve()

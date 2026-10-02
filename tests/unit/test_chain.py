@@ -293,6 +293,33 @@ def test_runner_source_guard(env):
 
 
 @pytest.mark.skipif(not _HAS_FFMPEG, reason="需要 ffmpeg")
+def test_runner_source_clip_form(env):
+    """E6 clip 形态兼容：拖动/切片后的音轨仍可作链源（单片段取引用；多片段明确报错）。"""
+    _project_with_audio(env)
+    proj = _proj(env)
+    f = proj.score.tracks[1].audio["file"]
+
+    def set_clips(clips):
+        return env["client"].post("/api/projects/p1/batch", json={
+            "label": "移动音频片段",
+            "commands": [{"op": "set_audio_clips", "track": 1, "value": {"clips": clips}}]})
+
+    one = [{"file": f, "start": 0.6, "src_offset": 0.0, "src_len": None, "stretch": 1.0,
+            "fade_in": 0.0, "fade_out": 0.0}]
+    r = set_clips(one)
+    assert r.status_code == 200 and r.json()["applied"] == 1, r.text
+    p = ChainRunner(_proj(env)).source_audio_path()
+    assert p.is_file() and p.name.endswith(".flac")
+
+    two = one + [{"file": f, "start": 2.0, "src_offset": 0.0, "src_len": None, "stretch": 1.0,
+                  "fade_in": 0.0, "fade_out": 0.0}]
+    r = set_clips(two)
+    assert r.status_code == 200 and r.json()["applied"] == 1, r.text
+    with pytest.raises(ValueError, match="多片段"):
+        ChainRunner(_proj(env)).source_audio_path()
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="需要 ffmpeg")
 def test_runner_status_restore_from_chain_json(env, monkeypatch):
     """新 runner（模拟 web 重启 / 重新挂链）应恢复 chain.json 的上轮完成态与产物。"""
     _project_with_audio(env)
