@@ -1,4 +1,6 @@
-"""agent 系统提示（ADR-0012）：角色 + 工具协议 + JSON 兜底说明。"""
+"""agent 系统提示（ADR-0012）：角色 + 工具协议 + JSON 兜底说明 + 可选知识包读引。"""
+
+import os
 
 SYSTEM_PROMPT = (
     "你是 the shape of voice 的音乐创作 agent。tsov 的定位：打通不懂乐理的人的音乐创作——"
@@ -24,9 +26,27 @@ _SKILLS_HINT = (
 )
 
 
+# 系统提示词知识包读引（2026-10-03 演示需求）：只注入「读」这个动作，不注入内容——
+# 环境变量 TSOV_KNOWLEDGE_PACKS（逗号分隔路径）非空时，把「先读这些知识文件」的
+# 约定随系统提示下发；会话内由 agent 自行 read_text（先目录、再按需分段读卡）。
+_KNOWLEDGE_HINT = (
+    "\n\n【知识包（必读）】涉及编曲 / 配器 / 混音等创作任务时，先阅读下列知识文件作为参考："
+    "用 read_text 先读目录，再按卡名定位、分段读卡；引用卡名须逐字。\n"
+)
+
+
+def _knowledge_pack_paths() -> list[str]:
+    raw = os.environ.get("TSOV_KNOWLEDGE_PACKS", "")
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
 def build_system_prompt(skills=None) -> str:
-    """系统提示 = 基础提示 + 技能目录（skills 传 SkillLibrary；空库则不加）。"""
+    """系统提示 = 基础提示 + 技能目录（skills 传 SkillLibrary；空库则不加）+ 知识包读引（可空）。"""
+    text = SYSTEM_PROMPT
     catalog = skills.catalog() if skills is not None else ""
-    if not catalog:
-        return SYSTEM_PROMPT
-    return SYSTEM_PROMPT + _SKILLS_HINT + catalog
+    if catalog:
+        text += _SKILLS_HINT + catalog
+    packs = _knowledge_pack_paths()
+    if packs:
+        text += _KNOWLEDGE_HINT + "\n".join(f"- {p}" for p in packs)
+    return text
