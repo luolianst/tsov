@@ -225,7 +225,7 @@ def tool_duplicate_bars(args: dict) -> str:
 
 
 def tool_set_track_mix(args: dict) -> str:
-    """调轨音量（Instrument.volume 0-2）与声像（pan -1..1，负左正右）。"""
+    """调轨音量（Instrument.volume 0-2）、声像（pan -1..1，负左正右）与静音/独奏（mute/solo，bool）。"""
     score = _load(args["score_path"])
     ti = _resolve_track(score, args.get("track", 0))
     tr = score.tracks[ti]
@@ -242,8 +242,14 @@ def tool_set_track_mix(args: dict) -> str:
             raise ValueError(f"pan 越界（-1..1）：{p}")
         parts.append(f"pan {getattr(tr, 'pan', 0)}→{p}")
         tr.pan = p
+    if args.get("mute") is not None:
+        parts.append(f"mute {getattr(tr, 'mute', False)}→{bool(args['mute'])}")
+        tr.mute = bool(args["mute"])
+    if args.get("solo") is not None:
+        parts.append(f"solo {getattr(tr, 'solo', False)}→{bool(args['solo'])}")
+        tr.solo = bool(args["solo"])
     if not parts:
-        raise ValueError("至少给 volume 或 pan 之一")
+        raise ValueError("至少给 volume / pan / mute / solo 之一")
     out = _save(score, _out_path(args, args["score_path"]))
     return f"track[{ti}] {tr.name}：{'、'.join(parts)} ｜ 写回：{out}"
 
@@ -474,8 +480,12 @@ def tool_read_text(args: dict) -> str:
     if not p.is_file():
         raise FileNotFoundError(str(p))
     size = p.stat().st_size
+    _seg = bool(args.get("match")) or args.get("offset") is not None or args.get("limit") is not None
     if size > 400_000:
-        raise ValueError(f"文件过大（{size} bytes > 400KB）：{rel}（换用更小的文件或只看片段）")
+        if not _seg:
+            raise ValueError(f"文件过大（{size} bytes > 400KB）：{rel}（整读上限；请用 match=… 或 offset/limit 分段读取）")
+        if size > 25_000_000:
+            raise ValueError(f"文件过大（{size} bytes > 25MB）：{rel}（超出分段读取上限）")
     text = p.read_text(encoding="utf-8", errors="replace")
 
     match = args.get("match")
@@ -580,12 +590,14 @@ def register_compose_tools(registry: ToolRegistry) -> None:
 
     registry.register(ToolSpec(
         name="set_track_mix",
-        description="调轨音量（Instrument.volume 0-2）与声像（pan -1..1，负左正右）",
+        description="调轨音量（Instrument.volume 0-2）、声像（pan -1..1，负左正右）与静音/独奏（mute/solo）",
         parameters={"type": "object", "properties": {
             "score_path": {"type": "string"},
             "track": {"description": "轨索引或轨名"},
             "volume": {"type": "number"},
             "pan": {"type": "number"},
+            "mute": {"type": "boolean"},
+            "solo": {"type": "boolean"},
         }, "required": ["score_path"]},
         handler=tool_set_track_mix))
 
@@ -663,8 +675,8 @@ def register_compose_tools(registry: ToolRegistry) -> None:
 
     registry.register(ToolSpec(
         name="read_text",
-        description=("读取仓库内文本文件（预设 json / 技能 md / 文档；≤400KB，默认整读截断 60K 字符）。"
-                     "大文件：先 match=子串 定位（返回带行号命中行），再 offset/limit 按行读段（1-based，limit 默认 200）"),
+        description=("读取仓库内文本文件（预设 json / 技能 md / 文档）。整读上限 400KB（截断 60K 字符）；"
+                     "大文件（>400KB）须分段：match=子串 定位（带行号，≤50 条）或 offset/limit 按行读段（1-based，limit 默认 200；分段上限 25MB）"),
         parameters={"type": "object", "properties": {
             "path": {"type": "string", "description": "仓库内相对路径或绝对路径（如 presets/arrangements/wotaiko-fast-6-8.json）"},
             "match": {"type": "string", "description": "可选：子串筛选（不区分大小写），返回命中行与行号（最多 50 条）"},
