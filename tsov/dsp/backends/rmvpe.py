@@ -114,7 +114,7 @@ class RMVPEBackend(TranscribeBackend):
 
 
 # ---------------------------------------------------------------------------
-# 规则音符分割（M3-FIX CREPE 时代恢复，见 git 155c8a9^:tsov/dsp/transcribe.py）
+# 规则音符分割（M3-FIX CREPE 时代恢复，见 git 96e2737^:tsov/dsp/transcribe.py）
 # ---------------------------------------------------------------------------
 
 def _segment_frames(time, pitch_hz, conf, cfg):
