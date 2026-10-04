@@ -144,6 +144,9 @@ def download(url: str, dest: Path, label: str | None = None) -> None:
                 pct = f"{got * 100 // total}%" if total else f"{got // (1 << 20)} MB"
                 log(f"    {label}: {pct}")
                 next_mark += 32 << 20
+    if total and got < total:
+        tmp.unlink(missing_ok=True)
+        raise OSError(f"incomplete download: got {got:,} of {total:,} B")
     tmp.replace(dest)
     log(f"    saved {dest.relative_to(REPO) if dest.is_relative_to(REPO) else dest} ({dest.stat().st_size:,} B)")
 
