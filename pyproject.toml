@@ -41,7 +41,9 @@ build-backend = "hatchling.build"
 [tool.uv]
 # numpy<2：属共享环境约束（GAME requirements 声明 numpy<2.0.0，其 venv 经 tsovvenv.pth 复用本 venv 的 numpy）。
 # 2026-09-22 治理实测裁定：原四项 override 中 numba>=0.60 / setuptools<75 / scipy<1.14 已摘除，唯此项保留。
-override-dependencies = ["numpy<2"]
+# 2026-10-04 复补 scipy<1.18：scipy≥1.18 要求 numpy≥2（1.18.x 在 numpy 1.26 下 sparse/signal 导入即崩 `np.long`），
+#   与之上的 numpy<2 直接冲突——全新建目录走查实测抓出（1.17.0 = 新旧兼容线；升级此项前必先解 GAME 的 numpy 约束）。
+override-dependencies = ["numpy<2", "scipy<1.18"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["tsov"]
