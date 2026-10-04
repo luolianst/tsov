@@ -1,7 +1,7 @@
 """LLM 设置档层单测（E2，2026-10-04）：解析链 / 掩码 / 视图 / 路由（写读清 + 校验 + 自检映射）。
 
 约定：
-- 不用 pytest tmp_path（handoff 坑 81）——output/<uuid> + teardown rmtree_force
+- 不用 pytest tmp_path（已知坑 81）——output/<uuid> + teardown rmtree_force
 - 设置档路径统一以 TSOV_SETTINGS_PATH 指向隔离文件（解析链与写盘共用该覆盖）
 - key 解析用例把 TSOV_LLM_API_KEY/DEEPSEEK_API_KEY/OPENCODE_GO_API_KEY 置空串
   （挡 .env 注入与真实环境串味），并清 DSH_HOME 兜底

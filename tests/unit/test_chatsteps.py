@@ -1,7 +1,7 @@
 """对话产物流（Chat ⇄ Steps）单测：动作计数（tool_stats）/ 轮聚合（_rounds）/ journal stats 字段。
 
 口径：受影响对象数（改 16 个音 = notes:16）；轮聚合按 round（一次指令执行回合）。
-约定：不用 pytest tmp_path（handoff 坑 81）——手动 output/<uuid> 目录 + rmtree_force 清理。
+约定：不用 pytest tmp_path（已知坑 81）——手动 output/<uuid> 目录 + rmtree_force 清理。
 """
 
 from __future__ import annotations

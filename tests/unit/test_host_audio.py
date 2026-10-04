@@ -1,6 +1,6 @@
 """M-V8 E2 音频轨（第一刀）单测：数据模型 / AudioClipSource / session 分派 / 渲染混入 / 导入 / 命令层 op。
 
-约定：不用 pytest tmp_path（安全软件锁，handoff 坑 81）——output/<uuid> + rmtree_force；低采样率加速。
+约定：不用 pytest tmp_path（安全软件锁，已知坑 81）——output/<uuid> + rmtree_force；低采样率加速。
 """
 
 from __future__ import annotations

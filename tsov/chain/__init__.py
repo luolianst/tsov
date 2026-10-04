@@ -5,7 +5,7 @@
 - runner.py：链运行器（步骤状态机 / 后台线程 / 取消检查点 / 产物落盘 / chain.json 持久化）
 - apply.py：链产物 → 工程装配（段3「双轨进工程」；只产命令 dict，执行交宿主层）
 
-设计要点见 docs/M-V8-TASK.md §11.1 A；运行模型见 E3 讨论记录 Q1/Q2/Q7。
+设计要点见 开发任务书 §11.1 A；运行模型见 E3 设计讨论 Q1/Q2/Q7。
 """
 
 from .apply import build_apply_commands, load_run_notes

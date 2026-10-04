@@ -1,4 +1,4 @@
-"""测试工作目录清理（handoff 坑 81 衍生，M-V6 批1 实测根因修正）。
+"""测试工作目录清理（已知坑 81 衍生，M-V6 批1 实测根因修正）。
 
 **根因**：fixture 创建的工程目录会被 git init（`Project.create`）——Windows 上
 `.git/objects` 松散对象文件带**只读属性**，`shutil.rmtree(ignore_errors=True)`

@@ -1,6 +1,6 @@
 """M-V7 D2（ADR-0019）：快照窗口 journal 单测——游标 / 双窗口淘汰 / GC / 持久化 / 动作回跳。
 
-约定：不用 pytest tmp_path（handoff 坑 81）——手动 output/<uuid> 目录 + rmtree_force 清理。
+约定：不用 pytest tmp_path（已知坑 81）——手动 output/<uuid> 目录 + rmtree_force 清理。
 """
 
 from __future__ import annotations

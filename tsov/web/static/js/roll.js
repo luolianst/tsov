@@ -58,7 +58,7 @@ export function draw() {
   const mainIsAudio = !!(mainTrk && mainTrk.kind === 'audio');
 
   if (single && mainIsAudio) {
-    /* 主轨 = 音频：上区波形（handoff #183①：音频轨进单轨不再空卷帘） */
+    /* 主轨 = 音频：上区波形（设计记录 #183①：音频轨进单轨不再空卷帘） */
     drawRegion(0, splitH1, store.singleTrack, mainTrk, false);
     drawSplitTail(single, sp);
     return;

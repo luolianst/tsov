@@ -1,7 +1,7 @@
 """M-V2 Web 壳单测（docs/05 前端接口契约）：REST 路由 + SSE 事件流 + agent 会话（mock LLM）。
 
 约定：
-- 不用 pytest tmp_path（handoff 坑 81：被安全软件锁）——手动 output/<uuid> 目录 + teardown rmtree
+- 不用 pytest tmp_path（已知坑 81：被安全软件锁）——手动 output/<uuid> 目录 + teardown rmtree
 - LLM 用 monkeypatch 假 chat（edit_score 走 annotations 纯程序路径，不触网）
 - 渲染用例依赖 vendor/soundfonts/FluidR3_GM.sf2（缺则跳过）
 """

@@ -105,7 +105,7 @@ class GameBackend(TranscribeBackend):
             cmd += ["--device", str(cfg.get("device") or "auto")]
         if cfg.get("precision") and _supports_flag("--precision"):
             cmd += ["--precision", str(cfg["precision"])]
-        # Windows GBK 控制台 + rich 进度条冲突：强制 UTF-8（handoff 坑 33）
+        # Windows GBK 控制台 + rich 进度条冲突：强制 UTF-8（已知坑 33）
         env = {**os.environ, "PYTHONUTF8": "1"}
         try:
             proc = subprocess.run(

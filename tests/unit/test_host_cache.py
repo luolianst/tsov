@@ -1,6 +1,6 @@
 """M-V7 D1（ADR-0018）：内容指纹 / stem 库 / 缓存拼装 单测。
 
-约定：不用 pytest tmp_path（handoff 坑 81）——手动 output/<uuid> 目录 + rmtree_force 清理；
+约定：不用 pytest tmp_path（已知坑 81）——手动 output/<uuid> 目录 + rmtree_force 清理；
 假音源（确定性常数信号）保证数值可手算与逐位比对。
 """
 

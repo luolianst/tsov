@@ -180,8 +180,8 @@ select:hover, input:hover { border-color: var(--border-strong); }
 .metro-chk { cursor: pointer; user-select: none; gap: 3px; }
 .metro-chk input[type="checkbox"] { width: auto; min-width: 0; padding: 0; margin: 0; }
 
-/* ---------------- 全局段轨（已删：2026-09-18 洛怜「段落/和弦两行可以删了」；
-     后续以「书签」功能替代，见 docs/03-open-questions.md Q46） ---------------- */
+/* ---------------- 全局段轨（已删：2026-09-18；
+     后续以「书签」功能替代） ---------------- */
 
 /* ---------------- 主布局 ---------------- */
 #layout {

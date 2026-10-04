@@ -1,6 +1,6 @@
 """agent 工具：set_tempo/拍号（M-V6 时间参数）+ Score.time_signature 兼容性 + MIDI 拍号导出。
 
-约定：不用 pytest tmp_path（handoff 坑 81）——手动 output/<uuid> 目录 + teardown（带重试清理）。
+约定：不用 pytest tmp_path（已知坑 81）——手动 output/<uuid> 目录 + teardown（带重试清理）。
 """
 
 from __future__ import annotations

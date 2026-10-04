@@ -1,6 +1,6 @@
 """skill 机制（SKILL.md 模式）单元测试：目录扫描 / 加载 / use_skill / 系统提示注入。
 
-约定：不用 pytest tmp_path（handoff 坑 81）——手动 output/<uuid> 目录 + teardown rmtree。
+约定：不用 pytest tmp_path（已知坑 81）——手动 output/<uuid> 目录 + teardown rmtree。
 """
 
 from __future__ import annotations

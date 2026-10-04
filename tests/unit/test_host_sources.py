@@ -1,6 +1,6 @@
 """音源适配器测试（ADR-0013 里程碑二）：VST3Source（pedalboard）/ SFZSource（内置最小采样器）。
 
-约定：不用 pytest tmp_path（handoff 坑 81）——手动 output/<uuid> 目录 + teardown rmtree。
+约定：不用 pytest tmp_path（已知坑 81）——手动 output/<uuid> 目录 + teardown rmtree。
 VST3 用例依赖 vendor/vst3/Dexed.vst3（不入库；缺失自动 skip）。
 """
 

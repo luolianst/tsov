@@ -1,6 +1,6 @@
 """链运行器（M-V8 E3 段2）：步骤状态机 + 后台线程 + 取消检查点 + chain.json 持久化。
 
-状态机（E3 讨论记录 Q1/Q2/Q7/Q8）：
+状态机（E3 设计讨论 Q1/Q2/Q7/Q8）：
 - 步骤态：pending | running | done | failed | skipped（mute）| cancelled | dirty
 - 快档（fast）改参自动顺跑：从最上游脏步起，顺「连续快工具段」向下自动跑，遇慢档停下标脏
 - 慢档（slow）改参：标脏 + 「应用」按钮（点 = 该步起的区间 run）

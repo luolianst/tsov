@@ -387,7 +387,7 @@ export function init(el, opts) {
   canvas.addEventListener('dblclick', (e) => {
     const ti = laneAt(e.offsetY);
     if (ti < 0) return;
-    /* E3 段1：音频轨同样进单轨 → 主轨波形视图（handoff #183①）；试听移至单轨波形区双击 */
+    /* E3 段1：音频轨同样进单轨 → 主轨波形视图（设计记录 #183①）；试听移至单轨波形区双击 */
     if (onEnter) onEnter(ti);
   });
 
