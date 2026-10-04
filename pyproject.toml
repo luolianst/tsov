@@ -1,6 +1,6 @@
 [project]
 name = "tsov"
-version = "0.1.0"
+version = "0.1.1"
 description = "the shape of voice — AI 音乐创作 agent：哼唱 → 转录 → 分析 → MIDI → 回放（原型阶段，库 + CLI 薄壳）"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"

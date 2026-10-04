@@ -1,0 +1,194 @@
+"""打包「tsov 一键开箱包」（Windows / 网盘分发版）——stdlib-only。
+
+产物结构（<name> = tsov-v0.1.1-win64）：
+  <name>/
+    启动tsov.bat          双击入口（scripts/bundle-template/start-tsov.bat）
+    bootstrap.py          启动引导（搬家修复/自检/起服务；每次启动幂等自愈）
+    使用说明.txt
+    python-base/          CPython 运行时（来源 = tsov/.venv 的 pyvenv.cfg home 所指）
+    tsov/                 程序本体（源码 + tsov/.venv 全依赖）
+    vendor/               引擎五件套（FluidSynth / 音色库 / RMVPE / GAME / VST3）
+    scripts/ docs/ README* LICENSE pyproject.toml .env.example
+    ffmpeg/ffmpeg.exe     音频处理
+
+用法：
+  python scripts/make_bundle.py                    # 全流程：stage → 修复 → 自检 → zip 到桌面
+  python scripts/make_bundle.py --skip-zip         # 只出 stage 目录（验收/调试用）
+  python scripts/make_bundle.py --out <zip 路径>   # 自定义产物路径
+  python scripts/make_bundle.py --keep-stage       # 保留 stage（默认保留，验收后手动清）
+
+要点：
+- 白名单复制（根级只带 README/LICENSE/pyproject/.env.example 等），**绝不带 .env**；
+- 排除 output/ knowledge/ tests/ handoff.md AGENTS.md .git，及 __pycache__（venv 内部保留 pyc）；
+- 打包前用包内 python-base 跑 bootstrap.py check（不过则中止）；
+- zip 用 Windows 自带 bsdtar（可打 zip64）；缺失则退回 zipfile。
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+import zipfile
+from datetime import datetime
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+TEMPLATE = REPO / "scripts" / "bundle-template"
+DEFAULT_STAGE = Path(os.environ.get("LOCALAPPDATA", "C:/")) / "hermes" / "cache" / "scratch" / "tsov-bundle"
+DESKTOP = Path(os.environ.get("USERPROFILE", "C:/")) / "Desktop"
+
+# 根级白名单（绝不把 .env / output / knowledge / skills / samples / .git 带进去）
+ROOT_DIRS = ["tsov", "vendor", "scripts", "docs", "presets"]
+ROOT_FILES = ["README.md", "README.zh-CN.md", "LICENSE", "CONTRIBUTING.md", "pyproject.toml", ".env.example"]
+SKIP_DIRNAMES = {"__pycache__", ".pytest_cache", ".ruff_cache", ".git", ".github", "knowledge", "tests"}
+SKIP_FILENAMES = {".env", ".env.local", ".env.production"}
+
+
+def read_version() -> str:
+    for line in (REPO / "pyproject.toml").read_text(encoding="utf-8").splitlines():
+        s = line.strip()
+        if s.startswith("version") and "=" in s:
+            return s.split("=", 1)[1].strip().strip('"').strip("'")
+    raise SystemExit("无法从 pyproject.toml 读取版本号")
+
+
+def _ignore(dirpath: str, names: list[str]) -> set[str]:
+    """复制过滤：排除缓存/垃圾；venv 内部保留 pyc（启动更快）。"""
+    in_venv = ".venv" in dirpath.replace("/", os.sep)
+    out: set[str] = set()
+    for n in names:
+        if n in SKIP_FILENAMES:
+            out.add(n)
+        elif not in_venv and (n in SKIP_DIRNAMES or n.endswith((".pyc", ".pyo"))):
+            out.add(n)
+    return out
+
+
+def copy_tree(src: Path, dst: Path) -> None:
+    shutil.copytree(src, dst, ignore=_ignore, symlinks=False, dirs_exist_ok=False)
+
+
+def locate_base_python() -> Path:
+    """从 tsov/.venv/pyvenv.cfg 的 home 读基座 python 目录（真目录）。"""
+    cfg = REPO / "tsov" / ".venv" / "pyvenv.cfg"
+    for line in cfg.read_text(encoding="utf-8").splitlines():
+        if line.strip().lower().startswith("home"):
+            p = Path(line.split("=", 1)[1].strip())
+            if p.is_dir():
+                return p.resolve()
+    raise SystemExit(f"找不到基座 Python（读 {cfg} 的 home 行失败）")
+
+
+def locate_ffmpeg() -> Path:
+    exe = shutil.which("ffmpeg")
+    if not exe:
+        raise SystemExit("PATH 里找不到 ffmpeg（打包需要它）")
+    return Path(exe)
+
+
+def run_check(name_root: Path) -> None:
+    """用包内 python-base 跑 bootstrap.py check（不过则中止）。"""
+    base_py = name_root / "python-base" / "python.exe"
+    boot = name_root / "bootstrap.py"
+    r = subprocess.run([str(base_py), str(boot), "check"], text=True, encoding="utf-8",
+                       errors="replace", cwd=str(name_root))
+    if r.returncode != 0:
+        raise SystemExit("包内自检未通过 —— 中止打包（先修问题再重跑）")
+
+
+def make_zip(stage: Path, folder: str, out: Path) -> None:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.exists():
+        out.unlink()
+    bsdtar = Path("C:/WINDOWS/system32/tar.exe")
+    if bsdtar.is_file():
+        print(f"[zip] bsdtar → {out}")
+        r = subprocess.run([str(bsdtar), "-a", "-c", "-f", str(out), "-C", str(stage), folder])
+        if r.returncode == 0 and out.is_file():
+            return
+        print("[zip] bsdtar 失败，退回 zipfile …")
+    print(f"[zip] zipfile(压缩级 1) → {out}（较慢，请耐心）")
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
+        root = stage / folder
+        for dirpath, dirnames, filenames in os.walk(root):
+            for fn in filenames:
+                p = Path(dirpath) / fn
+                zf.write(p, p.relative_to(stage).as_posix())
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="打包 tsov 一键开箱包")
+    ap.add_argument("--out", default=None, help="zip 产物路径（默认：桌面）")
+    ap.add_argument("--stage", default=str(DEFAULT_STAGE), help="stage 目录")
+    ap.add_argument("--skip-zip", action="store_true", help="只出 stage，不压 zip")
+    ap.add_argument("--keep-stage", action="store_true", help="保留旧 stage（默认重建）")
+    args = ap.parse_args()
+
+    version = read_version()
+    folder = f"tsov-v{version}-win64"
+    stage = Path(args.stage)
+    name_root = stage / folder
+    out = Path(args.out) if args.out else DESKTOP / f"tsov-v{version}-一键开箱包-win64.zip"
+
+    print(f"[1/6] 版本 {version} · 产物 {folder}")
+    if name_root.exists():
+        if not args.keep_stage:
+            print(f"[2/6] 清理旧 stage：{name_root}")
+            shutil.rmtree(name_root)
+        else:
+            raise SystemExit(f"stage 已存在（--keep-stage）：{name_root}")
+    else:
+        print("[2/6] stage 全新")
+    stage.mkdir(parents=True, exist_ok=True)
+
+    print("[3/6] 复制程序本体 / 引擎 / 文档 …（几 GB，约 2–6 分钟）")
+    for d in ROOT_DIRS:
+        src = REPO / d
+        if src.is_dir():
+            copy_tree(src, name_root / d)
+            print(f"      ✓ {d}")
+    for f in ROOT_FILES:
+        src = REPO / f
+        if src.is_file():
+            shutil.copy2(src, name_root / f)
+    # 模板三件（改名进包）
+    shutil.copy2(TEMPLATE / "bootstrap.py", name_root / "bootstrap.py")
+    shutil.copy2(TEMPLATE / "start-tsov.bat", name_root / "启动tsov.bat")
+    (name_root / "使用说明.txt").write_text(
+        (TEMPLATE / "readme-cn.txt").read_text(encoding="utf-8").replace("{VERSION}", version),
+        encoding="utf-8")
+    print("      ✓ 启动器 / 使用说明 / bootstrap")
+
+    print("[4/6] 自带运行时：python-base + ffmpeg …")
+    base_src = locate_base_python()
+    copy_tree(base_src, name_root / "python-base")
+    print(f"      ✓ python-base ← {base_src}")
+    ff_src = locate_ffmpeg()
+    (name_root / "ffmpeg").mkdir(exist_ok=True)
+    shutil.copy2(ff_src, name_root / "ffmpeg" / "ffmpeg.exe")
+    print(f"      ✓ ffmpeg ← {ff_src}（{ff_src.stat().st_size:,}B）")
+
+    print("[5/6] 搬家修复 + 包内自检 …")
+    sys.path.insert(0, str(name_root))
+    import bootstrap  # noqa: E402 —— 用包内模板做同款修复（bootstrap.ROOT 已由 __file__ 决定）
+    bootstrap.fixup()
+    run_check(name_root)
+    print("[5/6] 自检通过 ✓")
+
+    if args.skip_zip:
+        print(f"[6/6] --skip-zip：完成。stage = {name_root}")
+        return 0
+    print("[6/6] 压缩 zip（GB 级，约 5–20 分钟）…")
+    t0 = datetime.now()
+    make_zip(stage, folder, out)
+    dt = (datetime.now() - t0).total_seconds()
+    print(f"[6/6] 完成 ✓ {out}（{out.stat().st_size:,}B，{dt:.0f}s）")
+    print(f"      （zip 内含顶层目录 {folder}/；解压后双击「启动tsov.bat」即可）")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
