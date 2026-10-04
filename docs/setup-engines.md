@@ -83,6 +83,10 @@ manually-installed torch (see the warning block in `pyproject.toml`).
 git clone https://github.com/Dream-High/RMVPE vendor/RMVPE
 git -C vendor/RMVPE checkout a6db1cd7d26014aa739383367afd9bab57fc624c   # tested revision
 
+# the upstream Dream-High repo does NOT contain rmvpe_model.py — it's an
+# RVC-derived single-file adaptation maintained in this repo (see its header):
+cp scripts/vendor-extras/rmvpe_model.py vendor/RMVPE/rmvpe_model.py
+
 # weights (181 MB) — official:
 curl -L -o vendor/RMVPE/rmvpe.pt \
   https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/main/rmvpe.pt

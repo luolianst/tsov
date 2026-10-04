@@ -316,6 +316,19 @@ def fetch_rmvpe(dest: Path, args) -> bool:
     if p.returncode != 0:
         log(f"  note: could not checkout pinned commit {RMVPE_COMMIT[:10]} ({p.stderr.strip()[:200]}) — keeping current revision")
 
+    # upstream ships no rmvpe_model.py — it's an RVC-derived adaptation maintained here
+    model_src = REPO / "scripts" / "vendor-extras" / "rmvpe_model.py"
+    model_dst = rdir / "rmvpe_model.py"
+    if not model_dst.is_file() or args.force:
+        if model_src.is_file():
+            shutil.copyfile(model_src, model_dst)
+            log("  placed rmvpe_model.py (upstream Dream-High repo does NOT ship it — RVC-derived adaptation maintained in this repo)")
+        else:
+            fail("  scripts/vendor-extras/rmvpe_model.py not found in the repo — cannot complete RMVPE setup")
+            return False
+    else:
+        log("  rmvpe_model.py already present — skipping")
+
     pt = rdir / "rmvpe.pt"
     if pt.is_file() and not args.force:
         log(f"  already present: {pt} ({pt.stat().st_size:,} B) — skipping")
