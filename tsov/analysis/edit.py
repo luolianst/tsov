@@ -23,7 +23,7 @@ from ..core.units import midi_to_hz
 from ..core.names import midi_to_note_name
 from ..core.key import detect_key  # 2026-09-22 F1：下沉 core（编辑层/命令层共用）
 
-from ..llm_client import LLM_MODEL, LlmRequestError, chat_post_json, resolve_api_key  # noqa: E402  F4 收口（原经 analysis.llm）
+from ..llm_client import LlmRequestError, chat_post_json, resolve_api_key, resolve_model  # noqa: E402  F4 收口（原经 analysis.llm）
 
 LLM_TIMEOUT_SEC = 120.0  # 编辑调用超时（比分析层 240s 短）
 
@@ -370,9 +370,9 @@ def _call_edit_llm(notes: list[Note], feedback: str, suspicious: list[dict] | No
     """
     api_key = resolve_api_key(**params)
     if not api_key:
-        return [], None, "缺少 OPENCODE_GO_API_KEY（LLM 编辑跳过）"
+        return [], None, "缺少 LLM key（LLM 编辑跳过；可在 WebUI ⚙ 设置 → 对话 / LLM 填写）"
     payload = {
-        "model": params.get("model", LLM_MODEL),
+        "model": resolve_model(**params),
         "messages": [
             {"role": "system", "content": _EDIT_SYSTEM},
             {"role": "user", "content": _build_edit_prompt(notes, feedback, suspicious)},

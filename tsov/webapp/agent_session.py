@@ -63,20 +63,20 @@ def _stream_chat(bus, project: str, session_id: str, messages: list[dict],
     import requests
 
     from ..agent.llm import _json_decision
-    from ..llm_client import LLM_ENDPOINT, LLM_MODEL, resolve_api_key  # F4：常量迁 llm_client
+    from ..llm_client import resolve_api_key, resolve_endpoint, resolve_model  # F4：常量迁 llm_client；E2：动态解析（设置档）
 
     api_key = resolve_api_key()
     if not api_key:
-        raise RuntimeError("缺少 LLM key（TSOV_LLM_API_KEY / DEEPSEEK_API_KEY，agent 会话无法启动）")
+        raise RuntimeError("缺少 LLM key（TSOV_LLM_API_KEY / DEEPSEEK_API_KEY，agent 会话无法启动）——可在 WebUI ⚙ 设置 → 对话 / LLM 里填写")
 
-    payload = {"model": LLM_MODEL, "messages": messages, "temperature": 0.2, "stream": True}
+    payload = {"model": resolve_model(), "messages": messages, "temperature": 0.2, "stream": True}
     if tools:
         payload["tools"] = tools
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     deltas = {"n": 0}
     try:
-        resp = requests.post(LLM_ENDPOINT, json=payload, headers=headers, timeout=(10, 300), stream=True)
+        resp = requests.post(resolve_endpoint(), json=payload, headers=headers, timeout=(10, 300), stream=True)
         resp.raise_for_status()
         content_acc: list[str] = []
         tool_acc: dict[int, dict] = {}

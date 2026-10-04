@@ -11,13 +11,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..llm_client import (
-    LLM_ENDPOINT,
-    LLM_MODEL,
     LLM_TIMEOUT_SEC,
     LlmRequestError,
     chat_post_json,
     load_json_loose,
     resolve_api_key,
+    resolve_endpoint,
+    resolve_model,
     strip_fences,
 )
 from .prompt import SYSTEM_PROMPT, build_prompt
@@ -115,13 +115,13 @@ def call_llm(semantic_dataset: dict[str, Any], **params) -> dict:
     - 可用参数：api_key / endpoint / model / timeout / prompt_builder
     """
     api_key = resolve_api_key(**params)
-    endpoint = params.get("endpoint") or LLM_ENDPOINT
-    model = params.get("model") or LLM_MODEL
+    endpoint = resolve_endpoint(**params)
+    model = resolve_model(**params)
     timeout = float(params.get("timeout", LLM_TIMEOUT_SEC))
     builder = params.get("prompt_builder", build_prompt)
 
     if not api_key:
-        return {**EMPTY_ANALYSIS, "error": "缺少 OPENCODE_GO_API_KEY（LLM 分析跳过）"}
+        return {**EMPTY_ANALYSIS, "error": "缺少 LLM key（LLM 分析跳过；可在 WebUI ⚙ 设置 → 对话 / LLM 填写）"}
 
     try:
         user_prompt = builder(semantic_dataset, **params.get("prompt_kwargs", {}))

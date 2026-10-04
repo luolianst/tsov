@@ -15,7 +15,7 @@ import json
 import time
 
 from ..host.effect import effect_kinds, param_spec
-from ..llm_client import LLM_MODEL, LlmRequestError, chat_post_json, extract_json_object, resolve_api_key
+from ..llm_client import LlmRequestError, chat_post_json, extract_json_object, resolve_api_key, resolve_model
 from ..presets import load_library
 from . import facts as facts_mod
 from . import spectrum, store
@@ -367,7 +367,7 @@ def llm_suggestions(facts: dict, det: list[dict], *, context_md: str = "", key: 
     def _post(p: dict) -> str:
         if post is not None:
             return str(post(p))
-        resp = chat_post_json({"model": LLM_MODEL, "messages": messages, "temperature": 0.2},
+        resp = chat_post_json({"model": resolve_model(), "messages": messages, "temperature": 0.2},
                               api_key=key or "")
         return str(resp["choices"][0]["message"]["content"])
 

@@ -54,7 +54,7 @@ def _context_text(proj) -> str:
 
 def _distill_history(batch: dict, sels: list[dict], report: dict) -> str | None:
     """LLM 从建议+对拍提炼 1–3 句决策日志；失败/无 key → None（走公式兜底）。"""
-    from ...llm_client import LLM_MODEL, chat_post_json, resolve_api_key
+    from ...llm_client import chat_post_json, resolve_api_key, resolve_model
 
     key = resolve_api_key()
     if not key:
@@ -68,7 +68,7 @@ def _distill_history(batch: dict, sels: list[dict], report: dict) -> str | None:
     }
     try:
         resp = chat_post_json({
-            "model": LLM_MODEL,
+            "model": resolve_model(),
             "messages": [
                 {"role": "system", "content": (
                     "你是录音棚助理。把这次调参应用的决策压缩成 1–3 句中文日志"

@@ -28,7 +28,10 @@ ENV_TIME_MIN = "TSOV_AUTOFAV_TIME_MIN"
 
 
 def global_settings_path() -> Path:
-    """全局档路径 = 仓库根 `tsov-settings.json`（tsov 包目录的上一级）。"""
+    """全局档路径 = 仓库根 `tsov-settings.json`（tsov 包目录的上一级）；TSOV_SETTINGS_PATH 可覆盖。"""
+    env = (os.environ.get("TSOV_SETTINGS_PATH") or "").strip()
+    if env:
+        return Path(env)
     return Path(__file__).resolve().parents[2] / GLOBAL_FILE
 
 

@@ -11,13 +11,13 @@ from __future__ import annotations
 import json
 
 from ..llm_client import (
-    LLM_ENDPOINT,
-    LLM_MODEL,
     LLM_TIMEOUT_SEC,
     LlmRequestError,
     chat_post_json,
     extract_json_object,
     resolve_api_key,
+    resolve_endpoint,
+    resolve_model,
 )
 
 
@@ -46,8 +46,8 @@ def chat(messages: list[dict], tools: list[dict] | None = None, **params) -> dic
     api_key = resolve_api_key(**params)
     if not api_key:
         raise RuntimeError("缺少 LLM key（TSOV_LLM_API_KEY / DEEPSEEK_API_KEY / OPENCODE_GO_API_KEY，agent LLM 跳过）")
-    endpoint = params.get("endpoint") or LLM_ENDPOINT
-    model = params.get("model") or LLM_MODEL
+    endpoint = resolve_endpoint(**params)
+    model = resolve_model(**params)
     timeout = float(params.get("timeout", LLM_TIMEOUT_SEC))
 
     payload: dict = {"model": model, "messages": messages, "temperature": 0.2}

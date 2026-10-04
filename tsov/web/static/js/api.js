@@ -83,6 +83,10 @@ export const api = {
   getSettings: (name) => req('/api/projects/' + encodeURIComponent(name) + '/settings'),
   setSettings: (name, patch) => post('/api/projects/' + encodeURIComponent(name) + '/settings', patch),
   setGlobalSettings: (patch) => post('/api/settings', patch),
+  /* E2：LLM 接入设置（WebUI 可填 key/地址/模型）+ 连通自检 */
+  getLlmSettings: () => req('/api/llm/settings'),
+  setLlmSettings: (patch) => post('/api/llm/settings', patch),
+  testLlm: (body) => post('/api/llm/test', body || {}),
   listSessions: () => req('/api/sessions'),
   loadSession: (project, name) => post('/api/sessions/load', { project, name }),
 

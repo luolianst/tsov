@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 
-from ..llm_client import LLM_MODEL, LlmRequestError, chat_post_json, extract_json_object, resolve_api_key
+from ..llm_client import LlmRequestError, chat_post_json, extract_json_object, resolve_api_key, resolve_model
 from .library import PatternLibrary, load_patterns
 
 _SYSTEM_PROMPT = (
@@ -137,7 +137,7 @@ def decide(facts: dict, *, key: str | None = None, context_md: str = "", post=No
     def _post(p: dict) -> str:
         if post is not None:
             return str(post(p))
-        resp = chat_post_json({"model": LLM_MODEL,
+        resp = chat_post_json({"model": resolve_model(),
                                "messages": [{"role": "system", "content": _SYSTEM_PROMPT},
                                             {"role": "user", "content": json.dumps(p, ensure_ascii=False)}],
                                "temperature": 0.3},

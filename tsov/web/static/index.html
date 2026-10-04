@@ -83,7 +83,7 @@
     <span id="save-state" class="save-state" title="工程保存状态">—</span>
     <button id="btn-theme" title="切换深/浅（母版双态）">◐</button>
     <div class="menu-wrap">
-      <button id="btn-menu-set" class="menu-btn" title="设置（输出 / 主题 / 版本留存）">⚙</button>
+      <button id="btn-menu-set" class="menu-btn" title="设置（输出 / 主题 / 版本留存 / 对话）">⚙</button>
       <div id="menu-set" class="menu-pop right" hidden>
         <div class="set-group"><div class="sg-t">音频输出</div>
           <div class="set-row"><label>输出</label><select id="set-out"><option>系统共享（默认 · 零配置）</option></select></div>
@@ -109,7 +109,26 @@
           <div class="set-hint">弱留存：用户 20 步 / 对话 5 轮滑动窗口 · 强留存：★ 收藏 / 自动收藏（改动即存·本工程）</div>
           <div class="set-row"><button id="set-rt-apply-all" class="fav-del" style="margin-left:0;border:1px solid var(--border);" title="把当前阈值/定时档写入全局档，对所有工程生效">应用到全部工程…</button></div>
         </div>
-        <div class="set-foot">改动即生效 · 无需保存</div>
+        <div class="set-group"><div class="sg-t">对话 / LLM</div>
+          <div class="set-row"><label>Key</label>
+            <input id="set-llm-key" type="password" placeholder="未配置（粘贴 API Key）" size="16" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="set-row"><label>地址</label>
+            <input id="set-llm-endpoint" type="text" placeholder="默认（DeepSeek 官方）" size="16" spellcheck="false">
+          </div>
+          <div class="set-row"><label>模型</label>
+            <input id="set-llm-model" type="text" placeholder="deepseek-v4-flash" size="16" spellcheck="false">
+          </div>
+          <div class="set-hint" id="set-llm-src">—</div>
+          <div class="set-hint">支持任意 OpenAI 兼容接口（…/v1/chat/completions）。Key 只存本机 tsov-settings.json，不上传。</div>
+          <div class="set-row">
+            <button id="set-llm-test" title="用当前填写的参数发一个微型请求验证连通（不保存）">测试连接</button>
+            <button id="set-llm-save" title="保存到本机设置档（地址/模型留空=回默认；Key 留空=不改动）">保存</button>
+            <button id="set-llm-clear" title="清除设置档里的 Key（环境变量/.env 的仍生效）">清除 Key</button>
+          </div>
+          <div class="set-hint" id="set-llm-status"></div>
+        </div>
+        <div class="set-foot">留存设置改动即生效 · 对话设置改完点「保存」</div>
       </div>
     </div>
   </div>

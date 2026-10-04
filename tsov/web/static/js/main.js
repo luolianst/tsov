@@ -323,7 +323,7 @@ function boot() {
     pop.hidden = !show;
   }
   $('btn-menu-file').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(menuFile); });
-  $('btn-menu-set').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(menuSet); if (!menuSet.hidden) loadRetentionSet(); });
+  $('btn-menu-set').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(menuSet); if (!menuSet.hidden) { loadRetentionSet(); loadLlmSet(); } });
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.menu-pop') && !e.target.closest('.menu-btn')) closeMenus(null);
   });
@@ -349,7 +349,7 @@ function boot() {
   $('mi-export').addEventListener('click', () => { closeMenus(null); openExport(); });
   $('mi-fav').addEventListener('click', () => { closeMenus(null); doFavorite(); });
   $('mi-fav-restore').addEventListener('click', () => { closeMenus(null); openFavDlg(); });
-  $('mi-settings').addEventListener('click', () => { closeMenus(null); menuSet.hidden = false; loadRetentionSet(); });
+  $('mi-settings').addEventListener('click', () => { closeMenus(null); menuSet.hidden = false; loadRetentionSet(); loadLlmSet(); });
 
   /* ---- 主题（◐ 与设置菜单同步） ---- */
   $('btn-theme').addEventListener('click', () => { setTheme(themeName() === 'dark' ? 'light' : 'dark'); closeMenus(null); });
@@ -764,6 +764,69 @@ function boot() {
       await api.setGlobalSettings(retentionPatch());
       toast('已应用到全部工程（全局档 tsov-settings.json）');
     } catch (e) { setError(e.message); }
+  });
+
+  /* ---- LLM 接入设置（E2）：⚙面板「对话 / LLM」——设置档 llm.* + 连通自检 ---- */
+  const LLM_SRC_TXT = { env: '环境变量/.env', file: '设置界面', dsh: 'dsh 凭据', default: '默认', none: '未配置' };
+  async function loadLlmSet() {
+    try {
+      const r = await api.getLlmSettings();
+      const key = r.key || {}, ep = r.endpoint || {}, md = r.model || {}, fl = r.file || {}, def = r.defaults || {};
+      const kInp = $('set-llm-key');
+      kInp.value = '';
+      kInp.placeholder = key.configured ? ('已配置 ' + key.hint + ' · 留空不改动') : '未配置（粘贴 API Key）';
+      const epInp = $('set-llm-endpoint');
+      epInp.value = fl.endpoint || '';
+      epInp.placeholder = '默认：' + (def.endpoint || '');
+      const mdInp = $('set-llm-model');
+      mdInp.value = fl.model || '';
+      mdInp.placeholder = '默认：' + (def.model || '');
+      $('set-llm-src').textContent = '当前生效 — ' + [
+        'Key：' + (LLM_SRC_TXT[key.source] || key.source),
+        '地址：' + (LLM_SRC_TXT[ep.source] || ep.source),
+        '模型：' + (LLM_SRC_TXT[md.source] || md.source),
+      ].join(' · ');
+      const st0 = $('set-llm-status');
+      st0.textContent = '';
+      st0.className = 'set-hint';
+    } catch (e) { /* 忽略：面板保持旧值 */ }
+  }
+  async function saveLlmSet() {
+    const body = { endpoint: $('set-llm-endpoint').value.trim(), model: $('set-llm-model').value.trim() };
+    const kv = $('set-llm-key').value.trim();
+    if (kv) body.api_key = kv;
+    try {
+      await api.setLlmSettings(body);
+      $('set-llm-key').value = '';
+      toast('LLM 设置已保存（本机设置档）');
+      await loadLlmSet();
+    } catch (e) { setError(e.message); }
+  }
+  $('set-llm-save').addEventListener('click', saveLlmSet);
+  $('set-llm-clear').addEventListener('click', async () => {
+    try {
+      await api.setLlmSettings({ clear_key: true });
+      toast('已清除设置档里的 Key');
+      await loadLlmSet();
+    } catch (e) { setError(e.message); }
+  });
+  $('set-llm-test').addEventListener('click', async () => {
+    const st = $('set-llm-status');
+    const body = {};
+    const kv = $('set-llm-key').value.trim(); if (kv) body.api_key = kv;
+    const ev = $('set-llm-endpoint').value.trim(); if (ev) body.endpoint = ev;
+    const mv = $('set-llm-model').value.trim(); if (mv) body.model = mv;
+    st.className = 'set-hint';
+    st.textContent = '测试中…';
+    try {
+      const r = await api.testLlm(body);
+      st.className = 'set-hint ' + (r.ok ? 'ok' : 'bad');
+      st.textContent = (r.ok ? '✓ ' : '✗ ') + (r.message || '');
+      toast(r.ok ? '连接成功' : '连接失败');
+    } catch (e) {
+      st.className = 'set-hint bad';
+      st.textContent = '✗ ' + e.message;
+    }
   });
 
   /* SSE → store（本地直接消费事件负载，契约 §六 数据流） */

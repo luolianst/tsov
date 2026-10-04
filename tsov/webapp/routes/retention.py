@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 from ...core.score import Score
 from ...host.state import ProjectState, global_settings_path, set_global_settings  # M-V7 D2（ADR-0019）：计数/设置
 from ..helpers import project_state
-from ..models import SettingsIn, WindowJumpIn
+from ..models import LlmSettingsIn, LlmTestIn, SettingsIn, WindowJumpIn
 from ..state import WebState
 
 
@@ -42,6 +42,22 @@ def _rounds(entries: list[dict]) -> list[dict]:
             agg["n_stale"] += 1
         agg["ts_last"] = e.get("ts")
     return out
+
+
+def _friendly_llm_error(msg: str, model: str) -> str:
+    """LLM 自检失败 → 中文人话提示（401/403/404/400/超时/连接失败族）。"""
+    m = msg or ""
+    if "401" in m or "403" in m:
+        return "Key 无效或无权限（HTTP 401/403）——检查 Key 是否完整、有效"
+    if "404" in m:
+        return "接口地址 404——检查地址（一般以 /v1/chat/completions 结尾）"
+    if "400" in m:
+        return f"请求被拒（HTTP 400）——模型名「{model}」可能不被该接口支持"
+    if "Timeout" in m or "timed out" in m:
+        return "连接超时——检查网络与接口地址"
+    if any(x in m for x in ("ConnectionError", "ProxyError", "SSLError", "NewConnectionError", "getaddrinfo")):
+        return "连不上——检查网络与接口地址"
+    return f"失败：{m[:200]}"
 
 
 def register(app: FastAPI) -> None:
@@ -127,6 +143,56 @@ def register(app: FastAPI) -> None:
         patch = {k: v for k, v in body.model_dump().items() if v is not None}
         return {"ok": True, "global": set_global_settings(patch),
                 "path": str(global_settings_path())}
+
+    # ---------------- LLM 接入设置（E2：WebUI ⚙ →「对话 / LLM」） ----------------
+
+    @app.get("/api/llm/settings")
+    def llm_settings_get() -> dict:
+        """LLM 配置视图（只读；key 只回掩码 + 各字段来源）。"""
+        from ...llm_client import llm_settings_view
+        return {"ok": True, **llm_settings_view()}
+
+    @app.post("/api/llm/settings")
+    def llm_settings_set(body: LlmSettingsIn) -> dict:
+        """写设置档 llm.*（endpoint/model 空串=清除该项覆盖；clear_key=清 key；地址须 http(s)://）。"""
+        from ...llm_client import llm_settings_view
+        patch: dict = {}
+        if body.clear_key:
+            patch["api_key"] = ""
+        elif (body.api_key or "").strip():
+            patch["api_key"] = body.api_key.strip()
+        if body.endpoint is not None:
+            ep = body.endpoint.strip()
+            if ep and not (ep.startswith("http://") or ep.startswith("https://")):
+                raise HTTPException(400, "接口地址需以 http:// 或 https:// 开头")
+            patch["endpoint"] = ep
+        if body.model is not None:
+            patch["model"] = body.model.strip()
+        if patch:
+            set_global_settings({"llm": patch})
+        return {"ok": True, "view": llm_settings_view()}
+
+    @app.post("/api/llm/test")
+    def llm_test(body: LlmTestIn) -> dict:
+        """连通自检（不落盘）：微型 chat 请求；失败给中文提示。"""
+        from ...llm_client import (LlmRequestError, chat_post_json, resolve_api_key,
+                                   resolve_endpoint, resolve_model)
+        kw: dict = {}
+        for name in ("api_key", "endpoint", "model"):
+            val = getattr(body, name)
+            if val is not None and str(val).strip():
+                kw[name] = str(val).strip()
+        key = resolve_api_key(**kw)
+        ep = resolve_endpoint(**kw)
+        model = resolve_model(**kw)
+        if not key:
+            return {"ok": False, "message": "未配置 Key——请先填写 API Key", "endpoint": ep, "model": model}
+        try:
+            chat_post_json({"model": model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1},
+                           api_key=key, endpoint=ep, timeout=30.0)
+            return {"ok": True, "message": f"连接成功（模型 {model}）", "endpoint": ep, "model": model}
+        except LlmRequestError as e:
+            return {"ok": False, "message": _friendly_llm_error(str(e), model), "endpoint": ep, "model": model}
 
     @app.post("/api/projects/{name}/agent-actions/{seq}/undo")
     def agent_action_undo(name: str, seq: int) -> dict:

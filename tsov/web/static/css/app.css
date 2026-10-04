@@ -831,6 +831,11 @@ body.chat-folded #rail-chat { display: flex; }
 .fav-del:hover { background: var(--bg-hover); color: #c0392b; }
 .set-row input[type="number"] { width: 64px; }
 .set-row input[type="checkbox"] { flex: none; }
+/* E2：对话 / LLM 设置行（文本输入占满 + 按钮组） */
+.set-row input[type="text"], .set-row input[type="password"] { flex: 1; min-width: 0; font-size: var(--fs-sm); }
+.set-row button { padding: 2px 8px; font-size: var(--fs-sm); }
+.set-hint.ok { color: var(--ok, #2e7d32); }
+.set-hint.bad { color: var(--err); }
 
 /* ---- dock「通道」页（选中轨 / 项目 profile） ---- */
 .chan { display: flex; align-items: center; gap: 16px; flex: 1; min-width: 0; flex-wrap: wrap; }

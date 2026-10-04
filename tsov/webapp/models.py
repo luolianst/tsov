@@ -86,3 +86,21 @@ class TitleIn(BaseModel):
 class SessionLoadIn(BaseModel):
     project: str
     name: str
+
+
+class LlmSettingsIn(BaseModel):
+    """LLM 接入设置补丁（E2）：api_key 非空 = 设置；clear_key = 清除设置档里的 key；
+    endpoint/model 传空串 = 清除该项覆盖（回默认），不传 = 不改。"""
+
+    api_key: str | None = None
+    endpoint: str | None = None
+    model: str | None = None
+    clear_key: bool = False
+
+
+class LlmTestIn(BaseModel):
+    """LLM 连通性自检入参（E2）：缺省项走解析链当前值（不落盘、不改配置）。"""
+
+    api_key: str | None = None
+    endpoint: str | None = None
+    model: str | None = None

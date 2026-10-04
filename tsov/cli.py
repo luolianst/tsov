@@ -228,7 +228,7 @@ def build_parser() -> argparse.ArgumentParser:
     p2 = agent_sub.add_parser("run", help="一次会话跑任务：工具调用循环 → 最终回答 → 会话 JSONL 落盘")
     p2.add_argument("task", help="任务描述（自然语言，如 '读 …json 改成 D 多利亚调式并渲染回放'）")
     p2.add_argument("--max-turns", type=int, default=12, help="最大工具循环轮数")
-    p2.add_argument("--model", default=None, help="LLM 模型（缺省 TSOV_LLM_MODEL）")
+    p2.add_argument("--model", default=None, help="LLM 模型（缺省 TSOV_LLM_MODEL → 设置档 → 内置默认）")
     p2.add_argument("--session-dir", default="output/agent-sessions", help="会话 JSONL 目录")
     p2.set_defaults(func=_cmd_agent_run)
 
