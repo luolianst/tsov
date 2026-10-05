@@ -85,7 +85,7 @@ python scripts/make_bundle.py          # stage + self-check + zip to your Deskto
 
 The result extracts to any folder; double-click `启动tsov.bat` and the workspace opens in the browser. First run: fill your LLM key via **⚙ Settings → Chat / LLM** (or skip — everything but the AI chat works without a key).
 
-**Prebuilt v0.1.1 (win64, 3.5 GB)** — use it without building: **[Quark Drive mirror](https://pan.quark.cn/s/774ff8275127?pwd=wGbG)** (China; Quark account required — the package exceeds GitHub's release-asset limit, so it's distributed via the mirror).
+**Prebuilt v0.1.1 (win64, 3.5 GB)** — use it without building: **[Quark Drive mirror](https://pan.quark.cn/s/b3697b158eef?pwd=G7tu)** (China; Quark account required — the package exceeds GitHub's release-asset limit, so it's distributed via the mirror).
 
 ### Configure the LLM
 
