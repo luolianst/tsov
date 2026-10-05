@@ -7,7 +7,7 @@
 
 ![demo](docs/assets/hero.gif)
 
-**Demo video (2:14)** — English & 中文 versions are attached to the [v0.1.0 release](https://github.com/luolianst/tsov/releases/latest). The demo covers the full loop: import a humming recording → transcribe → adopt MIDI → four rounds of agent chat (arrangement, orchestration, mixing guidance, mix & export) → listen to the result.
+**Demo video (2:14)** — English & 中文 versions are attached to the [v0.1.0 release](https://github.com/luolianst/tsov/releases/latest); the Chinese version is also up on **[Bilibili](https://www.bilibili.com/video/BV1XEHE6bEjP/)**. The demo covers the full loop: import a humming recording → transcribe → adopt MIDI → four rounds of agent chat (arrangement, orchestration, mixing guidance, mix & export) → listen to the result.
 
 | Workspace & chat | Humming quick-lane | Export | Play the result |
 |---|---|---|---|

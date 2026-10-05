@@ -7,7 +7,7 @@
 
 ![demo](docs/assets/hero.gif)
 
-**演示视频（2:14）**——中英两版都在 [v0.1.0 Release](https://github.com/luolianst/tsov/releases/latest) 附件里（B站版发布后补链接）。演示覆盖完整闭环：导入哼唱录音 → 转谱 → 采纳 MIDI → 四轮对话（对齐编曲 / 配器 / 混音指导 / 混音导出）→ 试听成品。
+**演示视频（2:14）**——中英两版都在 [v0.1.0 Release](https://github.com/luolianst/tsov/releases/latest) 附件里，中文版也发布在 **[B站](https://www.bilibili.com/video/BV1XEHE6bEjP/)**。演示覆盖完整闭环：导入哼唱录音 → 转谱 → 采纳 MIDI → 四轮对话（对齐编曲 / 配器 / 混音指导 / 混音导出）→ 试听成品。
 
 | 工作台与对话 | 哼唱快车道 | 导出 | 试听成品 |
 |---|---|---|---|
