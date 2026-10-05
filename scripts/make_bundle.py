@@ -19,8 +19,9 @@
 
 要点：
 - 白名单复制（根级只带 README/LICENSE/pyproject/.env.example 等），**绝不带 .env**；
+- **docs/ 只复制 git 跟踪（公开面）文件**——工作区里隐身留存的内部过程档案绝不进包；
 - 排除 output/ knowledge/ tests/ handoff.md AGENTS.md .git，及 __pycache__（venv 内部保留 pyc）；
-- 打包前用包内 python-base 跑 bootstrap.py check（不过则中止）；
+- 打包前门禁：stage 扫非公开面文件（零容忍）+ 包内 bootstrap.py check（不过则中止）；
 - zip 用 Windows 自带 bsdtar（可打 zip64）；缺失则退回 zipfile。
 """
 
@@ -69,6 +70,59 @@ def _ignore(dirpath: str, names: list[str]) -> set[str]:
 
 def copy_tree(src: Path, dst: Path) -> None:
     shutil.copytree(src, dst, ignore=_ignore, symlinks=False, dirs_exist_ok=False)
+
+
+def git_tracked_files() -> set[str]:
+    """公开面 = git 跟踪的文件集（仓库相对路径；-z 防 CJK 八进制转义）。"""
+    r = subprocess.run(["git", "-C", str(REPO), "-c", "core.quotePath=false", "ls-files", "-z"],
+                       capture_output=True)
+    if r.returncode != 0:
+        raise SystemExit("git ls-files 失败——无法确定公开面，中止打包")
+    return {p for p in r.stdout.decode("utf-8", "surrogateescape").split("\0") if p}
+
+
+def copy_docs_public(dst: Path, tracked: set[str]) -> int:
+    """docs/ 只复制公开面（git 跟踪）文件到 dst（相对路径原样保留）；返回复制件数。"""
+    n = 0
+    for rel in sorted(x for x in tracked if x.startswith("docs/")):
+        src = REPO / rel
+        if not src.is_file():
+            print(f"      ⚠ 跟踪文件缺失，跳过：{rel}")
+            continue
+        t = dst / rel
+        t.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, t)
+        n += 1
+    return n
+
+
+def gate_stage(name_root: Path, tracked: set[str]) -> None:
+    """门禁：stage 内（除自带件/运行时外）不得出现非公开面（git 跟踪）文件。"""
+    allowed_extra = {"bootstrap.py", "启动tsov.bat", "使用说明.txt"}
+    skip_heads = {"python-base", "vendor", "ffmpeg"}
+    bad: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(name_root):
+        rel_dir = os.path.relpath(dirpath, name_root).replace("\\", "/")
+        if rel_dir != "." and rel_dir.split("/", 1)[0] in skip_heads:
+            dirnames[:] = []
+            continue
+        dirnames[:] = [x for x in dirnames if x != ".venv"]
+        for fn in filenames:
+            if fn.endswith((".pyc", ".pyo")):
+                continue
+            rel = f"{rel_dir}/{fn}" if rel_dir != "." else fn
+            if rel in allowed_extra:
+                continue
+            if rel not in tracked:
+                bad.append(rel)
+    if bad:
+        print(f"[gate] ✗ stage 含 {len(bad)} 个非公开面文件：")
+        for b in sorted(bad)[:40]:
+            print("      -", b)
+        if len(bad) > 40:
+            print(f"      … 共 {len(bad)} 个")
+        raise SystemExit("[gate] 中止打包——非公开内容不得进分发包")
+    print("[gate] ✓ 非公开面零残留")
 
 
 def locate_base_python() -> Path:
@@ -145,9 +199,15 @@ def main() -> int:
     stage.mkdir(parents=True, exist_ok=True)
 
     print("[3/6] 复制程序本体 / 引擎 / 文档 …（几 GB，约 2–6 分钟）")
+    tracked = git_tracked_files()
     for d in ROOT_DIRS:
         src = REPO / d
-        if src.is_dir():
+        if not src.is_dir():
+            continue
+        if d == "docs":
+            n = copy_docs_public(name_root, tracked)
+            print(f"      ✓ docs（公开面 {n} 件）")
+        else:
             copy_tree(src, name_root / d)
             print(f"      ✓ {d}")
     for f in ROOT_FILES:
@@ -171,10 +231,11 @@ def main() -> int:
     shutil.copy2(ff_src, name_root / "ffmpeg" / "ffmpeg.exe")
     print(f"      ✓ ffmpeg ← {ff_src}（{ff_src.stat().st_size:,}B）")
 
-    print("[5/6] 搬家修复 + 包内自检 …")
+    print("[5/6] 搬家修复 + 门禁 + 包内自检 …")
     sys.path.insert(0, str(name_root))
     import bootstrap  # noqa: E402 —— 用包内模板做同款修复（bootstrap.ROOT 已由 __file__ 决定）
     bootstrap.fixup()
+    gate_stage(name_root, tracked)
     run_check(name_root)
     print("[5/6] 自检通过 ✓")
 

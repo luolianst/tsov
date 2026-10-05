@@ -8,6 +8,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -45,3 +47,33 @@ def test_whitelists():
         assert d in mod.ROOT_DIRS
     assert ".env.example" in mod.ROOT_FILES
     assert ".env" not in mod.ROOT_FILES
+
+
+def test_git_tracked_has_no_process_archives():
+    """docs 打包以公开面为准：跟踪集内不得含过程档案类文件。"""
+    mod = _load_make_bundle()
+    tracked = mod.git_tracked_files()
+    assert "docs/glossary.md" in tracked
+    assert not [x for x in tracked if "讨论记录" in x or "复述单" in x]
+
+
+def test_gate_stage_zero_tolerance(tmp_path: Path):
+    """门禁：stage 出现非公开面文件必须中止。"""
+    mod = _load_make_bundle()
+    tracked = {"docs/glossary.md"}
+    stage = tmp_path / "stage"
+    (stage / "docs").mkdir(parents=True)
+    (stage / "docs" / "glossary.md").write_text("ok", encoding="utf-8")
+    (stage / "bootstrap.py").write_text("ok", encoding="utf-8")
+    mod.gate_stage(stage, tracked)  # 干净 → 通过
+    (stage / "docs" / "内部档案.md").write_text("leak", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        mod.gate_stage(stage, tracked)
+
+
+def test_copy_docs_public_keeps_docs_prefix(tmp_path: Path):
+    """docs 复制必须落在 stage/docs/ 下（保留相对路径；曾因剥前缀落错位被门禁抓出）。"""
+    mod = _load_make_bundle()
+    n = mod.copy_docs_public(tmp_path, {"docs/glossary.md"})
+    assert n == 1
+    assert (tmp_path / "docs" / "glossary.md").is_file()
