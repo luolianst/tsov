@@ -5,6 +5,7 @@
 
 import { api } from './api.js';
 import { bus } from './events.js';
+import { mdToHtml } from './md.js';   // 批B P10：LLM 输出 markdown 安全子集渲染
 import { renderAgentsBlock, refreshAgents } from './staging.js';   // D 件：工程上下文折叠条
 import { store, setAgentBusy, clearDiff, toast, setError, clearAnnotations, refTag, favSource,
          setSelection, setSingleTrack, addAgentTracks, clearAgentTracks,
@@ -414,7 +415,8 @@ function renderAll() {
     if (r.kind === 'user') { logEl.appendChild(text('msg user', r.text)); continue; }
     if (r.kind === 'error') { logEl.appendChild(text('msg error', r.text)); continue; }
     if (r.kind === 'assistant') {
-      const m = text('msg assistant', r.text);
+      const m = el('msg assistant');
+      m.innerHTML = mdToHtml(r.text || '');   // 批B P10：历史消息同样走 markdown 渲染
       if (r.tag) { const t = el('tag'); t.textContent = r.tag; m.prepend(t); }
       logEl.appendChild(m);
       continue;
@@ -594,12 +596,14 @@ function wireEvents() {
       // 批A P18：定稿即移除流式卡（正文以正式消息卡为准）——修复「同段文字显示两遍」
       finalizeStreamCard();
       const tag = 'agent·第 ' + d.turn + ' 轮' + ((d.tool_calls || []).length ? ' · 调用 ' + d.tool_calls.length + ' 个工具' : '');
-      const m = text('msg assistant', d.content || '（本轮仅工具调用）');
+      const m = el('msg assistant');
+      m.innerHTML = mdToHtml(d.content || '（本轮仅工具调用）');
       const t = el('tag'); t.textContent = tag; m.prepend(t);
       appendCard(m, { kind: 'assistant', text: d.content || '（本轮仅工具调用）', tag, ts: Date.now() });
     } else if (d.content && d.content.trim()) {
       const tag = 'agent·第 ' + d.turn + ' 轮';
-      const m = text('msg assistant', d.content);
+      const m = el('msg assistant');
+      m.innerHTML = mdToHtml(d.content);
       const t = el('tag'); t.textContent = tag; m.prepend(t);
       appendCard(m, { kind: 'assistant', text: d.content, tag, ts: Date.now() });
     }
@@ -675,7 +679,8 @@ function wireEvents() {
       }
       persist();
     } else {
-      const m = text('msg assistant', d.content || '');
+      const m = el('msg assistant');
+      m.innerHTML = mdToHtml(d.content || '');
       const t = el('tag'); t.textContent = tag; m.prepend(t);
       appendCard(m, { kind: 'assistant', text: d.content || '', tag, ts: Date.now() });
     }

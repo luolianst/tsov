@@ -411,6 +411,18 @@ body.chat-folded #rail-chat { display: flex; }
 .msg .statusline { font-size: var(--fs-sm); color: var(--muted); margin-bottom: 3px; user-select: none; }
 .msg .statusline.warn { color: var(--warn); }
 .msg .statusline.danger { color: var(--err); }
+/* 批B P10：markdown 渲染子集（md.js 输出） */
+.msg .md-p { margin: 0 0 6px; }
+.msg .md-p:last-child { margin-bottom: 0; }
+.msg .md-h { font-weight: 600; margin: 2px 0 4px; }
+.msg .md-code { margin: 4px 0; padding: 6px 8px; background: var(--bg-sunken); border: 1px solid var(--border);
+  border-radius: var(--radius-agent); font: var(--fs-sm)/1.45 var(--font-mono); white-space: pre; overflow-x: auto; }
+.msg code { font-family: var(--font-mono); font-size: var(--fs-sm); background: var(--bg-sunken); padding: 0 3px; border-radius: 2px; }
+.msg .md-code code { background: none; padding: 0; }
+.msg ul, .msg ol { margin: 2px 0 6px; padding-left: 18px; }
+.msg li { margin: 1px 0; }
+.msg a { color: var(--accent); }
+.msg hr { border: 0; border-top: 1px solid var(--border); margin: 6px 0; }
 .msg .body { min-width: 0; }
 .msg.streaming .body::after { content: "▍"; color: var(--accent); animation: blink 1s step-start infinite; }
 @keyframes blink { 50% { opacity: 0; } }
