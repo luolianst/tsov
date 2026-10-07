@@ -116,7 +116,7 @@ function appendCard(node, record) {
     if (logs[currentProject].length > MAX_LOGS) logs[currentProject].shift();
     persist();
   }
-  logEl.scrollTop = logEl.scrollHeight;
+  scrollLog();
   return node;
 }
 
@@ -436,21 +436,41 @@ function renderAll() {
       continue;
     }
   }
-  logEl.scrollTop = logEl.scrollHeight;
+  scrollLog(true);   // 重建后回底（与原行为一致）
   refreshActionStale();   // 批B：按动作日志恢复失效置灰（刷新/切工程后）
 }
 
 /* ---------------- 流式卡片 ---------------- */
 
-let streamCard = null;   // { root, body, thinkPre, thinkSummary }
+let streamCard = null;   // { root, body, thinkPre, thinkDs, thinkLab, thinkInline, statusEl, line }
+
+/* 批B 修正轮：贴底跟随滚动——用户上翻查看历史时不被流式增量拽回（自己滚回底部即恢复跟随） */
+let stickBottom = true;
+function atLogBottom() {
+  return (logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight) < 48;
+}
+function scrollLog(force) {
+  if (force || stickBottom) logEl.scrollTop = logEl.scrollHeight;
+}
 
 function ensureStreamCard() {
   if (streamCard) return streamCard;
   const root = el('msg assistant streaming');
   const think = el('think');
   const details = document.createElement('details');
+  details.hidden = true;   // 批B 修正：无思考时整行不占位（首条思考才显示）
   const summary = document.createElement('summary');
-  summary.textContent = '…思考中…';
+  const tLab = document.createElement('span');
+  tLab.className = 'think-lab';
+  tLab.textContent = '思考中';
+  const tSep = document.createElement('span');
+  tSep.className = 'think-sep';
+  tSep.textContent = '·';
+  const tInline = document.createElement('span');
+  tInline.className = 'think-inline';
+  summary.appendChild(tLab);
+  summary.appendChild(tSep);
+  summary.appendChild(tInline);
   details.appendChild(summary);
   const pre = document.createElement('pre');
   pre.textContent = '';
@@ -464,7 +484,7 @@ function ensureStreamCard() {
   root.appendChild(think);
   root.appendChild(body);
   logEl.appendChild(root);
-  streamCard = { root, body, thinkPre: pre, thinkSummary: summary, statusEl,
+  streamCard = { root, body, thinkPre: pre, thinkDs: details, thinkLab: tLab, thinkInline: tInline, statusEl,
     line: { phase: 'waiting', silent: null, silentTs: 0, tool: null, toolChars: 0 } };
   return streamCard;
 }
@@ -528,6 +548,7 @@ async function send(message) {
   const ua = peekUserActions();   // 批B B1-4：用户手动操作（回流 agent 上下文）
   clearAgentTracks();             // 批B B1-3：新一轮清上一轮改动标记
   appendCard(text('msg user', message), { kind: 'user', text: message, ts: Date.now() });
+  scrollLog(true);   // 自己发的消息——强制回底
   inputEl.value = '';
   autoGrowInput();
   setAgentBusy(true);
@@ -558,10 +579,10 @@ function wireEvents() {
     const sc = ensureStreamCard();
     if (d.kind === 'thinking') {
       sc.thinkPre.textContent += d.text || '';
-      if (sc.thinkPre.textContent.length > 0) {
-        // 批B P8：默认折叠、不自动展开（防长思考链占版面）；摘要实时计字数
-        sc.thinkSummary.textContent = '思考中…（' + fmtCount(sc.thinkPre.textContent.length) + ' 字）';
-      }
+      // 批B 修正：dsh 式单行内滚动条——懒显示 + 尾部跟随（点击 summary 展开全量）
+      sc.thinkDs.hidden = false;
+      sc.thinkInline.textContent += d.text || '';
+      sc.thinkInline.scrollLeft = sc.thinkInline.scrollWidth;
       if (sc.line) sc.line.silent = null;
     } else if (d.kind === 'tool_args') {
       // 批B P20：工具参数生成进度（后端节流推送）
@@ -571,7 +592,7 @@ function wireEvents() {
       if (sc.line) { sc.line.phase = 'stream'; sc.line.tool = null; sc.line.silent = null; }
     }
     renderStreamStatus();
-    logEl.scrollTop = logEl.scrollHeight;
+    scrollLog();
   });
 
   /* 批B P20：静默心跳 → 状态行显示「模型静默 Ns」并变色 */
@@ -585,9 +606,10 @@ function wireEvents() {
   bus.on('agent_retry', (d) => {
     const sc = ensureStreamCard();
     sc.thinkPre.textContent = '';
-    sc.thinkSummary.textContent = '…思考中…';
-    const dt = sc.thinkPre.closest('details');
-    if (dt) dt.open = false;
+    sc.thinkInline.textContent = '';
+    sc.thinkLab.textContent = '思考中';
+    sc.thinkDs.hidden = true;
+    sc.thinkDs.open = false;
     sc.body.textContent = '';
     sc.line = { phase: 'waiting', silent: null, silentTs: 0, tool: null, toolChars: 0 };
     if (sc.statusEl) sc.statusEl.className = 'statusline';
@@ -609,11 +631,14 @@ function wireEvents() {
         sc.root.classList.remove('streaming');
         if (sc.statusEl) sc.statusEl.remove();          // 状态行只属于流式期
         sc.body.innerHTML = mdToHtml(textContent);      // 正文以 turn 终值为准（替换流式累积）
-        sc.thinkSummary.textContent = hasThink
-          ? ('思考过程（' + fmtCount(sc.thinkPre.textContent.length) + ' 字）')
-          : '思考过程';
+        if (hasThink) {
+          sc.thinkLab.textContent = '思考';   // 定稿：单行条保留（每思考块 2 行 = tag + 思考条）
+        } else {
+          sc.thinkDs.remove();                // 空思考行不保留
+        }
         const t = el('tag'); t.textContent = tag; sc.root.prepend(t);
         appendCard(sc.root, { kind: 'assistant', text: textContent, tag, ts: Date.now() });
+        if (hasThink) sc.thinkInline.scrollLeft = 0;   // 定稿归位头部（dsh 静置观感；流式期=尾部跟随）
       }
     } else if (d.content && d.content.trim()) {
       const m = el('msg assistant');
@@ -659,7 +684,7 @@ function wireEvents() {
       if (logs[currentProject].length > MAX_LOGS) logs[currentProject].shift();
       persist();
     }
-    logEl.scrollTop = logEl.scrollHeight;
+    scrollLog();
   });
 
   /* 批B B1-2：动作撤销事件（含其他客户端触发）→ 按 seq 置灰同动作及其后卡片 */
@@ -893,6 +918,7 @@ function initChatResize() {
 
 export function init(opts) {
   logEl = opts.logEl;
+  logEl.addEventListener('scroll', () => { stickBottom = atLogBottom(); });   // 批B 修正：贴底判定
   inputEl = opts.inputEl;
   sendBtn = opts.sendBtn;
   undoRoundBtn = opts.undoRoundBtn;
