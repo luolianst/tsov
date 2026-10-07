@@ -465,7 +465,7 @@ function ensureStreamCard() {
 
 function finalizeStreamCard() {
   if (!streamCard) return;
-  streamCard.root.classList.remove('streaming');
+  streamCard.root.remove();   // 批A P18：定稿即从 DOM 移除（旧版只去 streaming 类 → 残留致「同段显示两遍」）
   streamCard = null;
 }
 
@@ -474,6 +474,7 @@ function finalizeStreamCard() {
 async function send(message) {
   if (!store.project) { setError('先打开一个工程'); return; }
   if (!message.trim() || store.agentBusy) return;
+  if (streamCard) finalizeStreamCard();   // 批A P18：新轮开工前清理上轮残留（异常路径防线）
 
   const baseRev = (cmpSel && cmpSel.value) || 'HEAD';   // 议题 ④：编辑目标版本标识（默认 HEAD）
   const anns = store.pendingAnnotations.map((q) => q.ann);   // M-V3：人工标注（确定性优先，随消息发送）
@@ -521,9 +522,7 @@ function wireEvents() {
 
   bus.on('agent_turn', (d) => {
     if (streamCard) {
-      if (d.content && d.content.trim()) {
-        streamCard.body.textContent = d.content;   // 流式累计后以完整正文为准
-      }
+      // 批A P18：定稿即移除流式卡（正文以正式消息卡为准）——修复「同段文字显示两遍」
       finalizeStreamCard();
       const tag = 'agent·第 ' + d.turn + ' 轮' + ((d.tool_calls || []).length ? ' · 调用 ' + d.tool_calls.length + ' 个工具' : '');
       const m = text('msg assistant', d.content || '（本轮仅工具调用）');
@@ -591,7 +590,7 @@ function wireEvents() {
 
   bus.on('agent_answer', (d) => {
     setAgentBusy(false);
-    streamCard = null;
+    if (streamCard) finalizeStreamCard();   // 批A P18：防御——残留流式卡一并清理
     for (const k of Object.keys(pendingTools)) delete pendingTools[k];
     const tag = 'agent 完成 · ' + d.turns + ' 轮 · ' + d.tool_calls_made + ' 次工具调用' +
       (d.adopted ? ' · 编辑已采用（见 diff 叠层）' : ' · 无谱面改动') +
@@ -614,7 +613,7 @@ function wireEvents() {
 
   bus.on('agent_error', (d) => {
     setAgentBusy(false);
-    streamCard = null;
+    if (streamCard) finalizeStreamCard();   // 批A P18：出错时残留流式卡一并清理
     for (const k of Object.keys(pendingTools)) delete pendingTools[k];
     appendCard(text('msg error', 'agent 出错：' + (d.error || '')), { kind: 'error', text: 'agent 出错：' + (d.error || ''), ts: Date.now() });
   });
