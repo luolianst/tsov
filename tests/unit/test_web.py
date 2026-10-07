@@ -289,6 +289,77 @@ def test_chat_agent_round_trip(env, monkeypatch):
     assert state["score"]["tracks"][0]["notes"][0]["pitch_midi"] == 60
 
 
+def test_chat_live_adoption_per_tool(env, monkeypatch):
+    """批B2（P41）逐工具下放：工具执行后立即同步宿主（会话未结束 score.json 已含前序结果）；
+    diff_applied 带 live 且为累计口径（单调增长）；轮末 adopted 口径 = 会话内有过采用。"""
+    name = _make_project(env)
+    proj_root = env["dir"] / name
+    c = env["client"]
+
+    import tsov.webapp.agent_session as web_mod
+
+    mid: dict = {}
+    captured: list = []
+    answered: dict = {}
+    bus = env["app"].state.tsov.bus
+    orig_publish = bus.publish
+
+    def spy(project, event, data):
+        if event == "diff_applied":
+            captured.append(dict(data))
+        elif event == "agent_answer":
+            answered.update(dict(data))
+        return orig_publish(project, event, data)
+
+    monkeypatch.setattr(bus, "publish", spy)
+
+    calls = {"n": 0}
+
+    def fake_stream(bus_, project, session_id, messages, tools, stop_event):
+        calls["n"] += 1
+        n = calls["n"]
+        if n == 2:   # 第 2 次流式调用时：第 1 个工具的结果应已「逐工具下放」进 score.json
+            disk = json.loads((proj_root / "score.json").read_text(encoding="utf-8"))
+            mid["pitch0_at_call2"] = disk["tracks"][0]["notes"][0]["pitch_midi"]
+        if n >= 3:
+            return {"content": "完成。", "tool_calls": [], "message": {"role": "assistant", "content": "done"}}
+        idx, val = (0, 74) if n == 1 else (1, 67)
+        return {
+            "content": "",
+            "tool_calls": [{
+                "id": f"call-{n}",
+                "name": "edit_score",
+                "arguments": {
+                    "score_path": str(proj_root / "score.json"),
+                    "annotations": [{"index": idx, "action": "pitch", "value": val}],
+                    "output": str(proj_root / "agent-edited-score.json"),
+                },
+            }],
+            "message": {"role": "assistant", "content": "", "tool_calls": []},
+        }
+
+    monkeypatch.setattr(web_mod, "_stream_chat", fake_stream)
+
+    r = c.post("/api/chat", json={"project": name, "message": "改两个音"})
+    assert r.status_code == 200
+    assert _wait_agent_done(env, name)
+
+    # ① 中途下放：第 2 次流式调用时第 1 个工具已进宿主（旧行为此刻仍是 60）
+    assert mid.get("pitch0_at_call2") == 74
+    # ② 事件：≥2 次 live diff_applied；累计口径单调增长（60→74 = -1+1；再 62→67 → 累计 4）
+    lives = [e for e in captured if e.get("live")]
+    assert len(lives) >= 2
+    assert lives[0]["total"] == 2 and lives[-1]["total"] == 4
+    assert answered.get("adopted") is True   # 轮末 no-op 不误报「无改动」
+    # ③ 终态两改都落盘；快照窗口 agent 条目 = 逐工具 2 条（下放与循环条目去重，无重复）
+    state = c.get(f"/api/projects/{name}/state").json()
+    notes = state["score"]["tracks"][0]["notes"]
+    assert notes[0]["pitch_midi"] == 74 and notes[1]["pitch_midi"] == 67
+    win = c.get(f"/api/projects/{name}/window").json()
+    agent_entries = [e for e in win["entries"] if e["source"] == "agent"]
+    assert len(agent_entries) == 2
+
+
 def test_chat_lock_exclusive(env):
     name = _make_project(env)
     env["app"].state.tsov.agent_lock.acquire()

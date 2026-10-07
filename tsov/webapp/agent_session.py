@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 from ..core.score import Score
+from ..host.diff import diff_notes
 from ..host.state import ProjectState
 from ..web_actions import (READ_TOOLS, SCORE_WRITING_TOOLS, ActionJournal,
                            impact_of, summarize_args, tool_label, tool_stats)
@@ -38,6 +39,45 @@ def _read_json_safe(path: Path) -> dict | None:
         return data if isinstance(data, dict) else None
     except (OSError, ValueError):
         return None
+
+
+def _cumulative_note_diff(preseed: dict | None, post_snap: dict | None) -> dict | None:
+    """批B2（P41）：本轮累计音符级 diff（track 0，与 apply_score/diff_notes 同源）。
+
+    基线 = 轮首预置（preseed）——随工具步进单调增长，供卷帘叠层/徽章「边做边长」。
+    无基线（预置失败）→ None（调用方退回该工具的增量 diff）。
+    """
+    if not preseed or not post_snap:
+        return None
+    try:
+        pre = Score.from_dict(preseed)
+        post = Score.from_dict(post_snap)
+        pre_notes = pre.tracks[0].notes if pre.tracks else []
+        post_notes = post.tracks[0].notes if post.tracks else []
+        return diff_notes(pre_notes, post_notes).to_dict()
+    except Exception:  # noqa: BLE001 累计 diff 失败不阻塞（调用方退回增量）
+        return None
+
+
+def _adopt_mid_round(proj, project_name: str, bus, preseed: dict | None,
+                     post_snap: dict, label: str) -> bool:
+    """批B2（P41）逐工具下放：把工作副本中间态同步采用到宿主（返回值 = 是否实际采用）。
+
+    - ok → 发 diff_applied（累计口径 + live 标志）+ state_updated；journal 经
+      _journal_append_apply 与已记工具条目去重（seq 复用，不产生重复条目）
+    - 失败静默（轮末兜底仍在；中间态下放绝不阻塞会话）
+    """
+    try:
+        result = proj.apply_score(Score.from_dict(post_snap), label, source="agent")
+        if not result.get("ok"):
+            return False
+        payload = _cumulative_note_diff(preseed, post_snap) or result.get("diff") or {}
+        bus.publish(project_name, "diff_applied",
+                    {**payload, "commit": None, "seq": result.get("seq"), "live": True})
+        bus.publish(project_name, "state_updated", project_state(proj))
+        return True
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _load_session_messages(jsonl_path: Path) -> list[dict]:
@@ -456,6 +496,7 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
     tool_count = 0
     turns = 0
     stopped = False
+    adopted_any = False   # 批B2（P41）：本轮任一次采用（逐工具下放或轮末）——agent_answer 口径
     try:
         registry = build_default_registry(skills=skills_lib)
 
@@ -528,6 +569,11 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
                         "undoable": bool(entry),
                     },
                 )
+                # 批B2（P41）：逐工具下放——写类工具有实际变化 → 立即同步宿主（叠层/卷帘边做边长）
+                if entry is not None and post_snap is not None:
+                    if _adopt_mid_round(proj, project_name, bus, preseed, post_snap,
+                                        f"agent：{tool_label(tool_name)}"):
+                        adopted_any = True
                 session.add("tool", observation, tool_call_id=tc["id"])
         else:
             answer = f"已达最大轮次（{config.AGENT_MAX_TURNS}）未形成最终回答；会话已落盘。"
@@ -570,7 +616,7 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
                 "content": answer,
                 "turns": turns,
                 "tool_calls_made": tool_count,
-                "adopted": bool(adopted),
+                "adopted": bool(adopted) or adopted_any,
                 "stopped": stopped,
             },
         )
@@ -583,7 +629,7 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
             project_name,
             "agent_answer",
             {"session_id": session_id, "content": "会话已被用户停止（流式中断）。",
-             "turns": turns, "tool_calls_made": tool_count, "adopted": False, "stopped": True},
+             "turns": turns, "tool_calls_made": tool_count, "adopted": adopted_any, "stopped": True},
         )
     except Exception as e:  # noqa: BLE001 LLM/致命错误 → agent_error 事件（锁在 finally 释放）
         try:   # 批B P23：终止轮次落痕（异常）
