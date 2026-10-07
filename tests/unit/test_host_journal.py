@@ -128,3 +128,26 @@ def test_legacy_index_migration():
         assert j2.cursor == 1
     finally:
         rmtree_force(ws)
+
+
+def test_undo_after_edit_no_stale_resurrection():
+    """批A P33：undo → 新编辑 → undo ⇒ 不回旧分支快照（不复活旧动作）。
+
+    实录复现（bili-prep-04）：建音符 A → undo → 建音符 B → undo ⇒
+    修前回 A 的 post（A 复活）；修后回 fork 点（A 之前）。
+    """
+    ws = _ws()
+    try:
+        j = ActionJournal(ws)
+        h0 = j.snapshot({"step": 0})
+        h1 = j.snapshot({"step": 1})
+        h2 = j.snapshot({"step": 2})
+        j.append(source="user", label="A", pre=h0, post=h1)
+        assert j.undo()["step"] == 0                    # A 之前
+        j.append(source="user", label="B", pre=h0, post=h2)   # 分歧：A 标 stale
+        assert j.entries[0]["stale"] is True
+        assert j.undo()["step"] == 0                    # 修前：entries[0].post=h1（A 复活）
+        assert j.undo()["step"] == 0                    # fork 点不变（不越过到旧分支）
+        assert j.jump(2)["step"] == 0                   # 动作级回跳同样停在 fork 点
+    finally:
+        rmtree_force(ws)

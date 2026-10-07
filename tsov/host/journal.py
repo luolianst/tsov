@@ -6,7 +6,8 @@
   - 用户手势：留最新 `USER_WINDOW = 20` 条；
   - agent 动作：留最新 `AGENT_ROUNDS = 5` 个**对话轮**（round = 一次用户消息触发的 agent 会话）。
 - **游标** cursor ∈ [0..n]：当前状态在条目序列中的位置——
-  cursor==0 = 第一条目之前（= entries[0].pre）；cursor==k = entries[k-1].post。
+  cursor==0 = 第一条目之前（= entries[0].pre）；0<k<n = entries[k].pre（分歧时=分支点状态，
+  防「撤销复活旧分支」）；cursor==n = entries[n-1].post。
   `undo()/redo()` = 游标前后移动并返回对应快照（由 Project 落盘，**零 git 操作**）。
   新编辑落在游标之后时，其后条目标 `stale`（分歧分支；`redo` 拒绝越入）。
 - 服务重启不丢：`index.json` 持久化 entries + cursor（兼容 pre-D2 裸列表格式）。
@@ -124,12 +125,19 @@ class ActionJournal:
             and not self.entries[self.cursor].get("stale")
 
     def snapshot_at(self, cursor: int) -> dict | None:
-        """游标位置的状态快照：0 = entries[0].pre；k = entries[k-1].post。"""
+        """游标位置的状态快照（分支安全）：0 = entries[0].pre；n = entries[n-1].post；
+        0<k<n = entries[k].pre（分支点状态——undo 后继续编辑再 undo 时不回旧分支，批A P33）。"""
         if not self.entries:
             return None
-        if cursor <= 0:
+        k = max(0, min(int(cursor), len(self.entries)))
+        if k <= 0:
             return self.load(self.entries[0].get("pre"))
-        return self.load(self.entries[cursor - 1].get("post"))
+        if k >= len(self.entries):
+            return self.load(self.entries[-1].get("post"))
+        snap = self.load(self.entries[k].get("pre"))
+        if snap is None:  # pre 缺失兜底：退回线性邻接（旧行为）
+            snap = self.load(self.entries[k - 1].get("post"))
+        return snap
 
     def undo(self) -> dict | None:
         """游标后退一步 → 该位置快照；无处可退 → None。"""
