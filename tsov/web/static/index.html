@@ -195,6 +195,7 @@
 
   <div id="rail-chat" class="rail right" title="展开对话面板"><span>◀ 对话</span></div>
   <aside id="chat-panel">
+    <div id="chat-resize" title="拖动调整对话栏宽度；双击恢复默认（360px）"></div>
     <div id="chat-head">
       <div id="sp-tabs" title="右栏视图：对话 / 步骤（选择记忆到 localStorage）">
         <button class="sp-tab active" data-view="chat">对话</button>
@@ -230,7 +231,7 @@
       <button id="btn-ann-clear" title="清空待发送标注">✕</button>
     </div>
     <div id="chat-input-row">
-      <input id="chat-input" placeholder="对乐谱说点什么…（如：改成 D 多利亚调式）">
+      <textarea id="chat-input" rows="1" placeholder="对乐谱说点什么…（如：改成 D 多利亚调式）｜Enter 发送 / Shift+Enter 换行"></textarea>
       <button id="btn-send">发送</button>
     </div>
     <div id="chat-actions">

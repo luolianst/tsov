@@ -529,6 +529,7 @@ async function send(message) {
   clearAgentTracks();             // 批B B1-3：新一轮清上一轮改动标记
   appendCard(text('msg user', message), { kind: 'user', text: message, ts: Date.now() });
   inputEl.value = '';
+  autoGrowInput();
   setAgentBusy(true);
   startBusyTicker();
   sysMsg('已发送（' + (anns.length ? '含 ' + anns.length + ' 条人工标注：确定性先行、不走 LLM；' : '')
@@ -842,6 +843,52 @@ export function switchProject(project) {
   renderAll();
 }
 
+/* ---------------- 批B P7：输入体验（自动增高 / 面板拖宽） ---------------- */
+
+function autoGrowInput() {
+  if (!inputEl || inputEl.tagName !== 'TEXTAREA') return;
+  inputEl.style.height = 'auto';
+  const maxH = 150;   // ≈6 行
+  inputEl.style.height = Math.min(inputEl.scrollHeight, maxH) + 'px';
+  inputEl.style.overflowY = inputEl.scrollHeight > maxH ? 'auto' : 'hidden';
+}
+
+let currentChatW = 0;
+
+function setChatWidth(w) {
+  currentChatW = Math.max(220, Math.min(560, Math.round(w)));
+  document.documentElement.style.setProperty('--chat-w', currentChatW + 'px');
+}
+
+function initChatResize() {
+  const handle = document.getElementById('chat-resize');
+  if (!handle) return;
+  try {
+    const saved = Number(localStorage.getItem('tsov.chatw')) || 0;
+    if (saved) setChatWidth(saved);
+  } catch (e) { /* 隐私模式忽略 */ }
+  let dragging = false;
+  handle.addEventListener('mousedown', (e) => {
+    dragging = true;
+    e.preventDefault();
+    document.body.classList.add('chat-resizing');
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    setChatWidth(window.innerWidth - e.clientX);
+  });
+  window.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.classList.remove('chat-resizing');
+    try { localStorage.setItem('tsov.chatw', String(currentChatW)); } catch (e) { /* 忽略 */ }
+  });
+  handle.addEventListener('dblclick', () => {
+    try { localStorage.removeItem('tsov.chatw'); } catch (e) { /* 忽略 */ }
+    setChatWidth(360);
+  });
+}
+
 /* ---------------- 初始化 ---------------- */
 
 export function init(opts) {
@@ -868,8 +915,13 @@ export function init(opts) {
 
   sendBtn.addEventListener('click', () => send(inputEl.value));
   inputEl.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.isComposing) send(inputEl.value);
+    // 批B P7：Enter 发送 / Shift+Enter 换行（isComposing 防中文 IME 误发）
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      send(inputEl.value);
+    }
   });
+  inputEl.addEventListener('input', autoGrowInput);   // 批B P7：多行自动增高（1–6 行）
 
   undoRoundBtn.addEventListener('click', async () => {
     if (!store.project) return;
@@ -909,6 +961,7 @@ export function init(opts) {
     if (chip && chip.dataset.chip) runAiChip(chip.dataset.chip, chip);
   });
 
+  initChatResize();
   wireEvents();
   bus.on('state', refreshRollbackOptions);
   bus.on('agentbusy', () => {

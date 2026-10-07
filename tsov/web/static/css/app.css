@@ -104,12 +104,12 @@ button {
 button:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--border-strong); }
 button:active:not(:disabled) { background: var(--bg-sunken); }
 button:disabled { opacity: .4; cursor: not-allowed; }
-button:focus-visible, select:focus-visible, input:focus-visible {
+button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
-select, input {
+select, input, textarea {
   background: var(--bg-elev);
   color: var(--text);
   border: 1px solid var(--border);
@@ -118,7 +118,7 @@ select, input {
   font: inherit;
   font-size: var(--fs-md);
 }
-select:hover, input:hover { border-color: var(--border-strong); }
+select:hover, input:hover, textarea:hover { border-color: var(--border-strong); }
 .muted { color: var(--muted); }
 .small { font-size: var(--fs-sm); }
 .error { color: var(--err); }
@@ -376,6 +376,7 @@ body.chat-folded #rail-chat { display: flex; }
 #chat-panel {
   background: var(--bg-panel);
   border-left: 1px solid var(--border);
+  position: relative;   /* 批B P7：拖宽手柄定位锚 */
   display: grid;
   grid-template-rows: auto auto 1fr auto auto auto;
   /* 修正轮2：显式列 + minmax(0,1fr)（长下拉选项的 min-content 曾把面板顶到 478px） */
@@ -578,9 +579,15 @@ body.chat-folded #rail-chat { display: flex; }
 #chat-chips { display: flex; gap: 6px; align-items: center; padding: 6px 10px; border-top: 1px solid var(--border); }
 #quick-cmd { flex: 1; min-width: 0; font-size: var(--fs-md); padding: 3px 8px; max-width: 240px; }
 #btn-quick-run { font-size: var(--fs-md); padding: 3px 10px; }
-#chat-input-row { display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--border); }
-#chat-input { flex: 1; min-width: 0; width: 100%; padding: 6px 8px; }
+#chat-input-row { display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--border); align-items: flex-end; }
+#chat-input { flex: 1; min-width: 0; width: 100%; padding: 6px 8px;
+  resize: none; overflow-y: hidden; line-height: 1.45;
+  font-family: var(--font-ui); font-size: var(--fs-md); }
 #chat-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+/* 批B P7：对话栏拖宽手柄（hover/拖拽高亮） */
+#chat-resize { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 5; }
+#chat-resize:hover, body.chat-resizing #chat-resize { background: var(--accent-soft); }
+body.chat-resizing { cursor: col-resize; user-select: none; }
 #chat-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--border); align-items: center; }
 #chat-actions button { font-size: var(--fs-md); padding: 3px 8px; flex: none; }
 #rollback-select { flex: 1 1 110px; min-width: 0; max-width: 58%; font-size: var(--fs-md); }
