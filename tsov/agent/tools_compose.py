@@ -159,7 +159,10 @@ def tool_create_track(args: dict) -> str:
 
 
 def tool_write_notes(args: dict) -> str:
-    """按「小节+16分格」写音符（bar/grid/len → 秒），mode=append|replace。"""
+    """按「小节+16分格」写音符（bar/grid/len → 秒），mode=append|replace。
+
+    replace = 覆盖写入：只重写「本次涉及的小节范围」内旧音（范围外保留；批A P31 语义修正）。
+    """
     score = _load(args["score_path"])
     ti = _resolve_track(score, args.get("track", 0))
     notes_in = args.get("notes")
@@ -170,9 +173,8 @@ def tool_write_notes(args: dict) -> str:
         raise ValueError(f"mode 只支持 append/replace：{mode!r}")
     bar_sec, gpb, grid_sec = _bar_grid_sec(score)
     tr = score.tracks[ti]
-    if mode == "replace":
-        tr.notes = []
-    added = 0
+    # 先解析全部 specs（校验 + 定范围），再落笔
+    parsed = []
     bar_lo, bar_hi = None, None
     for i, spec in enumerate(notes_in):
         try:
@@ -185,20 +187,33 @@ def tool_write_notes(args: dict) -> str:
             raise ValueError(f"第 {i} 音 grid 需在 1..{gpb}（本工程每小节 {gpb} 个 16 分格）：{grid}")
         if ln < 1 or grid - 1 + ln > gpb:
             raise ValueError(f"第 {i} 音 len 越界（grid {grid} + len {ln} > {gpb}）：{spec!r}")
+        parsed.append((bar, grid, ln, spec))
+        bar_lo = bar if bar_lo is None else min(bar_lo, bar)
+        bar_hi = bar if bar_hi is None else max(bar_hi, bar)
+    removed = 0
+    if mode == "replace":
+        lo = (bar_lo - 1) * bar_sec - 1e-6
+        hi = bar_hi * bar_sec - 1e-6          # [bar_lo 起, bar_hi 末) 区间
+        kept = [n for n in tr.notes if not (lo <= n.start < hi)]
+        removed = len(tr.notes) - len(kept)
+        tr.notes = kept
+    added = 0
+    for bar, grid, ln, spec in parsed:
         pm = _pitch_of(spec)
         start = (bar - 1) * bar_sec + (grid - 1) * grid_sec
         tr.notes.append(_make_note(pm, start, start + ln * grid_sec, spec.get("velocity", 0.8)))
         added += 1
-        bar_lo = bar if bar_lo is None else min(bar_lo, bar)
-        bar_hi = bar if bar_hi is None else max(bar_hi, bar)
     tr.notes.sort(key=lambda n: (n.start, n.pitch_midi))
     out = _save(score, _out_path(args, args["score_path"]))
-    return (f"已{'重写' if mode == 'replace' else '追加'} {added} 音 → track[{ti}] {tr.name}；"
+    if mode == "replace":
+        return (f"已重写 {added} 音 → track[{ti}] {tr.name}（覆盖小节 {bar_lo}-{bar_hi}，替换原 {removed} 音；"
+                f"范围外保留）；该轨共 {len(tr.notes)} 音 ｜ 写回：{out}")
+    return (f"已追加 {added} 音 → track[{ti}] {tr.name}；"
             f"覆盖小节 {bar_lo}-{bar_hi}（{gpb} 格/小节）；该轨共 {len(tr.notes)} 音 ｜ 写回：{out}")
 
 
 def tool_duplicate_bars(args: dict) -> str:
-    """整小节复制（段落复制填充）；track 省略 = 全轨复制（复刻段落）。"""
+    """整小节复制（段落复制填充·追加式：目标区原有音符保留，不覆盖不清除）；track 省略 = 全轨复制（复刻段落）。"""
     score = _load(args["score_path"])
     src0 = int(args["src_start_bar"]); src1 = int(args["src_end_bar"]); dest = int(args["dest_start_bar"])
     if not (1 <= src0 <= src1) or dest < 1:
@@ -219,9 +234,10 @@ def tool_duplicate_bars(args: dict) -> str:
         tr.notes.sort(key=lambda n: (n.start, n.pitch_midi))
     out = _save(score, _out_path(args, args["score_path"]))
     if args.get("track") is None:
-        return f"已全轨复制 小节 {src0}-{src1} → {dest}（共 {copied} 音）｜ 写回：{out}"
+        return (f"已全轨复制 小节 {src0}-{src1} → {dest}（追加 {copied} 音；目标区原有音符保留）"
+                f"｜ 写回：{out}")
     return (f"已复制 track[{targets[0]}] {score.tracks[targets[0]].name} 小节 {src0}-{src1} → {dest}"
-            f"（{copied} 音）｜ 写回：{out}")
+            f"（追加 {copied} 音；目标区原有音符保留）｜ 写回：{out}")
 
 
 def tool_set_track_mix(args: dict) -> str:
@@ -374,24 +390,32 @@ def tool_analyze_levels(args: dict) -> str:
     win = float(args.get("window_sec", 4.0))
     engine = HostEngine()
     session = engine.load(score)
+    any_solo = any(bool(getattr(t, "solo", False)) for t in score.tracks)
+    solo_names = [f"track[{i}] {t.name}" for i, t in enumerate(score.tracks) if bool(getattr(t, "solo", False))]
     try:
         sr = session.samplerate
         mix = render_buses(session, stereo=False, auto_scale=False)
         mix_peak = float(np.max(np.abs(mix))) if mix.size else 0.0
-        rows = []
+        rows = []   # (i, name, rms_all, rms_win, n, reason)；reason ∈ empty/mute/solo/silent（批A P25b）
         for i, tr in enumerate(score.tracks):
             if not tr.notes:
-                rows.append((i, tr.name, None, None, 0))
+                rows.append((i, tr.name, None, None, 0, "empty"))
                 continue
             buf = render_buses(session, stereo=False, only_track=i, auto_scale=False)
-            if buf.size == 0:
-                rows.append((i, tr.name, None, None, len(tr.notes)))
+            if buf.size == 0 or float(np.max(np.abs(buf))) <= 1e-12:
+                if bool(getattr(tr, "mute", False)):
+                    reason = "mute"
+                elif any_solo and not bool(getattr(tr, "solo", False)):
+                    reason = "solo"
+                else:
+                    reason = "silent"
+                rows.append((i, tr.name, None, None, len(tr.notes), reason))
                 continue
             rms_all = float(np.sqrt(np.mean(buf ** 2)))
             w = max(1, int(win * sr))
             n_win = max(1, len(buf) // w)
             rms_win = max(float(np.sqrt(np.mean(buf[k * w:(k + 1) * w] ** 2))) for k in range(n_win))
-            rows.append((i, tr.name, rms_all, rms_win, len(tr.notes)))
+            rows.append((i, tr.name, rms_all, rms_win, len(tr.notes), None))
     finally:
         session.close()
 
@@ -402,12 +426,20 @@ def tool_analyze_levels(args: dict) -> str:
     ref = max(r[2] for r in loud) if loud else 0.0
     lines = [f"电平报告（{len(score.tracks)} 轨；以最响轨为相对 0 dB；窗口 {win:.1f}s）",
              f"混音峰值（未缩放，满刻度 1.0）：{mix_peak:.3f}" + ("  ⚠ 超过 1.0（会削波/被整体缩放）" if mix_peak > 1.0 else "  ✓")]
-    for i, name, rms_all, rms_win, n in rows:
+    if any_solo:
+        lines.append(f"⚠ solo 门控生效中（仅 solo 轨可闻）：{'、'.join(solo_names)}")
+    for i, name, rms_all, rms_win, n, reason in rows:
         if rms_all:
             lines.append(f"track[{i}] {name}: 整段 {db(rms_all):.1f} dB / 最响窗口 {db(rms_win):.1f} dB "
                          f"（相对主轨 {db(rms_all) - db(ref):+.1f} dB；{n} 音）")
+        elif reason == "empty":
+            lines.append(f"track[{i}] {name}: （无音符）")
+        elif reason == "mute":
+            lines.append(f"track[{i}] {name}: （mute 静音——混音中不发声；{n} 音）")
+        elif reason == "solo":
+            lines.append(f"track[{i}] {name}: （被 solo 门控排除——当前仅 solo 轨可闻；{n} 音）")
         else:
-            lines.append(f"track[{i}] {name}: （无音符，{n} 音）")
+            lines.append(f"track[{i}] {name}: （静音/无输出；{n} 音）")
     lines.append("提示：调整音量用 set_track_mix（volume），目标=各轨在「同时发声窗口」相对电平接近 0 dB（见配器预设 level_hint）")
     return "\n".join(lines)
 
@@ -567,7 +599,8 @@ def register_compose_tools(registry: ToolRegistry) -> None:
         name="write_notes",
         description=("按「小节+16分格」写音符：note={bar,grid,len,note|pitch_midi,velocity?}；"
                      "6/8 每小节 12 格（八分格 n = 16分格 2n-1），4/4 每小节 16 格；"
-                     "音名 C4=60（如 E4 / f#3）；mode=append|replace"),
+                     "音名 C4=60（如 E4 / f#3）；mode=append 追加｜replace 覆盖写入"
+                     "（只重写本次涉及的小节范围、范围外保留；无「清空」模式）"),
         parameters={"type": "object", "properties": {
             "score_path": {"type": "string"},
             "track": {"description": "轨索引或轨名"},
@@ -578,7 +611,7 @@ def register_compose_tools(registry: ToolRegistry) -> None:
 
     registry.register(ToolSpec(
         name="duplicate_bars",
-        description="整小节复制（段落复制填充）：src 小节范围 → dest 起点；track 省略 = 全轨复制（复刻段落）",
+        description="整小节复制（段落复制填充·追加式：目标区原有音符保留）：src 小节范围 → dest 起点；track 省略 = 全轨复制（复刻段落）",
         parameters={"type": "object", "properties": {
             "score_path": {"type": "string"},
             "src_start_bar": {"type": "integer"},

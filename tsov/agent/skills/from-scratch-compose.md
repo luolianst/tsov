@@ -24,7 +24,7 @@ description: 空谱从零创作：先出结构段表、逐段写、段落复制�
 
 ## 3.5 工具速查（按这个链路干）
 1. `create_track`（program 用 GM 名：piano / synth_lead / synth_bass / pad / guitar_clean / guitar_muted / drums）建编制；
-2. `write_notes` 写音：note = `{bar, grid, len, note|pitch_midi, velocity}`——bar 从 1 数，grid 是 16 分格序号（6/8 每小节 12 格，八分格 n = 16 分格 2n-1），**不要自己算秒数**；mode=replace 可整轨重写；
+2. `write_notes` 写音：note = `{bar, grid, len, note|pitch_midi, velocity}`——bar 从 1 数，grid 是 16 分格序号（6/8 每小节 12 格，八分格 n = 16 分格 2n-1），**不要自己算秒数**；mode=replace 覆盖写入（重写本次涉及的小节范围，范围外保留）；
 3. 鼓不用逐音写：`apply_pattern`（wotaiko_drums_base 主歌 / wotaiko_drums_energy 副歌，crash=true 加段头镲）；
 4. 段落复制：`duplicate_bars`（省略 track = 全轨复制；复制后改和声/加花做「重复中的变化」）；
 5. 音量平衡：`analyze_levels` 测各轨 RMS → `set_track_mix` 调 volume/pan（目标=同时发声窗口相对电平接近）；

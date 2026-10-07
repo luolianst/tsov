@@ -110,10 +110,26 @@ def test_write_notes_grid_math(tmp_path):
         tc.tool_write_notes({"score_path": str(sp), "output": str(sp),
                              "notes": [{"bar": 1, "grid": 12, "len": 2, "pitch_midi": 60}]})
 
-    # replace 重写
-    tc.tool_write_notes({"score_path": str(sp), "output": str(sp), "mode": "replace",
-                         "notes": [{"bar": 1, "grid": 1, "len": 12, "pitch_midi": 72}]})
-    assert len(_load(sp)["tracks"][0]["notes"]) == 1
+    # replace 覆盖语义（批A P31）：只重写本次涉及的小节范围，范围外保留
+    msg = tc.tool_write_notes({"score_path": str(sp), "output": str(sp), "mode": "replace",
+                               "notes": [{"bar": 1, "grid": 1, "len": 12, "pitch_midi": 72}]})
+    assert "范围外保留" in msg and "替换原 1 音" in msg
+    notes = _load(sp)["tracks"][0]["notes"]
+    assert len(notes) == 2                                # bar2 的原音保留
+    assert {n["pitch_midi"] for n in notes} == {60, 72}
+
+
+def test_write_notes_replace_scope_keeps_outside(tmp_path):
+    """批A P31 实录回归：16 小节谱只替换第 1 小节 → 第 10 小节原有音不受影响。"""
+    sp = _save_score(tmp_path / "score.json", _base([_melody()]))
+    tc.tool_write_notes({"score_path": str(sp), "output": str(sp), "notes": [
+        {"bar": 10, "grid": 1, "len": 2, "pitch_midi": 60},
+    ]})
+    msg = tc.tool_write_notes({"score_path": str(sp), "output": str(sp), "mode": "replace",
+                               "notes": [{"bar": 1, "grid": 1, "len": 2, "pitch_midi": 72}]})
+    notes = _load(sp)["tracks"][0]["notes"]
+    assert len(notes) == 2 and {n["pitch_midi"] for n in notes} == {60, 72}
+    assert "范围外保留" in msg
 
 
 def test_duplicate_bars_all_tracks(tmp_path):
@@ -127,7 +143,7 @@ def test_duplicate_bars_all_tracks(tmp_path):
     ]})
     msg = tc.tool_duplicate_bars({"score_path": str(sp), "output": str(sp),
                                   "src_start_bar": 1, "src_end_bar": 2, "dest_start_bar": 3})
-    assert "全轨复制" in msg
+    assert "全轨复制" in msg and "追加" in msg and "原有音符保留" in msg
     s = _load(sp)
     assert len(s["tracks"][0]["notes"]) == 4 and len(s["tracks"][1]["notes"]) == 2
     starts = sorted(n["start"] for n in s["tracks"][0]["notes"])
@@ -217,6 +233,28 @@ def test_analyze_levels(tmp_path):
                            "track": 1, "pattern": "wotaiko_drums_base", "start_bar": 1, "bars": 1})
     msg = tc.tool_analyze_levels({"score_path": str(sp)})
     assert "电平报告" in msg and "混音峰值" in msg and "track[0]" in msg
+
+
+@pytest.mark.skipif(not SF2.exists(), reason="缺 vendor/soundfonts/FluidR3_GM.sf2")
+def test_analyze_levels_exclusion_messages(tmp_path):
+    """批A P25b：被 solo/mute 排除 ≠ 无音符——报告须分列原因并标注 solo 门控。"""
+    sp = _save_score(tmp_path / "score.json", _base([_melody(), _drums()]))
+    tc.tool_write_notes({"score_path": str(sp), "output": str(sp), "track": 0, "notes": [
+        {"bar": 1, "grid": 1, "len": 12, "pitch_midi": 72},
+    ]})
+    tc.tool_apply_pattern({"score_path": str(sp), "output": str(sp),
+                           "track": 1, "pattern": "wotaiko_drums_base", "start_bar": 1, "bars": 1})
+    # 轨 1 solo → 轨 0（有音）被门控排除
+    tc.tool_set_track_mix({"score_path": str(sp), "output": str(sp), "track": 1, "solo": True})
+    msg = tc.tool_analyze_levels({"score_path": str(sp)})
+    line0 = next(l for l in msg.splitlines() if l.startswith("track[0]"))
+    assert "solo 门控排除" in line0 and "无音符" not in line0
+    assert "⚠ solo 门控生效中" in msg
+    # 轨 0 mute → 原因转 mute
+    tc.tool_set_track_mix({"score_path": str(sp), "output": str(sp), "track": 0, "mute": True})
+    msg2 = tc.tool_analyze_levels({"score_path": str(sp)})
+    line0b = next(l for l in msg2.splitlines() if l.startswith("track[0]"))
+    assert "mute 静音" in line0b
 
 
 @pytest.mark.skipif(not SF2.exists() or not shutil.which("ffmpeg"), reason="缺 SoundFont 或 ffmpeg")
