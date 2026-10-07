@@ -2,7 +2,7 @@
 
 import { api } from './api.js';
 import { bus, connectEvents } from './events.js';
-import { store, setState, setError, toast, fitView, setView, clearDiff, setAnnotations, clearAnnotations, setSnap, setViewMode, setSingleTrack, fitViewTrack, refTag, favSource, bookmarks, setSelBookmark, setLoopOn, splitPartner, audioClipsOf } from './state.js';
+import { store, setState, setError, toast, fitView, setView, clearDiff, setDiff, setAnnotations, clearAnnotations, setSnap, setViewMode, setSingleTrack, fitViewTrack, refTag, favSource, bookmarks, setSelBookmark, setLoopOn, splitPartner, audioClipsOf } from './state.js';
 import * as roll from './roll.js';
 import * as timeline from './timeline.js';
 import * as dock from './dock.js';
@@ -832,12 +832,8 @@ function boot() {
   /* SSE → store（本地直接消费事件负载，契约 §六 数据流） */
   bus.on('state_updated', (s) => setState(s, { preserveSelection: true }));
   bus.on('diff_applied', (d) => {
-    const box = $('status-diff');
-    const parts = [];
-    if (d.added && d.added.length) parts.push('+' + d.added.length);
-    if (d.removed && d.removed.length) parts.push('-' + d.removed.length);
-    if (d.changed && d.changed.length) parts.push('~' + d.changed.length);
-    box.textContent = parts.length ? ('本轮 diff ' + parts.join(' ') + (refTag(d) ? ' ' + refTag(d) : '')) : '';
+    /* 批B2：重接线——数据进 store.diff，由 'diff' 主题统一驱动徽章（diff.js）与卷帘三色叠层 */
+    setDiff(d);
   });
 
   /* 版本对比（议题 ④；M-V7 D3 加收藏段）：左槽选版本 → 试听；base_rev 由 chat.js 读取 */
@@ -911,9 +907,7 @@ function boot() {
     fitView(rc.width, rc.height);
   });
   $('btn-clear-diff').addEventListener('click', () => {
-    store.diff = null;
-    $('status-diff').textContent = '';
-    bus.dispatch('diff');
+    clearDiff();   /* 批B2：统一走 clearDiff（置空 store.diff → 'diff' 主题刷新徽章与叠层） */
   });
 
   /* 工程改名：见 renameProject（「☰ 文件 → 重命名工程…」） */
