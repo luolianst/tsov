@@ -363,11 +363,7 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
     edited_path = root / config.EDITED_SCORE_NAME
     journal = proj.journal   # 快照窗口——与工程共享单例（防双实例全量覆盖丢账）
     round_key = f"{session_id}:{int(time.time())}"   # 本对话轮标识（agent 窗口淘汰口径）
-    # 清掉上一轮残留——只采用「本轮」的编辑结果
-    try:
-        edited_path.unlink()
-    except FileNotFoundError:
-        pass
+    # 批B P22：工作副本不再轮首删除——在人工标注应用后预置为「本轮起点」副本（见下方 preseed）
 
     # ---- M-V3：人工标注确定性先行（最高优先级；ADR-0009「不走 LLM」）----
     # 失败（非法标注 / 空结果守卫）→ 拒绝整条消息、谱不变；成功 → 落盘 + 快照窗口条目（M-V7 D2：零 commit）
@@ -397,6 +393,25 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
             state.agent_lock.release()
             return
 
+    # 批B P22：预置工作副本 = 本轮起点（当前谱副本；含已应用的人工标注）——原子写。
+    # 效果：agent 侧草稿恒存在（不再出现「被宿主回收」）；轮末「与预置一致 = 未改」跳过采用。
+    preseed: dict | None = None
+    _preseed_tmp = edited_path.with_name(edited_path.name + ".tmp")
+    try:
+        preseed = proj.score.to_dict()
+        _preseed_tmp.write_text(json.dumps(preseed, ensure_ascii=False), encoding="utf-8")
+        _preseed_tmp.replace(edited_path)
+    except Exception:  # noqa: BLE001 预置失败 → 退回清残留（旧行为）
+        preseed = None
+        try:
+            _preseed_tmp.unlink()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            edited_path.unlink()
+        except FileNotFoundError:
+            pass
+
     score_path = root / "score.json"
     render_path = root / config.RENDER_WAV_NAME
     sel_note = ""
@@ -413,6 +428,8 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
         f"- 当前工程名：{proj.name}；工程 score 路径：{score_path}\n"
         f"- 编辑目标版本：{base_rev}（工程 git 版本标识；请勿自行 git 回滚/切分支，版本切换由宿主负责）\n"
         f"{ann_note}{sel_note}{ua_note}"
+        f"- 工作副本（{config.EDITED_SCORE_NAME}）每轮开头由宿主重置为本轮起点（当前谱副本）；"
+        f"若发现「被回收/重置」，属正常机制，直接继续改谱\n"
         f"- 改谱：用 edit_score 工具（score_path 用上面的工程 score 路径，feedback 写用户的修改要求），"
         f"工具会把新谱自动落盘为同目录的 {config.EDITED_SCORE_NAME}\n"
         f"- 改完谱自查：用 load_score 读 {config.EDITED_SCORE_NAME}，检查全部音高是否属于目标调式音阶"
@@ -521,13 +538,19 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
             except Exception:  # noqa: BLE001
                 pass
 
-        # 采用编辑结果：agent-edited-score.json 存在且与现谱有差异 → 一个 commit + 三色 diff
+        # 采用编辑结果：agent-edited-score.json 相对「轮首预置」有差异 → 采用（零 commit + 三色 diff）
         adopted: dict | None = None
         if edited_path.is_file():
             try:
-                new_score = Score.from_dict(json.loads(edited_path.read_text(encoding="utf-8")))
-                result = proj.apply_score(new_score, f"agent：{task[:40]}", source="agent")
-                adopted = result if result["ok"] else None
+                edited_dict = json.loads(edited_path.read_text(encoding="utf-8"))
+                # 批B P22：与预置一致 = agent 本轮未改 → 跳过采用（防旧副本压掉用户轮中手改）
+                if preseed is not None and edited_dict == preseed:
+                    new_score = None
+                else:
+                    new_score = Score.from_dict(edited_dict)
+                if new_score is not None:
+                    result = proj.apply_score(new_score, f"agent：{task[:40]}", source="agent")
+                    adopted = result if result["ok"] else None
             except Exception as e:  # noqa: BLE001 坏文件不阻塞回答
                 bus.publish(
                     project_name,

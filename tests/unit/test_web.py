@@ -1134,3 +1134,32 @@ def test_chat_stop_termination_recorded(env, monkeypatch):
     f = env["dir"] / "agent-sessions" / (r["session_id"] + ".jsonl")
     lines = [_json.loads(x) for x in f.read_text(encoding="utf-8").splitlines() if x.strip()]
     assert any("轮次终止" in (ln.get("content") or "") for ln in lines), lines[-3:]
+
+def test_chat_preseeds_working_copy(env, monkeypatch):
+    """P22：轮首预置工作副本=当前谱副本（agent 侧恒存在）+ brief 含「重置为本轮起点」说明。"""
+    import json as _json
+
+    import tsov.webapp.agent_session as web_mod
+
+    name = _make_project(env)
+    proj_root = env["dir"] / name
+    seen: dict = {}
+
+    def fake_stream(bus, project, session_id, messages, tools, stop_event):
+        draft = proj_root / "agent-edited-score.json"
+        seen["exists"] = draft.is_file()
+        if seen["exists"]:
+            seen["equal"] = (_json.loads(draft.read_text(encoding="utf-8"))
+                             == _json.loads((proj_root / "score.json").read_text(encoding="utf-8")))
+        seen["brief"] = "\n".join(str(m.get("content", "")) for m in messages if m.get("role") == "user")
+        return {"content": "收到。", "tool_calls": [], "message": {"role": "assistant", "content": "ok"}}
+
+    monkeypatch.setattr(web_mod, "_stream_chat", fake_stream)
+    r = env["client"].post("/api/chat", json={"project": name, "message": "看看草稿"})
+    assert r.status_code == 200
+    assert _wait_agent_done(env, name)
+    assert seen.get("exists") is True, "轮首应已预置工作副本"
+    assert seen.get("equal") is True, "预置副本应等于当前谱"
+    assert "重置为本轮起点" in seen.get("brief", "")
+    # 轮末：未改 → 采用跳过；草稿仍在（预置语义）
+    assert (proj_root / "agent-edited-score.json").is_file()
