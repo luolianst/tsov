@@ -485,14 +485,43 @@ function ensureStreamCard() {
   root.appendChild(body);
   logEl.appendChild(root);
   streamCard = { root, body, thinkPre: pre, thinkDs: details, thinkLab: tLab, thinkInline: tInline, statusEl,
+    thinkFull: '', buf: null,
     line: { phase: 'waiting', silent: null, silentTs: 0, tool: null, toolChars: 0 } };
+  details.addEventListener('toggle', () => {
+    // 展开时懒填充全量思考（流式期 pre 不随增量重写——防超大文本反复布局）
+    if (details.open && streamCard && streamCard.thinkDs === details) pre.textContent = streamCard.thinkFull || '';
+  });
   return streamCard;
 }
 
 function finalizeStreamCard() {
   if (!streamCard) return;
+  if (streamCard.buf && streamCard.buf.t) clearTimeout(streamCard.buf.t);
   streamCard.root.remove();   // 批A P18：定稿即从 DOM 移除（旧版只去 streaming 类 → 残留致「同段显示两遍」）
   streamCard = null;
+}
+
+/* 批B 修正轮2：增量批处理——万级增量的流不再逐条触发布局（防主线程 O(n²) 呆死） */
+const FLUSH_MS = 120;
+function scheduleFlush(sc) {
+  if (!sc.buf) sc.buf = { think: '', body: '', t: 0 };
+  if (sc.buf.t) return;
+  sc.buf.t = setTimeout(() => { sc.buf.t = 0; flushDelta(sc); }, FLUSH_MS);
+}
+function flushDelta(sc) {
+  const b = sc.buf;
+  if (!b) return;
+  if (b.think) {
+    sc.thinkFull = (sc.thinkFull || '') + b.think;
+    sc.thinkInline.textContent = sc.thinkFull.slice(-240);   // 单行条=尾部窗口（内滚动观感）
+    b.think = '';
+  }
+  if (b.body) {
+    sc.body.textContent += b.body;
+    b.body = '';
+  }
+  renderStreamStatus();
+  scrollLog();
 }
 
 /* 批B P20：流式状态行——本地秒表 / 参数进度 / 静默变色（≥60s 黄 / ≥90s 红） */
@@ -524,7 +553,9 @@ function renderStreamStatus() {
   if (!sc || !sc.statusEl) return;
   const L = sc.line || {};
   const elapsed = Math.floor((Date.now() - busyStartTs) / 1000);
-  const segs = [L.phase === 'stream' ? ('模型输出中… ' + fmtDur(elapsed)) : ('等待模型响应… ' + fmtDur(elapsed))];
+  const segs = [L.phase === 'stream' ? ('模型输出中… ' + fmtDur(elapsed))
+    : L.phase === 'thinking' ? ('模型思考中… ' + fmtDur(elapsed))
+    : ('等待模型响应… ' + fmtDur(elapsed))];
   if (L.tool) segs.push('正在生成 ' + L.tool + ' 参数…（' + (L.toolChars >= 1000 ? (L.toolChars / 1000).toFixed(1) + 'k' : L.toolChars) + ' 字）');
   let silentLive = null;
   if (L.silent != null) {
@@ -578,21 +609,20 @@ function wireEvents() {
   bus.on('agent_delta', (d) => {
     const sc = ensureStreamCard();
     if (d.kind === 'thinking') {
-      sc.thinkPre.textContent += d.text || '';
-      // 批B 修正：dsh 式单行内滚动条——懒显示 + 尾部跟随（点击 summary 展开全量）
+      // 批B 修正：dsh 式单行条——懒显示；文本进缓冲，由批处理窗口刷新（尾部窗口）
       sc.thinkDs.hidden = false;
-      sc.thinkInline.textContent += d.text || '';
-      sc.thinkInline.scrollLeft = sc.thinkInline.scrollWidth;
-      if (sc.line) sc.line.silent = null;
+      if (!sc.buf) sc.buf = { think: '', body: '', t: 0 };
+      sc.buf.think += d.text || '';
+      if (sc.line) { sc.line.phase = 'thinking'; sc.line.silent = null; }
     } else if (d.kind === 'tool_args') {
       // 批B P20：工具参数生成进度（后端节流推送）
       if (sc.line) { sc.line.tool = d.tool || '?'; sc.line.toolChars = d.chars || 0; sc.line.silent = null; }
     } else {
-      sc.body.textContent += d.text || '';
+      if (!sc.buf) sc.buf = { think: '', body: '', t: 0 };
+      sc.buf.body += d.text || '';
       if (sc.line) { sc.line.phase = 'stream'; sc.line.tool = null; sc.line.silent = null; }
     }
-    renderStreamStatus();
-    scrollLog();
+    scheduleFlush(sc);   // 批处理：≥120ms 合并一次 DOM/布局操作
   });
 
   /* 批B P20：静默心跳 → 状态行显示「模型静默 Ns」并变色 */
@@ -605,8 +635,12 @@ function wireEvents() {
   /* 批B P23：断流重试 → 重置流式卡（正文/思考清空，等待重发；后端已重发） */
   bus.on('agent_retry', (d) => {
     const sc = ensureStreamCard();
+    if (sc.buf && sc.buf.t) clearTimeout(sc.buf.t);
+    sc.buf = null;
+    sc.thinkFull = '';
     sc.thinkPre.textContent = '';
     sc.thinkInline.textContent = '';
+    sc.thinkInline.classList.remove('head');
     sc.thinkLab.textContent = '思考中';
     sc.thinkDs.hidden = true;
     sc.thinkDs.open = false;
@@ -622,9 +656,11 @@ function wireEvents() {
     if (streamCard) {
       // 批B P8：定稿=转正——流式卡升格为本轮正式消息（思考链折叠保留；不再「移除+重挂」，P18 不回归）
       const sc = streamCard;
+      if (sc.buf && sc.buf.t) { clearTimeout(sc.buf.t); sc.buf.t = 0; }
+      flushDelta(sc);   // 批B 修正轮2：落掉缓冲残量
       streamCard = null;
       const textContent = d.content || '（本轮仅工具调用）';
-      const hasThink = sc.thinkPre.textContent.length > 0;
+      const hasThink = !!(sc.thinkFull && sc.thinkFull.length);
       if (!hasThink && !d.content) {
         sc.root.remove();   // 空卡（无思考无正文）直接移除
       } else {
@@ -633,12 +669,14 @@ function wireEvents() {
         sc.body.innerHTML = mdToHtml(textContent);      // 正文以 turn 终值为准（替换流式累积）
         if (hasThink) {
           sc.thinkLab.textContent = '思考';   // 定稿：单行条保留（每思考块 2 行 = tag + 思考条）
+          sc.thinkPre.textContent = sc.thinkFull;                    // 全量入 pre（点开即读，不再随流重写）
+          sc.thinkInline.textContent = sc.thinkFull.slice(0, 240);   // 定稿归位头部窗口（dsh 静置观感）
+          sc.thinkInline.classList.add('head');
         } else {
           sc.thinkDs.remove();                // 空思考行不保留
         }
         const t = el('tag'); t.textContent = tag; sc.root.prepend(t);
         appendCard(sc.root, { kind: 'assistant', text: textContent, tag, ts: Date.now() });
-        if (hasThink) sc.thinkInline.scrollLeft = 0;   // 定稿归位头部（dsh 静置观感；流式期=尾部跟随）
       }
     } else if (d.content && d.content.trim()) {
       const m = el('msg assistant');

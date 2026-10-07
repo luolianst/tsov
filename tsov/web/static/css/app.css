@@ -412,12 +412,13 @@ body.chat-folded #rail-chat { display: flex; }
 .msg .think details[open] summary::before { content: '▾'; }
 .msg .think .think-lab, .msg .think .think-sep { flex: none; }
 .msg .think .think-sep { opacity: .6; }
-/* 批B 修正：单行内滚动条（尾部跟随；可横向拉动；点击 summary 展开） */
-.msg .think .think-inline { flex: 1 1 auto; min-width: 0; overflow-x: auto; white-space: nowrap;
-  scrollbar-width: none;
-  -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 12px), transparent 100%);
-  mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 12px), transparent 100%); }
-.msg .think .think-inline::-webkit-scrollbar { display: none; }
+/* 批B 修正：单行条——流式=尾部窗口（左缘渐隐）/ 定稿=头部窗口（右缘渐隐）；点击 summary 展开全量 */
+.msg .think .think-inline { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px);
+  mask-image: linear-gradient(90deg, transparent 0, #000 14px); }
+.msg .think .think-inline.head {
+  -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 14px), transparent 100%);
+  mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 14px), transparent 100%); }
 .msg .think pre { margin: 4px 0 0; font: var(--fs-sm)/1.5 var(--font-mono); color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere;
   max-height: 40vh; overflow: auto; }   /* 批B P8：展开区限高滚动 */
 /* 批B P20：流式状态行（计时 / 进度 / 静默变色） */
