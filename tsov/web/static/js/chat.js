@@ -456,10 +456,14 @@ function ensureStreamCard() {
   think.appendChild(details);
   const body = el('body');
   body.textContent = '';
+  const statusEl = el('statusline');
+  statusEl.textContent = '';
+  root.appendChild(statusEl);   // 批B P20：流式状态行（计时 / 参数进度 / 静默变色）
   root.appendChild(think);
   root.appendChild(body);
   logEl.appendChild(root);
-  streamCard = { root, body, thinkPre: pre, thinkSummary: summary };
+  streamCard = { root, body, thinkPre: pre, thinkSummary: summary, statusEl,
+    line: { phase: 'waiting', silent: null, silentTs: 0, tool: null, toolChars: 0 } };
   return streamCard;
 }
 
@@ -467,6 +471,42 @@ function finalizeStreamCard() {
   if (!streamCard) return;
   streamCard.root.remove();   // 批A P18：定稿即从 DOM 移除（旧版只去 streaming 类 → 残留致「同段显示两遍」）
   streamCard = null;
+}
+
+/* 批B P20：流式状态行——本地秒表 / 参数进度 / 静默变色（≥60s 黄 / ≥90s 红） */
+let statusTimer = null;
+let busyStartTs = 0;
+
+function fmtDur(s) {
+  if (s < 60) return s + 's';
+  return Math.floor(s / 60) + 'm' + String(s % 60).padStart(2, '0') + 's';
+}
+
+function startBusyTicker() {
+  stopBusyTicker();
+  busyStartTs = Date.now();
+  statusTimer = setInterval(renderStreamStatus, 1000);
+  renderStreamStatus();
+}
+
+function stopBusyTicker() {
+  if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+}
+
+function renderStreamStatus() {
+  const sc = streamCard;
+  if (!sc || !sc.statusEl) return;
+  const L = sc.line || {};
+  const elapsed = Math.floor((Date.now() - busyStartTs) / 1000);
+  const segs = [L.phase === 'stream' ? ('模型输出中… ' + fmtDur(elapsed)) : ('等待模型响应… ' + fmtDur(elapsed))];
+  if (L.tool) segs.push('正在生成 ' + L.tool + ' 参数…（' + (L.toolChars >= 1000 ? (L.toolChars / 1000).toFixed(1) + 'k' : L.toolChars) + ' 字）');
+  let silentLive = null;
+  if (L.silent != null) {
+    silentLive = Math.round(L.silent + (Date.now() - (L.silentTs || Date.now())) / 1000);
+    segs.push('模型静默 ' + fmtDur(silentLive));
+  }
+  sc.statusEl.textContent = segs.join(' · ');
+  sc.statusEl.className = 'statusline' + (silentLive != null && silentLive >= 90 ? ' danger' : silentLive != null && silentLive >= 60 ? ' warn' : '');
 }
 
 /* ---------------- 发送 ---------------- */
@@ -484,6 +524,7 @@ async function send(message) {
   appendCard(text('msg user', message), { kind: 'user', text: message, ts: Date.now() });
   inputEl.value = '';
   setAgentBusy(true);
+  startBusyTicker();
   sysMsg('已发送（' + (anns.length ? '含 ' + anns.length + ' 条人工标注：确定性先行、不走 LLM；' : '')
     + (ua.length ? '含 ' + ua.length + ' 条手动操作摘要；' : '')
     + 'SSE 事件流；目标版本 ' + baseRev + '）…');
@@ -494,6 +535,7 @@ async function send(message) {
     if (ua.length) clearUserActions();     // 批B B1-4：已送达，清缓冲
   } catch (e) {
     setAgentBusy(false);
+    stopBusyTicker();
     const msg = '启动失败：' + e.message;
     appendCard(text('msg error', msg), { kind: 'error', text: msg, ts: Date.now() });
     if (String(e.message || '').indexOf('409') >= 0) sysMsg('（已有会话在跑：若界面卡在"运行中"，刷新页面即可复位）');
@@ -514,10 +556,37 @@ function wireEvents() {
         const details = sc.thinkPre.closest('details');
         if (details) details.open = true;
       }
+      if (sc.line) sc.line.silent = null;
+    } else if (d.kind === 'tool_args') {
+      // 批B P20：工具参数生成进度（后端节流推送）
+      if (sc.line) { sc.line.tool = d.tool || '?'; sc.line.toolChars = d.chars || 0; sc.line.silent = null; }
     } else {
       sc.body.textContent += d.text || '';
+      if (sc.line) { sc.line.phase = 'stream'; sc.line.tool = null; sc.line.silent = null; }
     }
+    renderStreamStatus();
     logEl.scrollTop = logEl.scrollHeight;
+  });
+
+  /* 批B P20：静默心跳 → 状态行显示「模型静默 Ns」并变色 */
+  bus.on('agent_wait', (d) => {
+    const sc = ensureStreamCard();
+    if (sc.line) { sc.line.silent = Number(d.silent_s) || 0; sc.line.silentTs = Date.now(); }
+    renderStreamStatus();
+  });
+
+  /* 批B P23：断流重试 → 重置流式卡（正文/思考清空，等待重发；后端已重发） */
+  bus.on('agent_retry', (d) => {
+    const sc = ensureStreamCard();
+    sc.thinkPre.textContent = '';
+    sc.thinkSummary.textContent = '…思考中…';
+    const dt = sc.thinkPre.closest('details');
+    if (dt) dt.open = false;
+    sc.body.textContent = '';
+    sc.line = { phase: 'waiting', silent: null, silentTs: 0, tool: null, toolChars: 0 };
+    if (sc.statusEl) sc.statusEl.className = 'statusline';
+    renderStreamStatus();
+    sysMsg('流式连接中断，正在重试…');
   });
 
   bus.on('agent_turn', (d) => {
@@ -590,6 +659,7 @@ function wireEvents() {
 
   bus.on('agent_answer', (d) => {
     setAgentBusy(false);
+    stopBusyTicker();
     if (streamCard) finalizeStreamCard();   // 批A P18：防御——残留流式卡一并清理
     for (const k of Object.keys(pendingTools)) delete pendingTools[k];
     const tag = 'agent 完成 · ' + d.turns + ' 轮 · ' + d.tool_calls_made + ' 次工具调用' +
@@ -613,6 +683,7 @@ function wireEvents() {
 
   bus.on('agent_error', (d) => {
     setAgentBusy(false);
+    stopBusyTicker();
     if (streamCard) finalizeStreamCard();   // 批A P18：出错时残留流式卡一并清理
     for (const k of Object.keys(pendingTools)) delete pendingTools[k];
     appendCard(text('msg error', 'agent 出错：' + (d.error || '')), { kind: 'error', text: 'agent 出错：' + (d.error || ''), ts: Date.now() });

@@ -1,6 +1,8 @@
 """agent 会话线程（F5 自 tsov/web.py 拆出；行为逐行保留）。
 
 - _stream_chat：流式 LLM 调用（OpenAI 兼容 SSE；思考/正文增量推 agent_delta）
+  批B P20/P23：静默心跳 agent_wait / 工具参数进度 tool_args / 中途失败重试 agent_retry（一次）/
+  读超时 90s / 终止轮次落痕 / 时延日志（output/agent-sessions/_stream-timing.jsonl）
 - _run_agent_session：一次对话框会话（后台线程；编辑结果采用进工程）
 - _retention_tick：轮末留存钩子（ADR-0019 / M-V7 D2）
 
@@ -9,6 +11,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 import threading
 import time
@@ -53,13 +56,86 @@ def _load_session_messages(jsonl_path: Path) -> list[dict]:
     return msgs
 
 
-def _stream_chat(bus, project: str, session_id: str, messages: list[dict],
-                 tools: list[dict] | None, stop_event: threading.Event) -> dict:
-    """流式 LLM 调用（OpenAI 兼容 SSE）：思考/正文增量推 agent_delta 事件。
+# ---------------------------------------------------------------------------
+# 批B（P20/P23）：流式调用治理——心跳 / 参数进度 / 超时 / 重试 / 时延日志
+# ---------------------------------------------------------------------------
 
-    返回与 tsov.agent.llm.chat 同构的 {content, tool_calls, message}；
-    连接/协议失败且尚无增量时回退非流式（行为与 AgentLoop 一致）。
-    """
+_READ_TIMEOUT_S = 90.0     # P23：读超时（原 300s；心跳 15s 可见化 + 重试一次兜底）
+_WAIT_HEARTBEAT_S = 15.0   # P20：静默心跳阈值（agent_wait 事件）
+_TOOL_ARGS_STEP = 400      # P20：工具参数进度步长（字）
+
+
+class _StreamMidFail(Exception):
+    """流中途失败（已有增量）——可重试一次（P23）。"""
+
+    def __init__(self, err: Exception):
+        super().__init__(str(err))
+        self.err = err
+
+
+class _StreamTicker:
+    """P20：流等待心跳——静默 ≥interval 推 agent_wait（每 interval 一条；增量 touch 复位）。"""
+
+    def __init__(self, bus, project: str, session_id: str, interval: float | None = None):
+        self.bus = bus
+        self.project = project
+        self.session_id = session_id
+        self.interval = float(interval or _WAIT_HEARTBEAT_S)
+        self.phase = "waiting"          # waiting / streaming（首增量后翻转）
+        self._last = time.monotonic()
+        self._stop = threading.Event()
+        self._th = threading.Thread(target=self._run, daemon=True, name="tsov-stream-heartbeat")
+
+    def start(self) -> None:
+        self._th.start()
+
+    def touch(self) -> None:
+        """收到增量——静默计时复位。"""
+        self._last = time.monotonic()
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            wait_s = max(0.05, min(1.0, self.interval / 3.0))
+            if self._stop.wait(wait_s):
+                return
+            silent = time.monotonic() - self._last
+            if silent >= self.interval:
+                try:
+                    self.bus.publish(self.project, "agent_wait",
+                                     {"session_id": self.session_id,
+                                      "silent_s": int(round(silent)), "phase": self.phase})
+                except Exception:  # noqa: BLE001 心跳失败静默
+                    pass
+                self._last = time.monotonic()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+
+def _append_stream_timing(session_id: str, timing: dict, t0: float) -> None:
+    """P23 层③：时延日志（首字节/最大静默/尝试数/错误）——攒数据再定是否绕代理。失败静默。"""
+    try:
+        path = Path(config.AGENT_SESSION_DIR) / "_stream-timing.jsonl"
+        row = {
+            "ts": datetime.datetime.now().isoformat(timespec="seconds"),
+            "session_id": session_id,
+            "attempts": timing.get("attempts"),
+            "first_delta_s": timing.get("first_delta_s"),
+            "max_gap_s": timing.get("max_gap_s"),
+            "total_s": round(time.monotonic() - t0, 2),
+            "deltas": timing.get("deltas"),
+            "error": timing.get("error"),
+        }
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception:  # noqa: BLE001 日志失败不阻塞
+        pass
+
+
+def _stream_once(bus, project: str, session_id: str, messages: list[dict],
+                 tools: list[dict] | None, stop_event: threading.Event,
+                 ticker: "_StreamTicker", timing: dict) -> dict:
+    """单次流式尝试（自原 _stream_chat 主体迁出；语义逐行保留 + P20 增量治理）。"""
     import requests
 
     from ..agent.llm import _json_decision
@@ -74,9 +150,26 @@ def _stream_chat(bus, project: str, session_id: str, messages: list[dict],
         payload["tools"] = tools
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
-    deltas = {"n": 0}
+    deltas = 0
+    last_ts = time.monotonic()
+    t_start = last_ts
+
+    def _mark() -> None:   # P20：统一增量记账（心跳复位 + 时延统计）
+        nonlocal deltas, last_ts
+        deltas += 1
+        timing["deltas"] = (timing.get("deltas") or 0) + 1
+        now = time.monotonic()
+        if timing.get("first_delta_s") is None:
+            timing["first_delta_s"] = round(now - t_start, 2)
+        gap = now - last_ts
+        if gap > (timing.get("max_gap_s") or 0.0):
+            timing["max_gap_s"] = round(gap, 2)
+        last_ts = now
+        ticker.touch()
+
     try:
-        resp = requests.post(resolve_endpoint(), json=payload, headers=headers, timeout=(10, 300), stream=True)
+        resp = requests.post(resolve_endpoint(), json=payload, headers=headers,
+                             timeout=(10, _READ_TIMEOUT_S), stream=True)
         resp.raise_for_status()
         content_acc: list[str] = []
         tool_acc: dict[int, dict] = {}
@@ -98,16 +191,18 @@ def _stream_chat(bus, project: str, session_id: str, messages: list[dict],
             delta = choices[0].get("delta") or {}
             rc = delta.get("reasoning_content")
             if rc:
-                deltas["n"] += 1
+                _mark()
+                ticker.phase = "streaming"
                 bus.publish(project, "agent_delta", {"session_id": session_id, "kind": "thinking", "text": rc})
             piece = delta.get("content")
             if piece:
-                deltas["n"] += 1
+                _mark()
+                ticker.phase = "streaming"
                 content_acc.append(piece)
                 bus.publish(project, "agent_delta", {"session_id": session_id, "kind": "content", "text": piece})
             for tcd in delta.get("tool_calls") or []:
                 idx = int(tcd.get("index", 0))
-                slot = tool_acc.setdefault(idx, {"id": "", "name": "", "args": ""})
+                slot = tool_acc.setdefault(idx, {"id": "", "name": "", "args": "", "pub_len": 0, "pub_ts": 0.0})
                 if tcd.get("id"):
                     slot["id"] = tcd["id"]
                 fn = tcd.get("function") or {}
@@ -115,14 +210,24 @@ def _stream_chat(bus, project: str, session_id: str, messages: list[dict],
                     slot["name"] += fn["name"]
                 if fn.get("arguments"):
                     slot["args"] += fn["arguments"]
+                    _mark()
+                    # P20：工具参数生成进度（节流：+400 字 或 每 1s）
+                    now = time.monotonic()
+                    n = len(slot["args"])
+                    if n - slot["pub_len"] >= _TOOL_ARGS_STEP or (now - slot["pub_ts"] >= 1.0 and n > slot["pub_len"]):
+                        slot["pub_len"] = n
+                        slot["pub_ts"] = now
+                        bus.publish(project, "agent_delta",
+                                    {"session_id": session_id, "kind": "tool_args",
+                                     "tool": slot["name"] or "?", "chars": n})
     except _StopRequested:
         raise
     except Exception as e:  # noqa: BLE001 连接/协议失败
-        if deltas["n"] == 0:
+        if deltas == 0:
             from ..agent.llm import chat as llm_chat
 
-            return llm_chat(messages, tools=tools)
-        raise RuntimeError(f"流式 LLM 中途失败：{type(e).__name__}: {e}") from e
+            return llm_chat(messages, tools=tools)   # 零增量 → 非流式回退（既有语义；失败原样抛出）
+        raise _StreamMidFail(e)
 
     content = "".join(content_acc)
     tool_calls: list[dict] = []
@@ -156,6 +261,44 @@ def _stream_chat(bus, project: str, session_id: str, messages: list[dict],
     if wire:
         message["tool_calls"] = wire
     return {"content": content, "tool_calls": tool_calls, "message": message}
+
+
+def _stream_chat(bus, project: str, session_id: str, messages: list[dict],
+                 tools: list[dict] | None, stop_event: threading.Event) -> dict:
+    """流式 LLM 调用（批B P20/P23 治理版）。
+
+    - 心跳：静默 ≥15s 推 agent_wait；工具参数生成每 +400 字/1s 推 agent_delta(tool_args)。
+    - 重试：流中途失败（已有增量）→ 推 agent_retry（前端重置流式卡）→ 重发一次；再失败抛错。
+    - deltas==0 的失败沿用非流式回退（既有语义，不占重试额度）。
+    - 每次调用结束（含异常）写一行时延日志（output/agent-sessions/_stream-timing.jsonl）。
+    """
+    ticker = _StreamTicker(bus, project, session_id)
+    ticker.start()
+    t0 = time.monotonic()
+    timing: dict = {"attempts": 0, "first_delta_s": None, "max_gap_s": 0.0, "deltas": 0, "error": None}
+    try:
+        for attempt in (1, 2):
+            timing["attempts"] = attempt
+            try:
+                return _stream_once(bus, project, session_id, messages, tools, stop_event, ticker, timing)
+            except _StopRequested:
+                timing["error"] = "stopped"
+                raise
+            except _StreamMidFail as f:
+                if attempt == 1:
+                    bus.publish(project, "agent_retry",
+                                {"session_id": session_id, "reason": f"{type(f.err).__name__}: {f.err}"})
+                    ticker.touch()
+                    continue
+                timing["error"] = f"{type(f.err).__name__}: {f.err}"
+                raise RuntimeError(f"流式 LLM 中途失败：{type(f.err).__name__}: {f.err}") from f.err
+            except Exception as e:  # noqa: BLE001 其余（回退失败 / key 缺失等）原样抛出（记 timing）
+                timing["error"] = f"{type(e).__name__}: {e}"
+                raise
+        raise RuntimeError("流式 LLM 调用未产生结果")   # 理论不可达
+    finally:
+        ticker.stop()
+        _append_stream_timing(session_id, timing, t0)
 
 
 def _retention_tick(state: WebState, project_name: str, *, agent_turns: int = 0) -> None:
@@ -373,6 +516,10 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
             answer = f"已达最大轮次（{config.AGENT_MAX_TURNS}）未形成最终回答；会话已落盘。"
         if stopped:
             answer = "会话已被用户停止（已落盘的修改保留，未完成的轮次中断）。"
+            try:   # 批B P23：终止轮次落痕（append-only；下一轮 LLM 亦可见中断说明）
+                session.add("system", f"[轮次终止] 原因=用户停止；已完成轮次={turns}；工具调用={tool_count}；中断轮不产生采用")
+            except Exception:  # noqa: BLE001
+                pass
 
         # 采用编辑结果：agent-edited-score.json 存在且与现谱有差异 → 一个 commit + 三色 diff
         adopted: dict | None = None
@@ -405,6 +552,10 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
             },
         )
     except _StopRequested:
+        try:   # 批B P23：终止轮次落痕（流式中断）
+            session.add("system", f"[轮次终止] 原因=用户停止（流式中断）；已完成轮次={turns}；工具调用={tool_count}；中断轮不产生采用")
+        except Exception:  # noqa: BLE001
+            pass
         bus.publish(
             project_name,
             "agent_answer",
@@ -412,6 +563,10 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
              "turns": turns, "tool_calls_made": tool_count, "adopted": False, "stopped": True},
         )
     except Exception as e:  # noqa: BLE001 LLM/致命错误 → agent_error 事件（锁在 finally 释放）
+        try:   # 批B P23：终止轮次落痕（异常）
+            session.add("system", f"[轮次终止] 原因={type(e).__name__}: {e}；已完成轮次={turns}；工具调用={tool_count}；中断轮不产生采用")
+        except Exception:  # noqa: BLE001
+            pass
         bus.publish(project_name, "agent_error", {"session_id": session_id, "error": f"{type(e).__name__}: {e}"})
     finally:
         # M-V7 D2（ADR-0019）：轮末留存钩子——迭代计数 + 阈值自动收藏 + 定时档惰性（失败静默）

@@ -1016,3 +1016,121 @@ def test_play_stop_idle(env):
     r = env["client"].post(f"/api/projects/{name}/play/stop")
     assert r.status_code == 200 and r.json()["ok"] is True
     assert env["client"].post("/api/projects/no_such/play/stop").status_code == 404
+
+# ---------------------------------------------------------------------------
+# 批B P20/P23：流式治理（心跳 / 断流重试 / 终止落痕 / 时延日志）
+# ---------------------------------------------------------------------------
+
+
+class _FakeBus:
+    """收集 publish 事件（心跳/重试断言用）。"""
+
+    def __init__(self):
+        self.events = []
+
+    def publish(self, project, type_, payload):
+        self.events.append((type_, payload))
+
+
+def test_stream_chat_retries_once_on_midstream(monkeypatch):
+    """P23：流中途失败（已有增量）→ agent_retry 事件 + 重发一次成功。"""
+    import threading
+
+    import tsov.webapp.agent_session as web_mod
+    from tsov.webapp.agent_session import _StreamMidFail, _stream_chat
+
+    bus = _FakeBus()
+    calls = {"n": 0}
+    ok = {"content": "完成", "tool_calls": [], "message": {"role": "assistant", "content": "完成"}}
+
+    def fake_once(bus_, project, session_id, messages, tools, stop_event, ticker, timing):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _StreamMidFail(RuntimeError("boom"))
+        return ok
+
+    monkeypatch.setattr(web_mod, "_stream_once", fake_once)
+    monkeypatch.setattr(web_mod, "_append_stream_timing", lambda *a, **k: None)
+    out = _stream_chat(bus, "p", "s1", [], None, threading.Event())
+    assert out is ok and calls["n"] == 2
+    assert [e[0] for e in bus.events].count("agent_retry") == 1
+    assert bus.events[0][1]["reason"].startswith("RuntimeError")
+
+
+def test_stream_chat_fails_after_second_midstream(monkeypatch):
+    """P23：重试后仍失败 → RuntimeError（不无限重试）。"""
+    import threading
+
+    import tsov.webapp.agent_session as web_mod
+    from tsov.webapp.agent_session import _StreamMidFail, _stream_chat
+
+    bus = _FakeBus()
+    calls = {"n": 0}
+
+    def fake_once(*a, **k):
+        calls["n"] += 1
+        raise _StreamMidFail(RuntimeError("x"))
+
+    monkeypatch.setattr(web_mod, "_stream_once", fake_once)
+    monkeypatch.setattr(web_mod, "_append_stream_timing", lambda *a, **k: None)
+    with pytest.raises(RuntimeError, match="中途失败"):
+        _stream_chat(bus, "p", "s1", [], None, threading.Event())
+    assert calls["n"] == 2
+
+
+def test_stream_ticker_emits_agent_wait_and_touch_resets():
+    """P20：静默 ≥interval → agent_wait；增量 touch 复位静默计时。"""
+    import time as _t
+
+    from tsov.webapp.agent_session import _StreamTicker
+
+    bus = _FakeBus()
+    tk = _StreamTicker(bus, "p", "s1", interval=0.2)
+    tk.start()
+    try:
+        for _ in range(6):          # 触摸式保持活跃（总时长 > interval，但单次静默 < interval）
+            _t.sleep(0.1)
+            tk.touch()
+        assert not [e for e in bus.events if e[0] == "agent_wait"], "触摸期间不应发心跳"
+        _t.sleep(0.55)              # 停止触摸 → 静默超阈值
+        waits = [e for e in bus.events if e[0] == "agent_wait"]
+        assert waits and waits[0][1]["silent_s"] >= 0 and "phase" in waits[0][1]
+    finally:
+        tk.stop()
+
+
+def test_append_stream_timing_writes_line(tmp_path, monkeypatch):
+    """P23 层③：时延日志落盘（jsonl 行含 attempts/first_delta/max_gap/deltas）。"""
+    import json as _json
+    import time as _t
+
+    import tsov.webapp.agent_session as web_mod
+    from tsov.webapp.agent_session import _append_stream_timing
+
+    monkeypatch.setattr(web_mod.config, "AGENT_SESSION_DIR", str(tmp_path))
+    _append_stream_timing("sX", {"attempts": 2, "first_delta_s": 1.23, "max_gap_s": 45.6,
+                                 "deltas": 7, "error": None}, _t.monotonic() - 3)
+    f = tmp_path / "_stream-timing.jsonl"
+    assert f.is_file()
+    row = _json.loads(f.read_text(encoding="utf-8").splitlines()[-1])
+    assert row["session_id"] == "sX" and row["attempts"] == 2 and row["deltas"] == 7
+    assert row["max_gap_s"] == 45.6 and row["total_s"] >= 3
+
+
+def test_chat_stop_termination_recorded(env, monkeypatch):
+    """P23：终止轮次落 system 痕——_StopRequested 出口 → JSONL 尾段含「[轮次终止]」。"""
+    import json as _json
+
+    import tsov.webapp.agent_session as web_mod
+
+    name = _make_project(env)
+
+    def fake_stream(bus, project, session_id, messages, tools, stop_event):
+        raise web_mod._StopRequested()
+
+    monkeypatch.setattr(web_mod, "_stream_chat", fake_stream)
+    r = env["client"].post("/api/chat", json={"project": name, "message": "停一下"}).json()
+    assert _wait_agent_done(env, name)
+    f = env["dir"] / "agent-sessions" / (r["session_id"] + ".jsonl")
+    lines = [_json.loads(x) for x in f.read_text(encoding="utf-8").splitlines() if x.strip()]
+    assert any("轮次终止" in (ln.get("content") or "") for ln in lines), lines[-3:]

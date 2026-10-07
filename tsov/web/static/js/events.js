@@ -24,6 +24,8 @@ export const bus = {
 /* SSE 事件类型（docs/05 §三）：原样转发到本地总线 */
 const SSE_TYPES = [
   'agent_turn', 'agent_tool', 'agent_answer', 'agent_error', 'agent_delta',
+  /* 批B P20/P23：流等待心跳 / 断流重试（后端新事件——白名单不登记即不转发） */
+  'agent_wait', 'agent_retry',
   'state_updated', 'diff_applied', 'playback_start', 'playback_stop',
   'render_progress', 'render_done',
   /* M-V8 E3 段2：处理链（agent/REST 通道触发的运行也驱动 UI 刷新） */
