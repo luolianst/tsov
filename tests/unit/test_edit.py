@@ -3,11 +3,13 @@
 LLM 调用不在此测（离线可跑精神），LLM 路径用 monkeypatch 模拟。
 """
 
+import copy
 import json
 
 import pytest
 
-from tsov.analysis.edit import (EditResult, _execute_actions, apply_annotations,
+from tsov.analysis.edit import (EditResult, _EDIT_SYSTEM, _build_edit_prompt, _count_changes,
+                                  _execute_actions, apply_annotations,
                                   build_diff_summary, edit_score, _validate_llm_notes)
 from tsov.core.key import detect_key
 from tsov.core.notes import Note
@@ -248,3 +250,68 @@ def test_edit_score_rejects_clear_all_annotations():
     result = edit_score(_score(), annotations=anns, llm=False)
     assert result.error and "空" in result.error, f"应拒绝：{result.error!r}"
     assert len(result.new_score.tracks[0].notes) == 3
+
+
+# ---- 批A（2026-10-07）：P12 轨定位 / P29 力度提示词 / P30 力度摘要 ----
+
+def _multi_track_score():
+    s = _score()
+    s.tracks.append(Track(name="bass", instrument=Instrument(), notes=[
+        Note(start=0.0, end=0.5, pitch_midi=40, pitch_hz=82.4),
+    ]))
+    return s
+
+
+def test_edit_score_track_selection():
+    """P12：annotations / 摘要作用于指定轨（按名/按号）；缺省 track 0 行为不变。"""
+    s = _multi_track_score()
+    r = edit_score(s, annotations=[{"index": 0, "action": "pitch", "value": 41}], llm=False, track="bass")
+    assert r.error == "" and r.track_index == 1
+    assert r.new_score.tracks[1].notes[0].pitch_midi == 41
+    assert r.new_score.tracks[0].notes[0].pitch_midi == 60          # melody 不动
+    r2 = edit_score(s, annotations=[{"index": 0, "action": "pitch", "value": 61}], llm=False, track=0)
+    assert r2.track_index == 0 and r2.new_score.tracks[0].notes[0].pitch_midi == 61
+    assert r2.new_score.tracks[1].notes[0].pitch_midi == 40          # bass 不动
+    with pytest.raises(ValueError, match="越界"):
+        edit_score(s, annotations=[], llm=False, track=9)
+    with pytest.raises(ValueError, match="找不到轨道"):
+        edit_score(s, annotations=[], llm=False, track="nope")
+
+
+def test_edit_score_track_error_names_track():
+    """P12：标注越界报错带目标轨（原先「共 0 音」无轨名 → agent 连烧轮）。"""
+    s = _multi_track_score()
+    s.tracks[1].notes = []
+    r = edit_score(s, annotations=[{"index": 0, "action": "pitch", "value": 61}], llm=False, track="bass")
+    assert r.error and "track[1]" in r.error and "bass" in r.error
+
+
+def test_edit_prompt_includes_velocity():
+    """P29：系统提示词含 velocity 动作；音符行含 velocity 现值。"""
+    assert "改力度" in _EDIT_SYSTEM and "velocity" in _EDIT_SYSTEM
+    prompt = _build_edit_prompt(_score().tracks[0].notes, "第二个音轻一点", None)
+    assert '"velocity"' in prompt
+
+
+def test_edit_score_llm_velocity_action(monkeypatch):
+    """P29：LLM 输出 velocity 动作 → 可执行、摘要出行。"""
+    def fake_llm(notes, feedback, suspicious, **params):
+        acts = [{"action": "velocity", "index": 1, "value": 0.5}]
+        new, err = _execute_actions(notes, acts)
+        assert err == ""
+        return new, acts, ""
+
+    monkeypatch.setattr("tsov.analysis.edit._call_edit_llm", fake_llm)
+    result = edit_score(_score(), feedback="第二个音轻一点", llm=True)
+    assert result.error == "" and result.new_score.tracks[0].notes[1].velocity == 0.5
+    assert any("vel" in d for d in result.diff_summary)
+
+
+def test_diff_summary_and_count_include_velocity():
+    """P30：纯力度变更 → 摘要出现「力度」行（原先恒「(无改动)」）、计数一致。"""
+    orig = _score().tracks[0].notes
+    new = [copy.deepcopy(n) for n in orig]
+    new[0].velocity = 0.5
+    diffs = build_diff_summary(orig, new)
+    assert any("力度" in d and "0.80→0.50" in d for d in diffs)
+    assert _count_changes(orig, new) == 1

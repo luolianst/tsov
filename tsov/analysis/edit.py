@@ -42,6 +42,7 @@ class EditResult:
     error: str = ""  # 非空表示 LLM 编辑被拒绝/降级（new_score 保留原谱）
     llm_used: bool = True
     actions: list[dict] | None = None  # M-V2.2：LLM 返回动作数组时的原始动作（意图级 diff 数据源）
+    track_index: int = 0  # 批A P12：作用轨索引（摘要/工具面回显）
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +170,7 @@ _EDIT_SYSTEM = (
     "- 删除音：{\"action\":\"delete\", \"index\":i}\n"
     "- 插入新音：{\"action\":\"add\", \"index\":i, \"value\":{\"pitch_midi\":整数, \"start\":秒, \"end\":秒}}\n"
     "- 改时长/位置：{\"action\":\"set_time\", \"index\":i, \"value\":{\"start\":秒?, \"end\":秒?}}\n"
+    "- 改力度：{\"action\":\"velocity\", \"index\":i, \"value\":0..1（线性力度：0 最轻、1 最响）}\n"
     "- 合并相邻音：{\"action\":\"merge\", \"index\":i}（index 与 index+1 合并）\n"
     "- 整体移调：{\"action\":\"transpose\", \"value\":整数（半音，可负）}\n"
     "动作按输入序列的 index 引用（index 从 0 开始）；多个动作按顺序执行（删除/插入会影响后续 index，"
@@ -188,6 +190,7 @@ def _build_edit_prompt(notes: list[Note], feedback: str, suspicious: list[dict] 
             "start": round(n.start, 3),
             "end": round(n.end, 3),
             "pitch_midi": int(n.pitch_midi),
+            "velocity": round(n.velocity, 2),
             "deviation_cents": round(n.deviation_cents, 1),
             "confidence": round(n.confidence, 2),
         })
@@ -434,7 +437,9 @@ def build_diff_summary(orig: list[Note], new: list[Note]) -> list[str]:
             j += 1
             continue
         o, n = orig[i], new[j]
-        if o.pitch_midi == n.pitch_midi and abs(o.start - n.start) < 1e-6 and abs((o.end - o.start) - (n.end - n.start)) < 1e-6:
+        if (o.pitch_midi == n.pitch_midi and abs(o.start - n.start) < 1e-6
+                and abs((o.end - o.start) - (n.end - n.start)) < 1e-6
+                and abs(o.velocity - n.velocity) < 1e-6):
             i += 1
             j += 1
             continue
@@ -442,6 +447,8 @@ def build_diff_summary(orig: list[Note], new: list[Note]) -> list[str]:
             diffs.append(f"~ idx{j} {_fmt(o)}→{_fmt(n)} ({n.pitch_midi - o.pitch_midi:+d}st)")
         elif abs(o.start - n.start) > 1e-6 or abs((o.end - o.start) - (n.end - n.start)) > 1e-6:
             diffs.append(f"~ idx{j} 时长 {round(o.end - o.start, 2)}→{round(n.end - n.start, 2)}s")
+        if abs(o.velocity - n.velocity) >= 1e-6:  # 批A P30：力度变更单独出行（原先恒被吞 → 摘要空显「无改动」）
+            diffs.append(f"~ idx{j} 力度 {o.velocity:.2f}→{n.velocity:.2f}")
         i += 1
         j += 1
     # 超过 cap 的剩余差异汇总
@@ -458,7 +465,9 @@ def _count_changes(orig: list[Note], new: list[Note]) -> int:
             n += 1
             continue
         o, x = orig[i], new[i]
-        if o.pitch_midi != x.pitch_midi or abs(o.start - x.start) > 1e-6 or abs((o.end - o.start) - (x.end - x.start)) > 1e-6:
+        if (o.pitch_midi != x.pitch_midi or abs(o.start - x.start) > 1e-6
+                or abs((o.end - o.start) - (x.end - x.start)) > 1e-6
+                or abs(o.velocity - x.velocity) > 1e-6):  # 批A P30：力度纳入变更计数
             n += 1
     return n
 
@@ -470,16 +479,38 @@ def _count_changes(orig: list[Note], new: list[Note]) -> int:
 # 4. 主入口
 # ---------------------------------------------------------------------------
 
+
+def _resolve_track_index(score: Score, track) -> int:
+    """track 选择（索引或轨名）→ 轨索引（缺省 0；批A P12）。
+
+    语义与 tools_compose._resolve_track 一致；未命中直接抛 ValueError（列候选）。
+    """
+    if track is None:
+        return 0
+    s = str(track).strip()
+    if isinstance(track, int) or s.lstrip("+-").isdigit():
+        idx = int(s)
+        if 0 <= idx < len(score.tracks):
+            return idx
+        raise ValueError(f"track 越界：{track!r}（共 {len(score.tracks)} 条）")
+    for i, tr in enumerate(score.tracks):
+        if tr.name == s:
+            return i
+    raise ValueError(f"找不到轨道：{track!r}（现有：{[t.name for t in score.tracks]}）")
+
+
 def edit_score(
     score: Score,
     feedback: str = "",
     annotations: list[dict] | None = None,
     llm: bool = True,
     suspicious: list[dict] | None = None,
+    track: int | str | None = None,
     **params,
 ) -> EditResult:
     """修正 Score：人工标注 → LLM 编辑 → 校验。
 
+    - track：作用轨（索引或轨名；缺省 0）——annotations / LLM 编辑 / 摘要均作用于该轨（批A P12）
     - annotations：最高优先级，程序直接应用（LLM 不得覆盖标注音——标注已先于 LLM 落定）
     - llm=True 且有 feedback 或 suspicious 时调 LLM 改完整序列
     - 校验失败/LLM 拒绝 → new_score 保留原谱 + error 说明
@@ -488,14 +519,16 @@ def edit_score(
     if not score.tracks:
         # 从零创作（审计修 M-V2.3）：web 新建工程落盘 tracks=[]，原先硬拒会挡住空谱创作 —— 自动补一条空旋律轨
         score.tracks = [Track(name="melody", instrument=Instrument(), notes=[])]
-    track = score.tracks[0]
-    orig_notes = list(track.notes)
+    ti = _resolve_track_index(score, track)
+    target = score.tracks[ti]
+    orig_notes = list(target.notes)
     snapshot = copy.deepcopy(orig_notes)  # 真值快照（动作路径会就地改对象，不能拿 orig_notes 做前后对比）
 
     # 1. 人工标注
     ann_notes, ann_err = apply_annotations(orig_notes, annotations or [])
     if ann_err:
-        return EditResult(score, [], f"人工标注非法（拒绝）：{ann_err}", False)
+        return EditResult(score, [], f"人工标注非法（拒绝）：{ann_err}（作用轨 track[{ti}] {target.name!r}）",
+                          False, track_index=ti)
 
     # 2. LLM 编辑（在标注结果之上）
     llm_used = False
@@ -515,9 +548,10 @@ def edit_score(
     # 3. 落定
     # 防误清空守卫（M-V2.4，B2#2 实测漏洞）：非空输入 → 空结果（动作路径 delete-all / 整谱空数组）一律拒绝
     if orig_notes and not result_notes:
-        return EditResult(score, [], "编辑结果为空（拒绝）——非空输入不允许清空，防误删已有谱", llm_used)
+        return EditResult(score, [], f"编辑结果为空（拒绝）——非空输入不允许清空，防误删已有谱"
+                          f"（作用轨 track[{ti}] {target.name!r}）", llm_used, track_index=ti)
 
-    track.notes = result_notes
+    target.notes = result_notes
     # M-V2.2：动作路径用意图级摘要（动作即 diff），legacy 整谱路径仍位置对齐
     if actions is not None:
         diff = build_intent_summary(actions, ann_notes)
@@ -525,4 +559,4 @@ def edit_score(
         diff = build_diff_summary(orig_notes, result_notes)
     if result_notes != snapshot:
         score.key_candidates = detect_key(result_notes)  # M8：改谱后调性同步（与快照比，防别名恒等）；M-V2.4 起与命令层共用 .key 实现
-    return EditResult(score, diff, error, llm_used, actions)
+    return EditResult(score, diff, error, llm_used, actions, track_index=ti)

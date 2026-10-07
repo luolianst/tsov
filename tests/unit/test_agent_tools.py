@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from tsov.agent.tools import build_default_registry, tool_load_score, tool_set_tempo
+from tsov.agent.tools import build_default_registry, tool_edit_score, tool_load_score, tool_set_tempo
 from tsov.core.score import Score, parse_time_signature
 from tsov.midi.export import score_to_midi
 
@@ -142,6 +142,37 @@ def test_load_score_accepts_both_keys():
         assert "melody" in a and a == b
         with pytest.raises(ValueError):
             tool_load_score({})
+    finally:
+        _cleanup(d)
+
+
+def test_edit_score_tool_track_param():
+    """批A P12：工具面 track 参数（轨名/索引）——多轨工程作用轨回显 + 缺省提示。"""
+    d = _ws()
+    try:
+        payload = _score_payload()
+        payload["tracks"].append({
+            "name": "bass",
+            "instrument": {"backend": "fluidsynth", "program": "bass", "volume": 0.9, "effects": []},
+            "notes": [{"start": 0.0, "end": 0.5, "pitch_midi": 40, "pitch_hz": 82.4,
+                        "velocity": 0.8, "confidence": 0.9, "deviation_cents": 0.0, "is_ornament": False}],
+        })
+        src = d / "score.json"
+        src.write_text(json.dumps(payload), encoding="utf-8")
+        out = tool_edit_score({"score_path": str(src), "track": "bass",
+                               "annotations": [{"index": 0, "action": "pitch", "value": 41}]})
+        assert "作用轨：track[1]" in out and "bass" in out
+        edited = json.loads((d / "agent-edited-score.json").read_text(encoding="utf-8"))
+        assert edited["tracks"][1]["notes"][0]["pitch_midi"] == 41
+        assert edited["tracks"][0]["notes"][0]["pitch_midi"] == 64    # melody 不动
+        # 缺省（未给 track）+ 多轨 → 提示行；作用轨回显 track[0]
+        out2 = tool_edit_score({"score_path": str(src),
+                                "annotations": [{"index": 0, "action": "pitch", "value": 65}]})
+        assert "作用轨：track[0]" in out2 and "缺省 track 0" in out2
+        # 越界 → ValueError（列候选）
+        with pytest.raises(ValueError, match="越界"):
+            tool_edit_score({"score_path": str(src), "track": 9,
+                             "annotations": [{"index": 0, "action": "pitch", "value": 60}]})
     finally:
         _cleanup(d)
 

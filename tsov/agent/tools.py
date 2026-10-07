@@ -66,23 +66,31 @@ def tool_load_score(args: dict) -> str:
 
 
 def tool_edit_score(args: dict) -> str:
-    """对 Score 应用人工标注 + LLM 改谱（复用 tsov.analysis.edit，ADR-0009），落盘新 JSON。"""
+    """对 Score 应用人工标注 + LLM 改谱（复用 tsov.analysis.edit，ADR-0009），落盘新 JSON。
+
+    作用轨由 track 指定（索引或轨名；缺省 0）——多轨工程请显式指定（批A P12）。
+    """
     score_path = args["score_path"]
     feedback = str(args.get("feedback", ""))
     annotations = args.get("annotations")  # 可选 [{index,action,value}]（确定性优先，不走 LLM）
+    track_sel = args.get("track")
     out_path = args.get("output") or str(Path(score_path).parent / "agent-edited-score.json")
 
     from ..analysis.edit import edit_score as _edit_score
 
     score = _score_from_path(score_path)
-    result = _edit_score(score, feedback=feedback, annotations=annotations, llm=True)
+    result = _edit_score(score, feedback=feedback, annotations=annotations, llm=True, track=track_sel)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(result.new_score.to_dict(), f, ensure_ascii=False, indent=2)
 
-    lines = [f"已写回：{out_path}"]
+    ti = result.track_index
+    tname = result.new_score.tracks[ti].name if 0 <= ti < len(result.new_score.tracks) else "?"
+    lines = [f"已写回：{out_path}", f"作用轨：track[{ti}] {tname!r}"]
     lines += [("  " + d) for d in result.diff_summary] or ["  (无改动)"]
-    notes = result.new_score.tracks[0].notes if result.new_score.tracks else []
+    notes = result.new_score.tracks[ti].notes if 0 <= ti < len(result.new_score.tracks) else []
     lines.append(f"notes={len(notes)} keys={[k.key for k in result.new_score.key_candidates]}")
+    if track_sel is None and len(result.new_score.tracks) > 1:
+        lines.append("提示：多轨工程可用 track 参数指定作用轨（缺省 track 0）")
     if result.error:
         lines.append(f"error: {result.error}")
     return "\n".join(lines)
@@ -236,7 +244,8 @@ def build_default_registry(skills: SkillLibrary | None = None) -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="edit_score",
-            description="对 Score 应用人工标注和/或 LLM 改谱（自然语言反馈），写出新 score JSON 并返回 diff",
+            description=("对 Score 应用人工标注和/或 LLM 改谱（自然语言反馈），写出新 score JSON 并返回 diff；"
+                         "作用轨由 track 指定（缺省 track 0——多轨工程请显式指定）"),
             parameters={
                 "type": "object",
                 "properties": {
@@ -244,6 +253,7 @@ def build_default_registry(skills: SkillLibrary | None = None) -> ToolRegistry:
                     "feedback": {"type": "string", "description": "自然语言修改反馈（如 '改成 D 多利亚调式'）"},
                     "annotations": {"type": "array", "items": {"type": "object"},
                                     "description": "人工标注 [{index,action,value}]，确定性命中，可选"},
+                    "track": {"description": "作用轨：轨索引或轨名（缺省 0；多轨工程请显式指定）"},
                     "output": {"type": "string", "description": "输出路径，缺省同目录 agent-edited-score.json"},
                 },
                 "required": ["score_path"],
