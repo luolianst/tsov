@@ -971,6 +971,16 @@ export function init(opts) {
   importCancel = opts.importCancel;
   cmpSel = opts.cmpSel;
 
+  /* 批B2 C3：跟随重渲开关（默认关；渲染行为在 playback.js 订阅 diff_applied.live） */
+  const liveChk = document.getElementById('chk-live-render');
+  if (liveChk) {
+    try { liveChk.checked = localStorage.getItem('tsov.autorender') === '1'; } catch (e) { /* 忽略 */ }
+    liveChk.addEventListener('change', () => {
+      try { localStorage.setItem('tsov.autorender', liveChk.checked ? '1' : '0'); } catch (e) { /* 忽略 */ }
+      toast(liveChk.checked ? '跟随重渲：开（每步采用后自动重渲试听）' : '跟随重渲：关');
+    });
+  }
+
   /* D 件：工程上下文折叠条挂载 */
   engCtxBody = document.getElementById('eng-ctx-body');
   renderEngCtx();

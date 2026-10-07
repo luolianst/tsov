@@ -333,6 +333,12 @@ export function init(opts) {
   window.__tsovMeterDebug = meterDebug;   // E5 段2：CDP 诊断口
   /* M-V7 D1：命令层落盘（手势/面板参数）→ 松手即听；渲染进度轻提示 */
   bus.on('batch_applied', () => scheduleFresh());
+  /* 批B2 C3：跟随重渲（默认关；开关在对话面板头部「边跑边听」）——agent 逐工具采用后自动重渲试听 */
+  bus.on('diff_applied', (d) => {
+    if (d && d.live) {
+      try { if (localStorage.getItem('tsov.autorender') === '1') scheduleFresh(); } catch (e) { /* 忽略 */ }
+    }
+  });
   bus.on('render_progress', (ev) => { if (ev && ev.state === 'render') toast('重渲 ' + ev.name + '…'); });
 
   /* SSE：后端播放事件驱动播放头动画 */

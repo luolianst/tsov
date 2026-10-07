@@ -389,6 +389,9 @@ body.chat-folded #rail-chat { display: flex; }
 #chat-head .panel-title { margin: 0; padding: 0; flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #chat-head-btns { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 #chat-head-btns button { font-size: var(--fs-sm); padding: 2px 7px; }
+#live-render-toggle { display: inline-flex; align-items: center; gap: 3px; font-size: var(--fs-sm); opacity: .78; cursor: pointer; user-select: none; white-space: nowrap; }
+#live-render-toggle input { margin: 0; }
+#live-render-toggle:has(input:checked) { opacity: 1; color: var(--ok); }
 #import-row { display: flex; gap: 4px; padding: 6px 10px; border-top: 1px dashed var(--border); }
 #import-row[hidden] { display: none; }
 #import-select { flex: 1; min-width: 0; font-size: var(--fs-sm); }
