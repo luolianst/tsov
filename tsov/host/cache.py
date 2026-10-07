@@ -25,7 +25,7 @@ def _code_fingerprint() -> str:
     """渲染路径源码指纹（自动失效）：相关模块改任一字节 → 全部旧茎自然失效。
 
     教训（M-V7 D4）：只靠人工 CACHE_VERSION 会漏 bump——D1 迭代中间态的旧茎被
-    静默命中（8.3e-3 级音差，见 `docs/M-V7-验收.md` §5.3）。自动指纹把
+    静默命中（8.3e-3 级音差，见 `docs/tasks/m-v7/M-V7-验收.md` §5.3）。自动指纹把
     「记得 bump」从纪律变成机制。
     """
     h = hashlib.sha256()

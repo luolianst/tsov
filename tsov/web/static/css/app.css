@@ -1,7 +1,7 @@
 /* the shape of voice — 可视化宿主（UI 批A：M1b「瑞士母版 v2」）
    母版基因：无圆角（基础 0）· 细线 · 红点 · 字距层级 · 零阴影 · 8px 网格
    双态：浅色默认（Q-UI-8）｜深色 = 石墨 #1D1F21 系
-   —— 与 docs/UI-设计规范-M1b.md 一一对应 */
+   —— 与 docs/tasks/ui-p0/UI-设计规范-M1b.md 一一对应 */
 
 :root {
   /* 色彩 token（浅色） */
