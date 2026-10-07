@@ -405,8 +405,10 @@ body.chat-folded #rail-chat { display: flex; }
   font-size: var(--fs-md);
 }
 .msg .think { margin: 0 0 4px; }
-.msg .think summary { cursor: pointer; color: var(--muted); font-size: var(--fs-sm); user-select: none; }
-.msg .think pre { margin: 4px 0 0; font: var(--fs-sm)/1.5 var(--font-mono); color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg .think summary { cursor: pointer; color: var(--muted); font-size: var(--fs-sm); user-select: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msg .think pre { margin: 4px 0 0; font: var(--fs-sm)/1.5 var(--font-mono); color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere;
+  max-height: 40vh; overflow: auto; }   /* 批B P8：展开区限高滚动 */
 /* 批B P20：流式状态行（计时 / 进度 / 静默变色） */
 .msg .statusline { font-size: var(--fs-sm); color: var(--muted); margin-bottom: 3px; user-select: none; }
 .msg .statusline.warn { color: var(--warn); }

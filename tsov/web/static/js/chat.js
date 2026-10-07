@@ -484,6 +484,10 @@ function fmtDur(s) {
   return Math.floor(s / 60) + 'm' + String(s % 60).padStart(2, '0') + 's';
 }
 
+function fmtCount(n) {
+  return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+}
+
 function startBusyTicker() {
   stopBusyTicker();
   busyStartTs = Date.now();
@@ -553,10 +557,9 @@ function wireEvents() {
     const sc = ensureStreamCard();
     if (d.kind === 'thinking') {
       sc.thinkPre.textContent += d.text || '';
-      if (sc.thinkPre.textContent.length > 0 && sc.thinkSummary.textContent === '…思考中…') {
-        sc.thinkSummary.textContent = '思考过程';
-        const details = sc.thinkPre.closest('details');
-        if (details) details.open = true;
+      if (sc.thinkPre.textContent.length > 0) {
+        // 批B P8：默认折叠、不自动展开（防长思考链占版面）；摘要实时计字数
+        sc.thinkSummary.textContent = '思考中…（' + fmtCount(sc.thinkPre.textContent.length) + ' 字）';
       }
       if (sc.line) sc.line.silent = null;
     } else if (d.kind === 'tool_args') {
@@ -592,16 +595,26 @@ function wireEvents() {
   });
 
   bus.on('agent_turn', (d) => {
+    const tag = 'agent·第 ' + d.turn + ' 轮' + ((d.tool_calls || []).length ? ' · 调用 ' + d.tool_calls.length + ' 个工具' : '');
     if (streamCard) {
-      // 批A P18：定稿即移除流式卡（正文以正式消息卡为准）——修复「同段文字显示两遍」
-      finalizeStreamCard();
-      const tag = 'agent·第 ' + d.turn + ' 轮' + ((d.tool_calls || []).length ? ' · 调用 ' + d.tool_calls.length + ' 个工具' : '');
-      const m = el('msg assistant');
-      m.innerHTML = mdToHtml(d.content || '（本轮仅工具调用）');
-      const t = el('tag'); t.textContent = tag; m.prepend(t);
-      appendCard(m, { kind: 'assistant', text: d.content || '（本轮仅工具调用）', tag, ts: Date.now() });
+      // 批B P8：定稿=转正——流式卡升格为本轮正式消息（思考链折叠保留；不再「移除+重挂」，P18 不回归）
+      const sc = streamCard;
+      streamCard = null;
+      const textContent = d.content || '（本轮仅工具调用）';
+      const hasThink = sc.thinkPre.textContent.length > 0;
+      if (!hasThink && !d.content) {
+        sc.root.remove();   // 空卡（无思考无正文）直接移除
+      } else {
+        sc.root.classList.remove('streaming');
+        if (sc.statusEl) sc.statusEl.remove();          // 状态行只属于流式期
+        sc.body.innerHTML = mdToHtml(textContent);      // 正文以 turn 终值为准（替换流式累积）
+        sc.thinkSummary.textContent = hasThink
+          ? ('思考过程（' + fmtCount(sc.thinkPre.textContent.length) + ' 字）')
+          : '思考过程';
+        const t = el('tag'); t.textContent = tag; sc.root.prepend(t);
+        appendCard(sc.root, { kind: 'assistant', text: textContent, tag, ts: Date.now() });
+      }
     } else if (d.content && d.content.trim()) {
-      const tag = 'agent·第 ' + d.turn + ' 轮';
       const m = el('msg assistant');
       m.innerHTML = mdToHtml(d.content);
       const t = el('tag'); t.textContent = tag; m.prepend(t);
