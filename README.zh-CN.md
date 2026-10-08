@@ -87,7 +87,7 @@ python scripts/make_bundle.py          # 生成并压缩到桌面
 
 产物解压到任意文件夹，双击「启动tsov.bat」浏览器里即打开工作台；首次在 ⚙ 设置 →「对话 / LLM」填一个 key 即可用（不填也能用除 AI 对话外的全部功能）。
 
-**成品包已打好（v0.1.1 · win64 · 3.5 GB）**——无需自行构建：**[夸克网盘](https://pan.quark.cn/s/b3697b158eef?pwd=G7tu)**（需夸克账号；文件超出 GitHub 发布资产上限，故走网盘分发）。
+**成品包已打好（v0.1.5 · win64 · 3.7 GB）**——无需自行构建：**[夸克网盘](https://pan.quark.cn/s/5492bdc95fb8?pwd=WYgU)**（需夸克账号；文件超出 GitHub 发布资产上限，故走网盘分发）。
 
 ### 配置 LLM
 
