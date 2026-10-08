@@ -37,6 +37,8 @@
 - v0.2 批C 后段增补（2026-10-08 挂道族）：白名单扩至 perf 曲线（bend / cc1 / cc11 / cc64——
   数据走 automation 通用键，MIDI 导出转 pitch_bend / CC 事件；perf 仅支持轨道层；
   力度 = Note.velocity 派生 bars 视图，零新 op）
+- v0.2 批C 后段增补（2026-10-08 轨管理）：move_track（轨重排——移除后插入；书签 ref=轨名不受影响）
+  / move_folder（文件夹成员整块移动 = 成员连续化，显示序随块序；P4/P5）
 - 事务协议：EditBatch.apply(score) 在深拷贝上逐条执行——非法命令被拒绝并记录 error，
   合法命令全部生效（部分应用 + 错误清单）；apply 前不脏原 Score。
 - 该命令层 = M-V2 起 agent 工具与 Web UI 共用的编辑通道（docs/05 接口契约）。
@@ -185,6 +187,11 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
         return _apply_add_lane(score, track, c)
     if c.op == "remove_lane":
         return _apply_remove_lane(score, track, c)
+    # v0.2 批C 后段（轨管理）：轨 / 文件夹块移动
+    if c.op == "move_track":
+        return _apply_move_track(score, c)
+    if c.op == "move_folder":
+        return _apply_move_folder(score, c)
     if c.op == "set_instrument":
         return _apply_set_instrument(track, c)
     if c.op == "add_effect":
@@ -752,6 +759,61 @@ def _apply_set_track_folder(score: Score, track, c: EditCommand) -> str | None:
     if len(name) > 64:
         return "文件夹名过长（≤64 字符）"
     track.folder = name
+    return None
+
+
+# v0.2 批C 后段（P4/P5 轨管理）：轨重排与文件夹块移动（书签 ref=轨名 → 重排天然安全）
+
+
+def _dispatch_move(score: Score, idxs: list[int], to: int) -> None:
+    """把 idxs（保序）整体移出后插到 to（**移除后**新数组口径）。"""
+    keep = set(idxs)
+    block = [score.tracks[i] for i in idxs]
+    rest = [t for i, t in enumerate(score.tracks) if i not in keep]
+    score.tracks = rest[:to] + block + rest[to:]
+
+
+def _apply_move_track(score: Score, c: EditCommand) -> str | None:
+    """value = {"to": int}——把 c.track 移到 to（移除后新数组里的插入位置，0..len-1）。
+
+    语义 = 单个轨重排（P4 拖轨排序）；书签 track 层 ref=轨名，不受位置变化影响。
+    """
+    n = len(score.tracks)
+    if not (0 <= c.track < n):
+        return f"move_track 越界：track {c.track}（共 {n} 轨）"
+    v = c.value if isinstance(c.value, dict) else {}
+    try:
+        to = int(v.get("to"))
+    except (TypeError, ValueError):
+        return f"move_track to 非法：{v.get('to')!r}"
+    if not (0 <= to < n):
+        return f"move_track to 越界：{to}（0..{n - 1}）"
+    if to == c.track:
+        return None
+    _dispatch_move(score, [c.track], to)
+    return None
+
+
+def _apply_move_folder(score: Score, c: EditCommand) -> str | None:
+    """value = {"folder": name, "to": int}——该文件夹全体成员（**保序**）整块移动。
+
+    to = 移除成员后的新数组插入位置（0..剩余数）；成员连续化 = 块移动的不变量（P5）。
+    """
+    v = c.value if isinstance(c.value, dict) else {}
+    name = str(v.get("folder") or "").strip()
+    if not name:
+        return "move_folder 需要 folder"
+    idxs = [i for i, t in enumerate(score.tracks) if (t.folder or "") == name]
+    if not idxs:
+        return f"move_folder 未找到文件夹：{name!r}"
+    rest_n = len(score.tracks) - len(idxs)
+    try:
+        to = int(v.get("to"))
+    except (TypeError, ValueError):
+        return f"move_folder to 非法：{v.get('to')!r}"
+    if not (0 <= to <= rest_n):
+        return f"move_folder to 越界：{to}（0..{rest_n}）"
+    _dispatch_move(score, idxs, to)
     return None
 
 

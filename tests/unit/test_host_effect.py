@@ -170,3 +170,20 @@ def test_muted_track_reverb_not_leaking():
     s.tracks[0].track.mute = True
     out = render_buses(s, stereo=True)
     assert np.abs(out).max() < 1e-9
+
+
+# ------------------------------------------------------------------
+# 注册表默认值（v0.2 批C 后段 P26：「重置」数据源）
+# ------------------------------------------------------------------
+
+
+def test_param_defaults():
+    from tsov.host.effect import param_defaults, param_spec
+
+    d = param_defaults()
+    assert abs(d["reverb"]["room_size"] - 0.5) < 1e-9
+    assert "ceiling_db" in d["brickwall"]
+    assert "threshold_db" in d["limiter"]
+    assert "vst3" not in d
+    for kind, vals in d.items():              # 键集 ⊆ 白名单（不多不少）
+        assert set(vals) <= set(param_spec(kind)), kind

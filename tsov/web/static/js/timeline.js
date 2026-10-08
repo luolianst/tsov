@@ -9,6 +9,10 @@ import { xOf, tOf } from './geom.js';   /* v0.2 批C 前段（R2 地基件）：
 
 let canvas, ctx, W = 0, H = 0, dpr = 1;
 
+/* v0.2 批C 后段（P4/P5 轨管理）：拖拽状态（dragstart 记源；drop 端兼容 CDP 注入的 dataTransfer） */
+let dragTrack = -1;      // 正在拖的轨 index（-1 = 无）
+let dragFolder = '';     // 正在拖的文件夹名（'' = 无）
+
 function resize() {
   dpr = window.devicePixelRatio || 1;
   const r = canvas.getBoundingClientRect();
@@ -161,6 +165,135 @@ function trackAddBtn() {
   return add;
 }
 
+/* ---- v0.2 批C 后段（P4/P5）：拖拽排序辅助 ---- */
+
+function clearDropMarks(el) {
+  for (const c of el.querySelectorAll('.drop-before, .drop-after, .drop-into')) {
+    c.classList.remove('drop-before', 'drop-after', 'drop-into');
+  }
+  el.classList.remove('drop-end');
+}
+
+function dragKinds(e) {
+  /* dragover 期 getData 被浏览器禁用 → 以「在途状态 + 类型表」判定；drop 期由 getDragSource 取真值 */
+  const out = { track: dragTrack >= 0, folder: !!dragFolder };
+  try {
+    const ts = Array.from((e.dataTransfer && e.dataTransfer.types) || []);
+    if (ts.includes('application/x-tsov-track')) out.track = true;
+    if (ts.includes('application/x-tsov-folder')) out.folder = true;
+  } catch (err) { /* 合成事件无 dt */ }
+  return out;
+}
+
+function getDragSource(e) {
+  if (dragTrack >= 0) return { kind: 'track', ti: dragTrack };
+  if (dragFolder) return { kind: 'folder', folder: dragFolder };
+  try {
+    const dt = e && e.dataTransfer;
+    if (dt) {
+      const t = dt.getData('application/x-tsov-track');
+      if (t !== '' && t != null) return { kind: 'track', ti: parseInt(t, 10) };
+      const f = dt.getData('application/x-tsov-folder');
+      if (f !== '' && f != null) return { kind: 'folder', folder: f };
+    }
+  } catch (err) { /* ignore */ }
+  return null;
+}
+
+function remapIdx(i, frm, to) {
+  let x = i - (i > frm ? 1 : 0);
+  if (x >= to) x += 1;
+  return x;
+}
+
+/* 拖拽后前端索引态重映射（对齐 remove_track 的索引校正口径） */
+function remapTrackStates(frm, to) {
+  const remapSet = (s) => {
+    const items = [...s].map((i) => remapIdx(i, frm, to));
+    s.clear();
+    items.forEach((i) => s.add(i));
+  };
+  remapSet(store.hiddenTracks);
+  remapSet(store.refs);
+  remapSet(store.agentTracks);
+  remapSet(store.collapsedLanes);
+  remapSet(store.velocityLanes);
+  store.singleTrack = remapIdx(store.singleTrack, frm, to);
+  if (store.selection && typeof store.selection.track === 'number') {
+    store.selection = { track: remapIdx(store.selection.track, frm, to), indices: store.selection.indices };
+  }
+  if (store.partner) {
+    if (store.partner.kind === 'lane') store.partner = { kind: 'lane', ti: remapIdx(store.partner.ti, frm, to), param: store.partner.param };
+    else store.partner = { kind: store.partner.kind, ti: remapIdx(store.partner.ti, frm, to) };
+  }
+  store.focus = remapIdx(store.focus, frm, to);
+}
+
+async function dropTrackAt(el, from, overTi, before) {
+  if (!store.project || from === overTi) return;
+  const insert = before ? overTi : overTi + 1;
+  const to = Math.max(0, Math.min(insert - (insert > from ? 1 : 0), store.score.tracks.length - 1));
+  if (to === from) return;
+  try {
+    const r = await api.postBatch(store.project, '拖动排序',
+      [{ op: 'move_track', track: from, value: { to } }], '拖动排序：轨 ' + from + ' → ' + to);
+    if (r.applied) {
+      remapTrackStates(from, to);
+      bus.dispatch('toast', '轨已移动（可撤销）');
+      bus.dispatch('state');
+    } else setError('被拒：' + (r.errors || []).join('；'));
+  } catch (e) { setError(e.message); }
+}
+
+async function joinFolder(ti, folder) {
+  if (!store.project) return;
+  const curF = (store.score.tracks[ti] || {}).folder || '';
+  if (curF === folder) return;
+  try {
+    const r = await api.postBatch(store.project, '拖入文件夹',
+      [{ op: 'set_track_folder', track: ti, value: { folder } }], '拖入文件夹：' + folder);
+    if (r.applied) bus.dispatch('toast', '已拖入文件夹「' + folder + '」（可再拖动排序）');
+    else setError('被拒：' + (r.errors || []).join('；'));
+  } catch (e) { setError(e.message); }
+}
+
+async function reorderFolder(srcFolder, overFolder, before) {
+  if (!store.project || srcFolder === overFolder) return;
+  const tracks = store.score.tracks;
+  const isSrc = (t) => (t.folder || '') === srcFolder;
+  const isOver = (t) => (t.folder || '') === overFolder;
+  const rest = tracks.filter((t) => !isSrc(t));
+  const firstOver = rest.findIndex(isOver);
+  if (firstOver < 0) return;
+  let lastOver = -1;
+  rest.forEach((t, i) => { if (isOver(t)) lastOver = i; });
+  const to = before ? firstOver : lastOver + 1;
+  try {
+    const r = await api.postBatch(store.project, '文件夹排序',
+      [{ op: 'move_folder', value: { folder: srcFolder, to } }], '文件夹排序：' + srcFolder + ' → ' + overFolder + (before ? ' 前' : ' 后'));
+    if (r.applied) bus.dispatch('toast', '文件夹「' + srcFolder + '」已整体移动');
+    else setError('被拒：' + (r.errors || []).join('；'));
+  } catch (e) { setError(e.message); }
+}
+
+async function leaveToEnd(ti) {
+  if (!store.project) return;
+  const n = store.score.tracks.length;
+  const tr = store.score.tracks[ti] || {};
+  const cmds = [];
+  if ((tr.folder || '') !== '') cmds.push({ op: 'set_track_folder', track: ti, value: { folder: '' } });
+  if (ti !== n - 1) cmds.push({ op: 'move_track', track: ti, value: { to: n - 1 } });
+  if (!cmds.length) return;
+  try {
+    const r = await api.postBatch(store.project, '拖出/置底', cmds, '拖出/置底');
+    if (r.applied) {
+      if (ti !== n - 1) remapTrackStates(ti, n - 1);
+      bus.dispatch('toast', '已移到列表末尾（并移出文件夹）');
+      bus.dispatch('state');
+    } else setError('被拒：' + (r.errors || []).join('；'));
+  } catch (e) { setError(e.message); }
+}
+
 function renderTracks(el) {
   el.innerHTML = '';
   if (!store.score || !store.score.tracks.length) {
@@ -219,7 +352,38 @@ function renderTracks(el) {
       hd.appendChild(fm);
       hd.appendChild(fs);
       hd.appendChild(fv);
-      hd.title = '单击：选中该文件夹（M 键给它建旗）｜ ▾ 折叠/展开 ｜ M/S/音量：文件夹层（VCA）';
+      hd.title = '单击：选中该文件夹（M 键给它建旗）｜ ▾ 折叠/展开 ｜ M/S/音量：文件夹层（VCA）｜ 拖动：整体排序';
+      /* v0.2 批C 后段（P5）：文件夹整块拖排序（成员连续化不变量）+ 接受轨拖入 */
+      hd.draggable = true;
+      hd.addEventListener('dragstart', (e) => {
+        dragFolder = tr.folder;
+        try { e.dataTransfer.setData('application/x-tsov-folder', tr.folder); e.dataTransfer.effectAllowed = 'move'; } catch (err) { /* ignore */ }
+        hd.classList.add('dragging');
+      });
+      hd.addEventListener('dragend', () => { dragFolder = ''; hd.classList.remove('dragging'); clearDropMarks(el); });
+      hd.addEventListener('dragover', (e) => {
+        const k = dragKinds(e);
+        if (!k.track && !k.folder) return;
+        e.preventDefault();
+        clearDropMarks(el);
+        if (k.folder) {
+          const r = hd.getBoundingClientRect();
+          hd.classList.add((e.clientY - r.top) < r.height / 2 ? 'drop-before' : 'drop-after');
+        } else {
+          hd.classList.add('drop-into');
+        }
+      });
+      hd.addEventListener('drop', (e) => {
+        const src = getDragSource(e);
+        if (!src) return;
+        e.preventDefault();
+        clearDropMarks(el);
+        if (src.kind === 'track') { joinFolder(src.ti, tr.folder); return; }
+        if (src.kind === 'folder' && src.folder !== tr.folder) {
+          const r2 = hd.getBoundingClientRect();
+          reorderFolder(src.folder, tr.folder, (e.clientY - r2.top) < r2.height / 2);
+        }
+      });
       hd.addEventListener('click', () => setSelFolder(store.selFolder === tr.folder ? '' : tr.folder));
       el.appendChild(hd);
     }
@@ -230,6 +394,31 @@ function renderTracks(el) {
       (store.agentTracks.has(ti) ? ' agent-touched' : '') +          // 批B B1-3：agent 改动标记
       (store.selection.track === ti ? ' selected' : '');
     item.dataset.track = String(ti);
+    /* v0.2 批C 后段（P4）：轨拖拽重排 / 拖入文件夹 */
+    item.draggable = true;
+    item.addEventListener('dragstart', (e) => {
+      dragTrack = ti;
+      try { e.dataTransfer.setData('application/x-tsov-track', String(ti)); e.dataTransfer.effectAllowed = 'move'; } catch (err) { /* ignore */ }
+      item.classList.add('dragging');
+    });
+    item.addEventListener('dragend', () => { dragTrack = -1; item.classList.remove('dragging'); clearDropMarks(el); });
+    item.addEventListener('dragover', (e) => {
+      const k = dragKinds(e);
+      if (!k.track) return;
+      e.preventDefault();
+      clearDropMarks(el);
+      const r = item.getBoundingClientRect();
+      item.classList.add((e.clientY - r.top) < r.height / 2 ? 'drop-before' : 'drop-after');
+    });
+    item.addEventListener('drop', (e) => {
+      const src = getDragSource(e);
+      if (!src || src.kind !== 'track') return;
+      e.preventDefault();
+      clearDropMarks(el);
+      if (src.ti === ti) return;
+      const r = item.getBoundingClientRect();
+      dropTrackAt(el, src.ti, ti, (e.clientY - r.top) < r.height / 2);
+    });
 
     const chip = document.createElement('span');
     chip.className = 'track-chip';
@@ -412,6 +601,28 @@ function renderTracks(el) {
       }
     }
   });
+  /* v0.2 批C 后段（P4）：容器空白区 = 置底（并移出文件夹）
+     —— 幂等绑定：#track-list 是持久元素、renderTracks 反复进入，直接 addEventListener 会叠挂 N 份，
+     一次 drop 触发 N 次 leaveToEnd（首跑冒烟实测：4 轨 folder 被连环清空） */
+  if (!el.__dndEndBound) {
+    el.__dndEndBound = true;
+    el.addEventListener('dragover', (e) => {
+      if (e.target !== el) return;
+      const k = dragKinds(e);
+      if (!k.track) return;
+      e.preventDefault();
+      el.classList.add('drop-end');
+    });
+    el.addEventListener('dragleave', (e) => { if (e.target === el) el.classList.remove('drop-end'); });
+    el.addEventListener('drop', (e) => {
+      if (e.target !== el) return;
+      const src = getDragSource(e);
+      if (!src || src.kind !== 'track') return;
+      e.preventDefault();
+      el.classList.remove('drop-end');
+      leaveToEnd(src.ti);
+    });
+  }
   el.appendChild(trackAddBtn());
   bus.dispatch('rowlayout');   /* UI 修正轮3.2：行布局就绪 → main.js 收集推给卷帘（文件夹行/折叠路径对齐） */
 }

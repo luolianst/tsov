@@ -291,10 +291,21 @@ def test_resolve_track_numeric_string(tmp_path):
 
 
 def test_apply_effect_requires_track(tmp_path):
-    """任务2 实测坑：apply_effect 缺 track 会静默落到 track[0]（master-limiter 覆盖旋律链）→ 现要求必填。"""
+    """任务2 实测坑：apply_effect 缺 track 会静默落到 track[0] → target=track 时 track 必填。
+    v0.2 批C 后段（P27）：target=master/bus 支持（限幅等挂得上）。"""
     sp = _save_score(tmp_path / "score.json", _base([_melody()]))
     with pytest.raises(ValueError, match="track 必填"):
         tc.tool_apply_effect({"score_path": str(sp), "output": str(sp), "preset": "piano-pop-reverb"})
+    # master 目标（限幅）
+    msg = tc.tool_apply_effect({"score_path": str(sp), "output": str(sp),
+                                "preset": "master-limiter", "target": "master"})
+    assert "master" in msg
+    fx = _load(sp)["master"]["effects"]
+    assert fx and "limiter" in {e["type"] for e in fx}
+    # bus 目标（不存在 → 明确报错）
+    with pytest.raises(ValueError, match="找不到总线"):
+        tc.tool_apply_effect({"score_path": str(sp), "output": str(sp),
+                              "preset": "master-limiter", "target": "bus", "ref": "nope"})
 
 
 def test_read_text_tool():

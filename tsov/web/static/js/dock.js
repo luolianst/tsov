@@ -14,6 +14,7 @@ let meta = { programs: [], effect_kinds: [] };
 let metaLoaded = false;
 /* M-V8 E5 段2：效果目标（当前轨 / 各总线 / master） */
 let fxTarget = { mode: 'track', ref: '' };
+let fxEdit = null;   // v0.2 批C 后段（P26）：效果参数编辑器槽位（null = 关闭）
 
 function selectedTrack() {
   const i = (store.selection && store.selection.track) || 0;
@@ -89,6 +90,13 @@ function renderFx() {
     x.onclick = () => post('移除效果 ' + fx.type, [{ op: 'remove_effect', track: cur.index, index: i, value: Object.assign({}, tbase) }]);
     slot.appendChild(hd);
     slot.appendChild(sub);
+    /* v0.2 批C 后段（P26）：⚙ 参数编辑（注册表驱动；一命令 set_effect_params） */
+    const gear = document.createElement('button');
+    gear.className = 'fx-gear';
+    gear.textContent = '⚙';
+    gear.title = '编辑该效果参数（范围=注册表；一命令提交，可撤销）';
+    gear.onclick = (e) => { e.stopPropagation(); fxEdit = (fxEdit === i ? null : i); renderFx(); };
+    slot.appendChild(gear);
     slot.appendChild(x);
     wrap.appendChild(slot);
     if (i < chain.length - 1) {
@@ -143,6 +151,99 @@ function renderFx() {
   wrap.appendChild(kindSel);
   wrap.appendChild(add);
   fxPane.appendChild(wrap);
+
+  /* v0.2 批C 后段（P26）：效果参数编辑器（注册表驱动；仅作用于目标链的选中槽） */
+  if (fxEdit != null && fxEdit >= 0 && fxEdit < chain.length) {
+    const fxe = chain[fxEdit];
+    const specs = ((store.metaParams && store.metaParams.effects) || {})[String(fxe.type || '')] || {};
+    const ed = document.createElement('div');
+    ed.className = 'fx-edit';
+    const ttl = document.createElement('div');
+    ttl.className = 'fx-edit-ttl';
+    ttl.textContent = '参数编辑：' + fxe.type + '（第 ' + (fxEdit + 1) + ' 槽；范围=注册表）';
+    ed.appendChild(ttl);
+    const keys = Object.keys(specs);
+    const inputs = {};
+    if (!keys.length) {
+      const none = document.createElement('div');
+      none.className = 'fx-none';
+      none.textContent = '（该类型无注册表参数——vst3 动态参数请走插件面）';
+      ed.appendChild(none);
+    }
+    for (const k of keys) {
+      const row = document.createElement('div');
+      row.className = 'fx-edit-row';
+      const lb = document.createElement('label');
+      lb.textContent = k;
+      const rng = Array.isArray(specs[k]) ? specs[k] : null;
+      const sld = document.createElement('input');
+      sld.type = 'range'; sld.className = 'fx-edit-sld';
+      if (rng) { sld.min = rng[0]; sld.max = rng[1]; sld.step = ((rng[1] - rng[0]) / 100) || 0.01; }
+      const num = document.createElement('input');
+      num.type = 'number'; num.step = 'any'; num.className = 'fx-edit-num';
+      if (rng) { num.min = rng[0]; num.max = rng[1]; }
+      const curVal = (fxe.params || {})[k];
+      num.value = (curVal == null ? '' : String(curVal));
+      num.placeholder = rng ? ('[' + rng[0] + '~' + rng[1] + ']') : '默认';
+      sld.value = (curVal == null ? (rng ? (rng[0] + rng[1]) / 2 : 0) : curVal);
+      sld.oninput = () => { num.value = String(Math.round(Number(sld.value) * 1000) / 1000); };
+      num.oninput = () => { const vv = Number(num.value); if (Number.isFinite(vv)) sld.value = String(vv); };
+      row.appendChild(lb); row.appendChild(sld); row.appendChild(num);
+      ed.appendChild(row);
+      inputs[k] = num;
+    }
+    const ft = document.createElement('div');
+    ft.className = 'fx-edit-ft';
+    const applyB = document.createElement('button');
+    applyB.className = 'primary fx-edit-apply';
+    applyB.textContent = '应用';
+    applyB.onclick = async () => {
+      const patch = {};
+      let n = 0;
+      for (const [k, el] of Object.entries(inputs)) {
+        const raw = el.value.trim();
+        if (raw === '') continue;
+        const vv = Number(raw);
+        if (!Number.isFinite(vv)) continue;
+        const oldV = (fxe.params || {})[k];
+        if (oldV == null || Math.abs(vv - Number(oldV)) > 1e-9) { patch[k] = vv; n += 1; }
+      }
+      if (!n) { bus.dispatch('toast', '无改动'); return; }
+      const idxEdit = fxEdit;
+      await post('参数编辑 ' + fxe.type, [{ op: 'set_effect_params', track: cur.index, value: Object.assign({}, tbase, { index: idxEdit, params: patch }) }]);
+      fxEdit = null;
+      renderFx();
+      setTimeout(renderFx, 450);   /* 批处理回包后刷新显示值 */
+    };
+    const closeB = document.createElement('button');
+    closeB.textContent = '收起';
+    closeB.onclick = () => { fxEdit = null; renderFx(); };
+    /* v0.2 批C 后段（P26）：重置 = 回填引擎默认（注册表 effect_defaults；点「应用」才写入） */
+    const resetB = document.createElement('button');
+    resetB.className = 'fx-edit-reset';
+    resetB.textContent = '重置（回默认）';
+    resetB.title = '各参数填回引擎默认值（/api/meta params.effect_defaults）；点「应用」才落盘';
+    resetB.onclick = () => {
+      const defs = ((store.metaParams && store.metaParams.effect_defaults) || {})[String(fxe.type || '')] || {};
+      if (!Object.keys(defs).length) { bus.dispatch('toast', '该类型无默认值表（vst3 走插件面）'); return; }
+      let n = 0;
+      for (const [k, el] of Object.entries(inputs)) {
+        if (defs[k] == null) continue;
+        el.value = String(defs[k]);
+        const sld = el.parentElement && el.parentElement.querySelector('.fx-edit-sld');
+        if (sld) sld.value = String(defs[k]);
+        n += 1;
+      }
+      bus.dispatch('toast', n ? ('已回填 ' + n + ' 项默认值（点「应用」写入）') : '无默认值可回填');
+    };
+    ft.appendChild(applyB);
+    ft.appendChild(resetB);
+    ft.appendChild(closeB);
+    ed.appendChild(ft);
+    fxPane.appendChild(ed);
+  } else if (fxEdit != null) {
+    fxEdit = null;
+  }
 }
 
 /* ---------------- 音源 tab ---------------- */

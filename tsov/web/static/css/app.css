@@ -1139,3 +1139,28 @@ body.chat-resizing { cursor: col-resize; user-select: none; }
 /* v0.2 批C2（F6）：文件夹行内联控件 */
 .fold-vol { width: 52px; margin-left: 4px; font-size: 11px; padding: 1px 3px;
   background: var(--bg-elev); color: var(--text); border: 1px solid var(--border); border-radius: 4px; }
+
+
+/* ============ v0.2 批C 后段（P4/P5/P26）：拖拽排序 + 效果参数编辑器 ============ */
+
+.track-item.dragging, .tl-folder.dragging { opacity: 0.45; }
+.track-item.drop-before, .tl-folder.drop-before { box-shadow: 0 -2px 0 0 var(--accent); }
+.track-item.drop-after, .tl-folder.drop-after { box-shadow: 0 2px 0 0 var(--accent); }
+.tl-folder.drop-into { outline: 2px dashed var(--accent); outline-offset: -2px; }
+#track-list.drop-end { box-shadow: inset 0 -3px 0 0 var(--accent); }
+
+.fx-gear {
+  border: none; background: none; cursor: pointer; font-size: 12px;
+  padding: 0 2px; opacity: 0.75;
+}
+.fx-gear:hover { opacity: 1; }
+.fx-edit {
+  margin: 8px 10px 4px; padding: 8px 10px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--bg-elev);
+}
+.fx-edit-ttl { font-size: var(--fs-xs); color: var(--muted); margin-bottom: 6px; }
+.fx-edit-row { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+.fx-edit-row label { width: 130px; font-size: var(--fs-xs); color: var(--text); }
+.fx-edit-sld { width: 120px; }
+.fx-edit-num { width: 84px; }
+.fx-edit-ft { margin-top: 6px; display: flex; gap: 8px; }

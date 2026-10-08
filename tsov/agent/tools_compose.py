@@ -312,21 +312,39 @@ def tool_rename_track(args: dict) -> str:
 
 
 def tool_apply_effect(args: dict) -> str:
-    """给轨应用效果预设（混响等；同一轨整体替换为该预设链）。track 必填（防误落到 track[0]）。"""
+    """给轨/总线/master 应用效果预设（混响、限幅等；目标效果链整体替换为该预设链）。
+
+    - target 缺省 track：track 必填（防误落到 track[0]）；
+    - target=bus：ref=总线名；target=master：作用于 master（v0.2 批C 后段 P27）。
+    """
     from ..presets import apply_effect_preset, load_library
 
     score = _load(args["score_path"])
-    if args.get("track") is None:
-        raise ValueError("track 必填（轨索引或轨名）——效果钉在哪条轨上必须明确；"
-                         "总线（master）效果暂不支持")
-    ti = _resolve_track(score, args.get("track"))
+    target = str(args.get("target") or "track").strip() or "track"
+    ref = args.get("ref")
+    ti = None
+    if target == "track":
+        if args.get("track") is None:
+            raise ValueError("track 必填（轨索引或轨名）——效果钉在哪条轨上必须明确；"
+                             "挂 master/总线请给 target=master / target=bus + ref")
+        ti = _resolve_track(score, args.get("track"))
     preset = str(args["preset"])
     lib = load_library()
     try:
-        new_score = apply_effect_preset(score, ti, preset, library=lib)
-    except KeyError:
+        new_score = apply_effect_preset(score, ti, preset, library=lib, target=target, ref=ref)
+    except KeyError as e:
+        msg = str(e.args[0] if e.args else e)
+        if "找不到" in msg:
+            raise ValueError(msg) from None
         raise ValueError(f"未知效果预设 {preset!r}；可用：{lib.list_names('effects')}") from None
     out = _save(new_score, _out_path(args, args["score_path"]))
+    if target == "bus":
+        bus = next(b for b in new_score.buses if b.name == str(ref))
+        chain = " → ".join(e.type for e in bus.effects) or "（空）"
+        return f"总线 {ref} 已应用效果链：{chain} ｜ 写回：{out}"
+    if target == "master":
+        chain = " → ".join(e.type for e in new_score.master.effects) or "（空）"
+        return f"master 已应用效果链：{chain} ｜ 写回：{out}"
     chain = " → ".join(e.type for e in new_score.tracks[ti].instrument.effects) or "（空）"
     return f"track[{ti}] {new_score.tracks[ti].name} 已应用效果链：{chain} ｜ 写回：{out}"
 
@@ -657,11 +675,14 @@ def register_compose_tools(registry: ToolRegistry) -> None:
 
     registry.register(ToolSpec(
         name="apply_effect",
-        description="给轨应用效果预设（混响等；预设名如 piano-pop-reverb / piano-bright-hall / synth-lead / master-limiter）",
+        description=("给轨/总线/master 应用效果预设（如 piano-pop-reverb / master-limiter；目标效果链整体替换）。"
+                     "target 缺省 track（须给 track）；target=bus 须给 ref=总线名；target=master 无需 track"),
         parameters={"type": "object", "properties": {
             "score_path": {"type": "string"},
-            "track": {"description": "轨索引或轨名"},
+            "track": {"description": "轨索引或轨名（target=track 时必填）"},
             "preset": {"type": "string"},
+            "target": {"type": "string", "enum": ["track", "bus", "master"], "description": "目标层（缺省 track）"},
+            "ref": {"type": "string", "description": "总线名（target=bus 时必填）"},
         }, "required": ["score_path", "preset"]},
         handler=tool_apply_effect))
 

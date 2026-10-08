@@ -175,26 +175,47 @@ def load_library(root: str | Path | None = None) -> PresetLibrary:
 
 def apply_effect_preset(
     score: Score,
-    track: int | str,
-    preset: EffectPreset | str,
+    track: int | str | None = None,
+    preset: EffectPreset | str = "",
     *,
     library: PresetLibrary | None = None,
+    target: str = "track",
+    ref: str | None = None,
 ) -> Score:
-    """把效果预设应用到某条轨（track = 索引或轨名），返回新 Score。"""
+    """把效果预设应用到目标层（track / bus / master；缺省轨），返回新 Score。
+
+    - target="track"：track 必填（索引或轨名）；目标轨效果链**整体替换**为该预设链；
+    - target="bus"：ref = 总线名（须存在）；target="master"：作用于 score.master。
+    （v0.2 批C 后段：P27——限幅等预设可挂 master/总线。）
+    """
     if isinstance(preset, str):
         preset = (library or load_library()).get_effect(preset)
 
-    idx = None
-    if isinstance(track, int):
-        idx = track
-    else:
-        for i, tr in enumerate(score.tracks):
-            if tr.name == track:
-                idx = i
-                break
-    if idx is None or not (0 <= idx < len(score.tracks)):
-        raise KeyError(f"找不到轨道：{track!r}（共 {len(score.tracks)} 条）")
-
     new_score = copy.deepcopy(score)
-    new_score.tracks[idx].instrument.effects = [Effect(type=e.type, params=dict(e.params)) for e in preset.chain]
-    return new_score
+    tgt = str(target or "track").strip() or "track"
+    chain = [Effect(type=e.type, params=dict(e.params)) for e in preset.chain]
+    if tgt == "track":
+        idx: int | None = None
+        if isinstance(track, int):
+            idx = track
+        elif track is not None:
+            for i, tr in enumerate(score.tracks):
+                if tr.name == track:
+                    idx = i
+                    break
+        if idx is None or not (0 <= idx < len(score.tracks)):
+            raise KeyError(f"找不到轨道：{track!r}（共 {len(score.tracks)} 条）")
+        new_score.tracks[idx].instrument.effects = chain
+        return new_score
+    if tgt == "bus":
+        name = str(ref or "").strip()
+        bus = next((b for b in (new_score.buses or []) if b.name == name), None)
+        if bus is None:
+            known = [b.name for b in (new_score.buses or [])] + ["master"]
+            raise KeyError(f"找不到总线：{name!r}（可用：{', '.join(known)}；master 用 target='master'）")
+        bus.effects = chain
+        return new_score
+    if tgt == "master":
+        new_score.master.effects = chain
+        return new_score
+    raise ValueError(f"未知 target：{target!r}（track / bus / master）")

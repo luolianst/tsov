@@ -97,3 +97,20 @@ def test_arrangement_preset_schema_checks():
         assert len(lib.errors) == 3
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+def test_apply_effect_preset_master_and_bus():
+    """v0.2 批C 后段（P27）：预设可挂 master / 总线（限幅等）。"""
+    from tsov.core.score import Bus
+    score = Score(title="t", tempo=100.0, tracks=[Track(name="melody")])
+    score.buses = [Bus(name="drums")]
+    lib = load_library()
+    s1 = apply_effect_preset(score, None, "master-limiter", library=lib, target="master")
+    assert [e.type for e in s1.master.effects] == ["highpass", "limiter"]
+    assert score.master.effects == []          # 原对象不动（深拷贝）
+    s2 = apply_effect_preset(score, None, "master-limiter", library=lib, target="bus", ref="drums")
+    assert [e.type for e in s2.buses[0].effects] == ["highpass", "limiter"]
+    with pytest.raises(KeyError):
+        apply_effect_preset(score, None, "master-limiter", library=lib, target="bus", ref="nope")
+    with pytest.raises(ValueError):
+        apply_effect_preset(score, None, "master-limiter", library=lib, target="nope")

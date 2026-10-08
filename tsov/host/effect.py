@@ -49,6 +49,27 @@ def param_spec(kind: str) -> dict:
     return {k: (list(v) if v else None) for k, v in (_PARAM_RANGES.get(str(kind)) or {}).items()}
 
 
+def param_defaults() -> dict[str, dict[str, float]]:
+    """各 kind 的注册表参数默认值（读 pedalboard 默认构造实例；缺失/非数值 → 跳过该键）。
+
+    v0.2 批C 后段（P26）：UI「重置」按钮的数据源（只读；vst3 无默认值表）。
+    """
+    out: dict[str, dict[str, float]] = {}
+    for kind in _PARAM_RANGES:
+        try:
+            plugin = _plugin_class(kind)()
+        except Exception:  # noqa: BLE001 —— 默认值缺失不阻断 meta
+            continue
+        vals: dict[str, float] = {}
+        for key in _PARAM_RANGES[kind]:
+            try:
+                vals[key] = float(getattr(plugin, key))
+            except (AttributeError, TypeError, ValueError):
+                continue
+        out[kind] = vals
+    return out
+
+
 def _clamp(kind: str, key: str, value) -> float:
     rng = _PARAM_RANGES[kind].get(key)
     v = float(value)

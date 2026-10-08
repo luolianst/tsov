@@ -18,9 +18,12 @@ def register(app: FastAPI) -> None:
 
     @app.get("/api/meta")
     def meta() -> dict:
-        """UI 批A：面板元数据（GM 音色名 / 效果类型）。v0.2 批C 前段（R1）：+ 参数注册表快照（additive）。"""
-        from ...host.effect import effect_kinds
+        """UI 批A：面板元数据（GM 音色名 / 效果类型）。v0.2 批C 前段（R1）：+ 参数注册表快照（additive）。
+        v0.2 批C 后段（P26）：params 内 + effect_defaults（「重置」数据源；additive）。"""
+        from ...host.effect import effect_kinds, param_defaults
         from ...host.params import snapshot
         from ...midi.export import GM_PROGRAMS
 
-        return {"programs": sorted(GM_PROGRAMS), "effect_kinds": effect_kinds(), "params": snapshot()}
+        snap = snapshot()
+        snap["effect_defaults"] = param_defaults()
+        return {"programs": sorted(GM_PROGRAMS), "effect_kinds": effect_kinds(), "params": snap}
