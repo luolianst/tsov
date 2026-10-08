@@ -2,7 +2,7 @@
 
 import { api } from './api.js';
 import { bus, connectEvents } from './events.js';
-import { store, setState, setError, toast, fitView, setView, clearDiff, setDiff, setAnnotations, clearAnnotations, setSnap, setViewMode, setSingleTrack, fitViewTrack, refTag, favSource, bookmarks, setSelBookmark, setLoopOn, splitPartner, audioClipsOf, setMetaParams } from './state.js';
+import { store, setState, setError, toast, fitView, setView, clearDiff, setDiff, setAnnotations, clearAnnotations, setSnap, setViewMode, setSingleTrack, fitViewTrack, refTag, favSource, bookmarks, setSelBookmark, setLoopOn, splitPartner, audioClipsOf, setMetaParams, paramLabel, setSplitSameAxis } from './state.js';
 import * as roll from './roll.js';
 import * as timeline from './timeline.js';
 import * as dock from './dock.js';
@@ -394,13 +394,32 @@ function boot() {
         info = tr.notes.length + ' 音 · ' + (inst.program || 'default');
       }
     }
-    /* E3 段1：分屏对象提示（叠加：轨名） */
+    /* v0.2 批C2：副区 + 焦点（编辑：X） */
     const sp = splitPartner();
     if (tr && sp) {
-      const ov = store.score.tracks[sp.ti];
-      info += ' ｜ 叠加：' + ((ov && ov.name) || ('track ' + sp.ti));
+      let pn;
+      if (sp.kind === 'lane') {
+        const ow = store.score.tracks[sp.ti];
+        pn = '曲线：' + paramLabel(sp.param) + '@' + ((ow && ow.name) || ('track ' + sp.ti));
+      } else {
+        const ov = store.score.tracks[sp.ti];
+        pn = (ov && ov.name) || ('track ' + sp.ti);
+      }
+      info += ' ｜ 副区：' + pn;
+    }
+    if (tr && store.focus !== store.singleTrack && store.score.tracks[store.focus]) {
+      const fk = store.score.tracks[store.focus];
+      info += ' ｜ 编辑：' + (fk.name || ('track ' + store.focus));
     }
     $('single-info').textContent = info;
+    /* v0.2 批C2：副区音轴切换钮（midi×midi 对偶时可见；同音轴 ⇄ 自适配概览） */
+    const btn = $('btn-split-axis');
+    if (btn) {
+      const show = !!(tr && tr.kind !== 'audio' && sp && sp.kind === 'midi');
+      btn.hidden = !show;
+      btn.textContent = store.splitSameAxis ? '同音轴' : '自适配';
+      btn.classList.toggle('on', !store.splitSameAxis);
+    }
   }
   function enterSingle(ti) {
     setViewMode('single', ti);
@@ -431,7 +450,12 @@ function boot() {
     lanes.resizeNow();
   }
   $('btn-back-lanes').addEventListener('click', backToLanes);
-  /* E3 段1：单轨内主轨/叠加变化（双击交换等）→ 头部同步 */
+  /* v0.2 C2：副区音轴切换（同音轴 ↔ 自适配概览） */
+  $('btn-split-axis').addEventListener('click', () => {
+    setSplitSameAxis(!store.splitSameAxis);
+    renderSingleHead();
+  });
+  /* E3 段1 / v0.2 C2：单轨内主/副变化（手势交换等）→ 头部同步 */
   bus.on('viewmode', () => { if (store.viewMode === 'single') renderSingleHead(); });
 
   /* M-V8 E1：M 键建旗（选中文件夹 > 单轨选中 > 项目层；Shift+M 强制项目层） */

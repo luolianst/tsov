@@ -1117,3 +1117,11 @@ body.chat-resizing { cursor: col-resize; user-select: none; }
 .arr-role .arr-seg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .arr-role .arr-n { color: var(--faint); font-variant-numeric: tabular-nums; }
 .arr-role .arr-prog { color: var(--faint); font-size: var(--fs-xs, 10px); }
+
+/* v0.2 批C2（工作台 v2）：副区音轴切换钮 */
+#btn-split-axis {
+  font-size: 11px; padding: 2px 8px; margin-left: 4px;
+  border: 1px solid var(--border); border-radius: 5px;
+  background: var(--bg-elev); color: var(--text); cursor: pointer;
+}
+#btn-split-axis.on { border-color: var(--accent); color: var(--accent); }

@@ -30,8 +30,13 @@ export const store = {
   /* 视图模式（修正轮2）：'lanes' = 总谱预览（每轨 lane）| 'single' = 单轨写谱 */
   viewMode: 'lanes',
   singleTrack: 0,
-  overlayTracks: new Set(),   // single 模式灰叠加轨（不可编辑；跨类型叠加 → 上下分屏）
-  splitRatio: 0.5,            // M-V8 E3 段1：单轨分屏上下比例（主轨上 / 叠加下；0.15~0.85，可拖分界）
+  /* v0.2 批C2（工作台 v2）：副区对象（单值）——{kind:'track', ti} | {kind:'lane', ti, param} | null。
+     手势族：单击=留而不切 ｜ Ctrl+单击=切且留 ｜ 双击=切不留（清副区）。 */
+  partner: null,
+  focus: 0,              // 工作台焦点轨（编辑作用对象；主/副二者之一）
+  splitSameAxis: true,   // 副区 MIDI 音轴：true 同音轴（与主区同映射，可编辑）｜ false 自适配（紧凑概览，只读）
+  refs: new Set(),       // 总谱态参照层（旧「灰叠加」仅存落点；单轨态不再渲染）
+  splitRatio: 0.5,       // M-V8 E3 段1：单轨分屏上下比例（主轨上 / 副区下；0.15~0.85，可拖分界）
 
   /* 轨道可见性（Set<trackIndex>；空 = 全可见） */
   hiddenTracks: new Set(),
@@ -317,56 +322,113 @@ export function setView(partial) {
 
 export function setViewMode(mode, track) {
   const m = (mode === 'single') ? 'single' : 'lanes';
-  if (m === 'lanes') {
-    store.overlayTracks = new Set();
-  }
   store.viewMode = m;
-  if (m === 'lanes') store.singleTrack = 0;   /* E3 段1 修：回总谱/切工程 → 单轨主轨记忆清空（残留值曾静默挡住 overlay 叠加） */
-  if (track != null) {
+  if (m === 'lanes') {
+    store.singleTrack = 0;   /* E3 段1 修：回总谱/切工程 → 单轨主轨记忆清空（残留值曾静默挡住叠加） */
+    store.partner = null;    /* v0.2 C2：副区是单轨态状态 → 回总谱清空 */
+  }
+  if (track != null && m === 'single') {
     store.singleTrack = Math.max(0, track | 0);
-    store.overlayTracks.delete(store.singleTrack);
+    store.focus = store.singleTrack;
+    store.partner = null;    /* v0.2 C2：进入单轨 = 干净单屏；副区由手势再建（双击=切不留） */
   }
   bus.dispatch('viewmode');
 }
 
 export function setSingleTrack(ti) {
   store.singleTrack = Math.max(0, ti | 0);
-  store.overlayTracks.delete(store.singleTrack);
+  store.focus = store.singleTrack;
+  if (store.partner && store.partner.kind === 'track' && store.partner.ti === store.singleTrack) store.partner = null;   /* 主轨不可同为轨道副区 */
   store.selection = { track: store.singleTrack, indices: [] };
   bus.dispatch('viewmode');
 }
 
-/* 灰叠加开关（返回是否已成为叠加） */
-export function toggleOverlay(ti) {
-  if (store.viewMode === 'single' && ti === store.singleTrack) return false;   /* 仅单轨态下主轨不可叠 */
-  if (store.overlayTracks.has(ti)) store.overlayTracks.delete(ti);
-  else store.overlayTracks.add(ti);
-  bus.dispatch('viewmode');
-  return store.overlayTracks.has(ti);
+/* ---------------- v0.2 批C2（工作台 v2）：副区 / 焦点 / 手势族 ops ---------------- */
+
+/** 该轨的道列表（只读规范形）：已物化取 lanes；缺省派生自 automation dict（存量同构）。 */
+export function trackLanes(tr) {
+  if (!tr) return [];
+  if (Array.isArray(tr.lanes) && tr.lanes.length) {
+    return tr.lanes.map((l) => ({ id: l.id || l.param, param: l.param, label: l.name || paramLabel(l.param) }));
+  }
+  const a = tr.automation || {};
+  return Object.keys(a).filter((k) => k === 'volume' || k === 'pan')
+    .map((k) => ({ id: k, param: k, label: paramLabel(k) }));
 }
 
-export function isOverlay(ti) { return store.overlayTracks.has(ti); }
-
-/* ---------------- M-V8 E3 段1：单轨分屏（主轨上 / 叠加轨下） ---------------- */
-
-/* 分屏对象：第一个跨类型的叠加轨（主轨为音频时取第一个叠加轨）；无 → null。
-   规则（E3 任务书 §11.1 D / G7）：MIDI×MIDI 走灰叠加；跨类型（含音频）走上下分屏。 */
-export function splitPartner() {
-  const sc = store.score;
-  if (!sc || store.viewMode !== 'single') return null;
-  const main = sc.tracks[store.singleTrack];
-  if (!main) return null;
-  const mainIsAudio = main.kind === 'audio';
-  const list = Array.from(store.overlayTracks).sort((a, b) => a - b);
-  for (const oi of list) {
-    if (oi === store.singleTrack) continue;   /* 防自己入叠（交换时序中间态） */
-    const o = sc.tracks[oi];
-    if (!o) continue;
-    if (mainIsAudio || o.kind === 'audio') {
-      return { ti: oi, kind: o.kind === 'audio' ? 'audio' : 'midi' };
-    }
+/** 副区对象（校验后的规范形；供 roll/main 只读消费）：
+    {kind:'midi'|'audio'|'lane', ti, param?} ｜ null */
+export function partnerOf() {
+  const p = store.partner;
+  if (!p || !store.score || store.viewMode !== 'single') return null;
+  const tr = store.score.tracks[p.ti];
+  if (!tr) return null;
+  if (p.kind === 'lane') {
+    if (!trackLanes(tr).some((l) => l.param === p.param)) return null;
+    return { kind: 'lane', ti: p.ti, param: p.param };
   }
-  return null;
+  if (p.ti === store.singleTrack) return null;
+  return { kind: tr.kind === 'audio' ? 'audio' : 'midi', ti: p.ti };
+}
+
+/** 单击（单轨）：留而不切——上副位 / 再点同一轨撤下 / 主轨无操作。 */
+export function setPartner(ti) {
+  const t = Math.max(0, ti | 0);
+  if (store.viewMode !== 'single' || t === store.singleTrack) return;
+  const raw = store.partner;
+  if (raw && raw.kind === 'track' && raw.ti === t) store.partner = null;   /* 再点同一轨 = 撤下（比原始 partner，partnerOf 为归一化形） */
+  else store.partner = { kind: 'track', ti: t };
+  bus.dispatch('viewmode');
+}
+
+export function clearPartner() {
+  if (!store.partner) return;
+  store.partner = null;
+  if (store.focus !== store.singleTrack) store.focus = store.singleTrack;
+  bus.dispatch('viewmode');
+}
+
+/** Ctrl+单击（单轨）：切且留——X 升主、原主降副（X 已是副位 → 与主对调）。 */
+export function swapMainPartner(ti) {
+  const t = Math.max(0, ti | 0);
+  if (store.viewMode !== 'single' || t === store.singleTrack) return;
+  const old = store.singleTrack;
+  store.singleTrack = t;
+  store.partner = { kind: 'track', ti: old };
+  store.focus = t;
+  store.selection = { track: t, indices: [] };
+  bus.dispatch('viewmode');
+}
+
+/** 焦点轨（点谁编谁；仅主/副二位之内）。 */
+export function setFocus(ti) {
+  if (store.viewMode !== 'single') return;
+  const t = Math.max(0, ti | 0);
+  const p = partnerOf();
+  const ok = (t === store.singleTrack) || !!(p && p.ti === t);
+  if (!ok || store.focus === t) return;
+  store.focus = t;
+  bus.dispatch('viewmode');
+}
+
+/* 总谱态参照层（旧灰叠加遗留；仅总谱视图渲染） */
+export function toggleRef(ti) {
+  if (store.refs.has(ti)) store.refs.delete(ti);
+  else store.refs.add(ti);
+  bus.dispatch('viewmode');
+  return store.refs.has(ti);
+}
+export function isRef(ti) { return store.refs.has(ti); }
+
+/* ---------------- M-V8 E3 段1：单轨分屏（主轨上 / 副区下） ---------------- */
+
+/* 分屏对象（工作台 v2 统一）：partnerOf() 非空即分屏；主轨↔副区各类型通吃。 */
+export function splitPartner() { return partnerOf(); }
+
+/** 副区音轴切换（同音轴 ↔ 自适配概览）。 */
+export function setSplitSameAxis(on) {
+  store.splitSameAxis = !!on;
+  bus.dispatch('view');
 }
 
 export function setSplitRatio(r) {
@@ -374,19 +436,34 @@ export function setSplitRatio(r) {
   bus.dispatch('view');
 }
 
+/** 工作台快照（__tsovState.single 用；CDP 断言面）。 */
+export function singleState() {
+  const single = store.viewMode === 'single';
+  const p = single ? partnerOf() : null;
+  return {
+    main: single ? store.singleTrack : null,
+    partner: p ? Object.assign({}, p) : null,
+    focus: single ? store.focus : null,
+    sameAxis: store.splitSameAxis,
+  };
+}
+
 /* 分屏快照（__tsovState / roll / main 共用） */
 export function splitState() {
   const sc = store.score;
   const single = store.viewMode === 'single';
   const main = single && sc ? sc.tracks[store.singleTrack] : null;
-  const p = splitPartner();
+  const p = single ? partnerOf() : null;
   return {
     on: !!p,
     ratio: store.splitRatio,
     main: main ? store.singleTrack : null,
     mainKind: main ? ((main.kind === 'audio') ? 'audio' : 'midi') : null,
-    overlay: p ? p.ti : null,
-    overlayKind: p ? p.kind : null,
+    partner: p ? p.ti : null,
+    partnerKind: p ? p.kind : null,
+    partnerParam: (p && p.kind === 'lane') ? p.param : null,
+    focus: single ? store.focus : null,
+    sameAxis: store.splitSameAxis,
   };
 }
 
@@ -544,7 +621,9 @@ export function snapshot() {
     selection: { track: store.selection.track, indices: store.selection.indices.slice() },
     viewMode: store.viewMode,
     singleTrack: store.singleTrack,
-    overlayTracks: Array.from(store.overlayTracks),
+    partner: store.partner ? Object.assign({}, store.partner) : null,
+    focus: store.focus,
+    refs: Array.from(store.refs),
     hiddenTracks: Array.from(store.hiddenTracks),
     agentTracks: Array.from(store.agentTracks),
     pendingUserActions: userActions.slice(),
@@ -569,6 +648,7 @@ export function snapshot() {
     lanesScroll: store.lanesScroll || 0,
     laneRows: store.laneRows || null,   /* UI 修正轮3.2：左栏行布局表（文件夹行/折叠对齐观测） */
     split: splitState(),   /* M-V8 E3 段1：单轨分屏快照（CDP 断言用） */
+    single: singleState(),   /* v0.2 批C2（工作台 v2）：{main, partner, focus, sameAxis}（CDP 断言用） */
     /* M-V8 E5 段2：自动化道 / 电平表快照（CDP 断言用）；v0.2 批C 前段：+ range（注册表快照同源） */
     automation: {
       open: store.autoLane.open,

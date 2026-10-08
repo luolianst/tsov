@@ -2,7 +2,7 @@
 
 import { bus } from './events.js';
 import { api } from './api.js';
-import { KEYS_W, store, tempo, beatsPerBar, segments, scoreBounds, setSelection, setError, toggleOverlay, refTag, bookmarks, folderTracks, setLoop, setLoopOn, setSelBookmark, setSelFolder, toggleFolderCollapse, setSingleTrack } from './state.js';
+import { KEYS_W, store, tempo, beatsPerBar, segments, scoreBounds, setSelection, setError, partnerOf, setPartner, swapMainPartner, toggleRef, refTag, bookmarks, folderTracks, setLoop, setLoopOn, setSelBookmark, setSelFolder, toggleFolderCollapse, setSingleTrack } from './state.js';
 import { pal, trackColors } from './theme.js';
 import { seekTo } from './playback.js';
 import { xOf, tOf } from './geom.js';   /* v0.2 批C 前段（R2 地基件）：时间↔x 几何共享 */
@@ -177,9 +177,10 @@ function renderTracks(el) {
   /* M-V8 E1：文件夹分组——记录每个文件夹的首个轨道下标（分组行插在那之前） */
   const firstOf = {};
   store.score.tracks.forEach((tr, i) => { if (tr.folder && firstOf[tr.folder] === undefined) firstOf[tr.folder] = i; });
+  const po = partnerOf();   /* v0.2 C2：副区对象（单轨态；主/副行标记用） */
   store.score.tracks.forEach((tr, ti) => {
     const isMain = single && store.singleTrack === ti;
-    const isOverlay = store.overlayTracks.has(ti);
+    const isPartner = !!(po && po.kind !== 'lane' && po.ti === ti);
     /* M-V8 E1：文件夹分组行（折叠 ▸/▾ + 单击选中为 M 键作用域） */
     if (tr.folder && firstOf[tr.folder] === ti) {
       const hd = document.createElement('div');
@@ -202,7 +203,7 @@ function renderTracks(el) {
     const item = document.createElement('div');
     item.className = 'track-item' + (store.hiddenTracks.has(ti) ? ' hidden-track' : '') +
       (tr.folder && store.collapsedFolders.has(tr.folder) ? ' fold-hidden' : '') +
-      (isMain ? ' main-track' : '') + (isOverlay ? ' is-overlay' : '') +
+      (isMain ? ' main-track' : '') + (isPartner ? ' is-overlay' : '') +
       (store.agentTracks.has(ti) ? ' agent-touched' : '') +          // 批B B1-3：agent 改动标记
       (store.selection.track === ti ? ' selected' : '');
     item.dataset.track = String(ti);
@@ -241,10 +242,10 @@ function renderTracks(el) {
     s.textContent = 'S';
     s.title = '独奏';
     s.onclick = (e) => { e.stopPropagation(); postMix(ti, { solo: !tr.solo }, tr.solo ? '取消独奏' : '独奏'); };
-    if (isMain || isOverlay) {
+    if (isMain || isPartner) {
       const mk = document.createElement('span');
       mk.className = 'tr-mark';
-      mk.textContent = isMain ? '主轨' : '叠加';
+      mk.textContent = isMain ? '主轨' : '副区';
       top.appendChild(mk);
     }
     top.appendChild(m);
@@ -258,8 +259,9 @@ function renderTracks(el) {
       (tr.bus && tr.bus !== 'master' ? ' · ' + tr.bus : '');
     /* 窄档小字行会隐藏（CSS）→ 信息并进 tooltip */
     item.title = (tr.name || ('track ' + ti)) + ' · ' + sub.textContent +
-      (isMain ? ' ｜ 主轨（单轨写谱中）' : '') + (isOverlay ? ' ｜ 灰叠加' : '') +
-      ' ｜ 双击：' + (single ? '切换主轨' : '进入单轨写谱') + ' ｜ 右键：轨道菜单';
+      (isMain ? ' ｜ 主轨（单轨写谱中）' : '') + (isPartner ? ' ｜ 副区' : '') +
+      ' ｜ 单击：' + (single ? '上/下副区' : '选中') + ' ｜ Ctrl+单击：' + (single ? '切主（原主降副）' : '参照层') +
+      ' ｜ 双击：' + (single ? '独立打开' : '进入单轨写谱') + ' ｜ 右键：轨道菜单';
 
     body.appendChild(top);
     body.appendChild(sub);
@@ -267,11 +269,14 @@ function renderTracks(el) {
     item.appendChild(body);
     item.addEventListener('click', (e) => {
       if (e.target.closest('button')) return;
-      /* 单轨模式：单击其他轨 = 灰叠加开关；总谱模式：Ctrl/Shift = 叠加集 */
-      if ((single && ti !== store.singleTrack) || e.ctrlKey || e.metaKey || e.shiftKey) {
-        toggleOverlay(ti);
+      /* v0.2 C2 手势族：单轨 = 单击留而不切（副位）/ Ctrl+单击切且留（升主降副）；总谱 = Ctrl/Shift 参照层 */
+      if (single) {
+        if (ti === store.singleTrack) { setSelection(ti, []); return; }
+        if (e.ctrlKey || e.metaKey) { swapMainPartner(ti); return; }
+        setPartner(ti);
         return;
       }
+      if (e.ctrlKey || e.metaKey || e.shiftKey) { toggleRef(ti); return; }
       setSelection(ti, []);
     });
     item.addEventListener('dblclick', (e) => {

@@ -2,7 +2,7 @@
 
 import { bus } from './events.js';
 import { api } from './api.js';
-import { KEYS_W, store, scoreBounds, tempo, beatsPerBar, setSelection, setView, refTag, setRange, splitPartner, setSplitRatio, toggleOverlay, setSingleTrack, fitViewTrack, audioClipsOf } from './state.js';
+import { KEYS_W, store, scoreBounds, tempo, beatsPerBar, setSelection, setView, refTag, setRange, splitPartner, setSplitRatio, setSingleTrack, fitViewTrack, audioClipsOf, setFocus, swapMainPartner } from './state.js';
 import { peaksGet } from './peaks.js';   /* E3 段1：单轨波形峰值（公共管线） */
 import { xOf, tOf } from './geom.js';   /* v0.2 批C 前段（R2 地基件）：时间↔x 几何共享 */
 import { clipHitBand, beginAudioDrag, updateAudioDrag, finishAudioDrag, isDragging, dragPreviewOf, selOf, clearSel, splitClipAt, drawClipBlocks } from './audio_edit.js';   /* E6 段1 补：音频 clip 手势引擎（单轨/总谱共用） */
@@ -50,7 +50,7 @@ export function draw() {
   const p = pal();
   const layers = diffLayers();
 
-  /* ---- M-V8 E3 段1：单轨分屏（主轨上 / 叠加轨下；splitH1 = 上区高） ---- */
+  /* ---- M-V8 E3 段1 / v0.2 批C2：单轨分屏（主轨上 / 副区下；splitH1 = 上区高） ---- */
   const single = store.viewMode === 'single';
   const sp = single ? splitPartner() : null;
   splitOn = !!sp;
@@ -60,7 +60,7 @@ export function draw() {
 
   if (single && mainIsAudio) {
     /* 主轨 = 音频：上区波形（设计记录 #183①：音频轨进单轨不再空卷帘） */
-    drawRegion(0, splitH1, store.singleTrack, mainTrk, false);
+    drawRegion(0, splitH1, store.singleTrack, mainTrk, 'main');
     drawSplitTail(single, sp);
     return;
   }
@@ -120,9 +120,7 @@ export function draw() {
   if (store.score) {
     store.score.tracks.forEach((tr, ti) => {
       if (store.hiddenTracks.has(ti)) return;
-      /* 单轨写谱（修正轮2）：只画主轨 + 灰叠加轨（低对比、不可编辑） */
-      const isGhost = single && ti !== store.singleTrack;
-      if (isGhost && !store.overlayTracks.has(ti)) return;
+      if (single && ti !== store.singleTrack) return;   /* v0.2 批C2：单轨只画主轨（副区在下区单独绘制） */
       const tc = trackColors();
       const color = tc[ti % tc.length];
       for (let ni = 0; ni < tr.notes.length; ni++) {
@@ -130,15 +128,6 @@ export function draw() {
         const x = xOf(n.start), y = yOf(n.pitch_midi);
         const w = Math.max(2, (n.end - n.start) * v.pxPerSec), h = v.pxPerSemi - 1;
         if (x + w < KEYS_W || x > W || y + h < 0 || y > H) continue;
-
-        if (isGhost) {
-          /* 灰叠加（修正轮2）：统一灰、低对比、不可编辑 */
-          ctx.fillStyle = p.laneLabel;
-          ctx.globalAlpha = 0.45;
-          ctx.fillRect(x, y + 0.5, w, h);
-          ctx.globalAlpha = 1;
-          continue;
-        }
 
         /* diff 叠层（只对 track 0） */
         let stroke = null, fill = color;
@@ -276,8 +265,40 @@ function audioMainBand() {
   return { ti: store.singleTrack, yTop: pad, hh: Math.max(10, h - pad * 2) };
 }
 
-/* E3 段1：分屏区渲染（音频 → 波形区；MIDI → 灰卷帘区〔音域自适应当前区高，只读〕） */
-function drawRegion(y0, h, ti, trk, isOverlay) {
+/* v0.2 C2：副区音频可编辑带（下落区 → 可编；主区波形带为 audioMainBand） */
+function partnerBand() {
+  if (store.viewMode !== 'single' || !splitOn || !store.score) return null;
+  const sp = splitPartner();
+  if (!sp || sp.kind !== 'audio') return null;
+  const h = H - splitH1;
+  if (h <= 8) return null;
+  const pad = bandPadOf(h);
+  return { ti: sp.ti, yTop: splitH1 + pad, hh: Math.max(10, h - pad * 2) };
+}
+
+/* v0.2 C2：区域命中路由 —— 单轨工作台两区（上=主轨 / 下=副区）。
+   返回 {ti, lower, audio, edit, lane}；edit=false = 该区不吃音符手势（自适配概览/道副区/音频）。 */
+function regionTrack(mx, my) {
+  if (store.viewMode !== 'single' || !store.score) return null;
+  const sp = splitPartner();
+  const lower = !!sp && my > splitH1;
+  const ti = lower ? sp.ti : store.singleTrack;
+  const tr = store.score.tracks[ti];
+  if (!tr) return null;
+  const audio = tr.kind === 'audio';
+  let edit = !audio;
+  if (lower) {
+    if (sp.kind === 'lane') edit = false;
+    else if (sp.kind === 'midi') edit = !!store.splitSameAxis;
+    else edit = false;   /* 音频副区走 clip 引擎，不进音符路由 */
+  }
+  return { ti, lower, audio, edit, lane: (lower && sp.kind === 'lane') ? sp.param : null };
+}
+
+/* v0.2 批C2：分屏区渲染。
+   音频 → 波形块（与总谱共用引擎/命令层；主/副区均可编辑）；
+   MIDI 副区 → 同音轴（与主区同 pitch 映射，可编辑外观）/ 自适配（紧凑概览，只读）。 */
+function drawRegion(y0, h, ti, trk, role) {
   if (h <= 8 || !trk) return;
   const p = pal();
   const tc = trackColors();
@@ -297,11 +318,10 @@ function drawRegion(y0, h, ti, trk, isOverlay) {
   ctx.font = '11px "Microsoft YaHei UI","PingFang SC",system-ui,sans-serif';
   const nm = (trk.name || ('track ' + ti));
   ctx.fillText('🎵 ' + (nm.length > 7 ? nm.slice(0, 7) + '…' : nm), 8, y0 + 15);
-  if (isOverlay) ctx.fillText('叠加', 8, Math.min(y0 + 30, y0 + h - 6));
+  if (role === 'partner') ctx.fillText('副区', 8, Math.min(y0 + 30, y0 + h - 6));
 
   if (trk.kind === 'audio') {
-    /* E6 段1 补（2026-09-27）：多 clip 波形块（与总谱共用引擎/命令层）；
-       主区可编辑（移动/修剪/淡化/伸缩/切分），叠加区只读 */
+    /* E6 段1 补（2026-09-27）：多 clip 波形块（与总谱共用引擎/命令层）；主/副区均可编辑 */
     const pad = bandPadOf(h);
     const prev = dragPreviewOf(ti);
     const sel = selOf();
@@ -310,9 +330,9 @@ function drawRegion(y0, h, ti, trk, isOverlay) {
       col,
       yTop: y0 + pad,
       hh: Math.max(10, h - pad * 2),
-      selIdx: (!isOverlay && sel && sel.ti === ti) ? sel.idx : null,
+      selIdx: (sel && sel.ti === ti) ? sel.idx : null,
       inDrag: !!prev,
-      dim: !!isOverlay,
+      dim: false,
       label: (trk.name || '素材'),
       p, v,
       xLo: KEYS_W, xHi: W,
@@ -320,34 +340,77 @@ function drawRegion(y0, h, ti, trk, isOverlay) {
     return;
   }
 
-  /* MIDI 区（灰卷帘，只读） */
   const notes = trk.notes || [];
-  let lo = 127, hi = 0;
-  for (const n of notes) { if (n.pitch_midi < lo) lo = n.pitch_midi; if (n.pitch_midi > hi) hi = n.pitch_midi; }
-  if (lo > hi) { lo = 60; hi = 72; }
-  const pad = Math.max(6, h * 0.12);
-  const inner = Math.max(8, h - pad * 2);
-  const nh = Math.max(3, Math.min(8, h * 0.09));
-  ctx.fillStyle = isOverlay ? p.laneLabel : col;
-  ctx.globalAlpha = isOverlay ? 0.5 : 0.85;
-  for (const n of notes) {
-    const x = xOf(n.start);
-    const w = Math.max(2, (n.end - n.start) * v.pxPerSec);
-    if (x + w < KEYS_W || x > W) continue;
-    const y = y0 + pad + ((hi - n.pitch_midi) / Math.max(1, hi - lo)) * (inner - nh);
-    ctx.fillRect(x, y, w, nh);
+  if (role === 'partner' && !store.splitSameAxis) {
+    /* 自适配：紧凑概览（只读） */
+    let lo = 127, hi = 0;
+    for (const n of notes) { if (n.pitch_midi < lo) lo = n.pitch_midi; if (n.pitch_midi > hi) hi = n.pitch_midi; }
+    if (lo > hi) { lo = 60; hi = 72; }
+    const pad = Math.max(6, h * 0.12);
+    const inner = Math.max(8, h - pad * 2);
+    const nh = Math.max(3, Math.min(8, h * 0.09));
+    ctx.fillStyle = col;
+    ctx.globalAlpha = 0.8;
+    for (const n of notes) {
+      const x = xOf(n.start);
+      const w = Math.max(2, (n.end - n.start) * v.pxPerSec);
+      if (x + w < KEYS_W || x > W) continue;
+      const y = y0 + pad + ((hi - n.pitch_midi) / Math.max(1, hi - lo)) * (inner - nh);
+      ctx.fillRect(x, y, w, nh);
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = p.laneLabel;
+    ctx.fillText('概览（只读）', 8, y0 + h - 8);
+    return;
   }
-  ctx.globalAlpha = 1;
+
+  /* 同音轴：与主区同一音高映射（可编辑） */
+  ctx.save();
+  ctx.beginPath(); ctx.rect(KEYS_W, y0, Math.max(0, W - KEYS_W), h); ctx.clip();
+  const sel2 = store.selection;
+  for (let ni = 0; ni < notes.length; ni++) {
+    const n = notes[ni];
+    const x = xOf(n.start), y = yOf(n.pitch_midi);
+    const w = Math.max(2, (n.end - n.start) * v.pxPerSec), hh = v.pxPerSemi - 1;
+    if (x + w < KEYS_W || x > W || y + hh < y0 || y > y0 + h) continue;
+    ctx.fillStyle = col;
+    ctx.globalAlpha = 0.92;
+    ctx.fillRect(x, y + 0.5, w, hh);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = p.noteStroke;
+    ctx.strokeRect(x + 0.5, y + 0.5, w, hh);
+    if (sel2.track === ti && sel2.indices.includes(ni)) {
+      ctx.strokeStyle = p.selStroke;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x + 1, y + 1, w - 1, hh - 1);
+      ctx.lineWidth = 1;
+    }
+  }
+  ctx.restore();
 }
 
-/* E3 段1：分屏尾部（下区 → 分界线 → 全高播放头）；卷帘分支与音频主轨分支共用 */
+/* E3 段1 / v0.2 C2：分屏尾部（下区 → 分界线 → 全高播放头）；卷帘分支与音频主轨分支共用 */
 function drawSplitTail(single, sp) {
   if (single && sp && store.score) {
-    const ov = store.score.tracks[sp.ti];
-    if (ov) drawRegion(splitH1, H - splitH1, sp.ti, ov, true);
+    if (sp.kind === 'lane') {
+      drawLaneRegion(splitH1, H - splitH1, sp);   /* v0.2 C2：道副区（段2 F4 接全渲染） */
+    } else {
+      const ov = store.score.tracks[sp.ti];
+      if (ov) drawRegion(splitH1, H - splitH1, sp.ti, ov, 'partner');
+    }
     drawSplitBar();
   }
   drawPlayheadLine();
+}
+
+/* v0.2 C2：道副区占位渲染（曲线全宽；段2 F4 接 lane_render 全道渲染） */
+function drawLaneRegion(y0, h, sp) {
+  const p = pal();
+  ctx.fillStyle = p.rollBg;
+  ctx.fillRect(KEYS_W, y0, Math.max(0, W - KEYS_W), h);
+  ctx.fillStyle = p.laneLabel;
+  ctx.font = '11px "Microsoft YaHei UI","PingFang SC",system-ui,sans-serif';
+  ctx.fillText('道：' + (sp.param || ''), 8, y0 + 15);
 }
 
 function drawSplitBar() {
@@ -378,24 +441,23 @@ function drawPlayheadLine() {
   ctx.lineWidth = 1;
 }
 
-/* E3 段1：分界变化 / 主轨交换后——主轨为 MIDI 时按上区高重适配音域 */
+/* E3 段1 / v0.2 C2：分界变化 / 主副变化后——主轨为 MIDI 时按上区高重适配音域 */
 function refitSplit() {
   if (!store.score || store.viewMode !== 'single') { draw(); return; }
   const tr = store.score.tracks[store.singleTrack];
-  const h1 = splitOn ? splitH1 : H;
+  const sp = splitPartner();
+  const h1 = sp ? Math.round(H * Math.max(0.15, Math.min(0.85, store.splitRatio))) : H;
   if (tr && tr.kind !== 'audio') fitViewTrack(store.singleTrack, Math.max(60, h1));
   draw();
 }
 
-/* E3 段1：下区双击 —— 与主轨交换（叠加升主轨、旧主轨入叠加；上下交换） */
+/* E3 段1 / v0.2 C2：下区双击 —— 主副对调（副区升主、旧主降副；上下交换） */
 function swapSplit() {
   const sp = splitPartner();
-  if (!sp) return;
-  const oldMain = store.singleTrack;
-  setSingleTrack(sp.ti);
-  toggleOverlay(oldMain);
+  if (!sp || sp.kind === 'lane') return;
+  swapMainPartner(sp.ti);
   refitSplit();
-  bus.dispatch('toast', '已交换主轨 / 叠加');
+  bus.dispatch('toast', '已切主轨（原主轨入副区）');
 }
 
 /* E3 段1：波形区双击 —— 试听素材原文件（E6 段1 补：多 clip → 取首 clip 文件） */
@@ -410,15 +472,23 @@ function previewTrackAudio(trk) {
     .catch((err) => showStatus('试听失败：' + ((err && err.message) || err), true));
 }
 
-/* ---- 命中测试（逆序=后画的优先；edge=左右端热区） ---- */
+/* ---- 命中测试（逆序=后画的优先；edge=左右端热区）
+   v0.2 C2：单轨态按区域路由（上=主轨 / 下=副区〔可编辑条件内〕）；总谱态保留旧全轨扫描兜底 ---- */
 function hitNote(mx, my) {
   if (!store.score) return null;
-  if (splitOn && my >= splitH1) return null;   /* E3 段1：下区（叠加区）不参与命中 */
   const v = store.view;
   const single = store.viewMode === 'single';
-  for (let ti = store.score.tracks.length - 1; ti >= 0; ti--) {
+  let list;
+  if (single) {
+    const r = regionTrack(mx, my);
+    if (!r || !r.edit) return null;
+    list = [r.ti];
+  } else {
+    list = store.score.tracks.map((_, i) => i);
+  }
+  for (let k = list.length - 1; k >= 0; k--) {
+    const ti = list[k];
     if (store.hiddenTracks.has(ti)) continue;
-    if (single && ti !== store.singleTrack) continue;   // 单轨模式：叠加轨不可点
     const notes = store.score.tracks[ti].notes;
     for (let ni = notes.length - 1; ni >= 0; ni--) {
       const n = notes[ni];
@@ -585,7 +655,8 @@ function onToolDown(e, tool) {
     return;
   }
   if (tool === 'eraser') {
-    eraserDrag = { track: store.singleTrack, set: new Set() };
+    const rr = regionTrack(e.offsetX, e.offsetY);
+    eraserDrag = { track: (rr && rr.edit) ? rr.ti : store.singleTrack, set: new Set() };
     markEraser(e);
     draw();
     return;
@@ -646,7 +717,8 @@ function commitRange() {
     const x0 = Math.min(rd.x0, rd.x1), x1 = Math.max(rd.x0, rd.x1);
     const y0 = Math.min(rd.y0, rd.y1), y1 = Math.max(rd.y0, rd.y1);
     const t0 = tOf(x0), t1 = tOf(x1);
-    const ti = store.viewMode === 'single' ? store.singleTrack : store.selection.track;
+    const rr = store.viewMode === 'single' ? regionTrack(rd.x0, rd.y0) : null;
+    const ti = store.viewMode === 'single' ? ((rr && rr.edit) ? rr.ti : store.singleTrack) : store.selection.track;
     const tr = store.score.tracks[ti];
     if (tr) {
       const idxs = [];
@@ -690,18 +762,18 @@ export function init(rollCanvas) {
 
   canvas.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;          // 仅左键
-    /* E3 段1：分界线拖拽（优先于一切手势）+ 下区（叠加区）拦截 */
+    /* E3 段1：分界线拖拽（优先于一切手势） */
     if (splitOn && Math.abs(e.offsetY - splitH1) <= 6) {
       splitDrag = true;
       canvas.style.cursor = 'row-resize';
       return;
     }
-    if (splitOn && e.offsetY > splitH1 + 6) return;   /* 下区无编辑手势（双击 = 交换主轨） */
-    /* E6 段1 补：单轨主区 = 音频 → clip 手势（与总谱同一引擎；空处不吃音符逻辑） */
-    const band = audioMainBand();
-    if (band) {
+    /* E6 段1 补 / v0.2 C2：音频 clip 手势（主区带与副区带共引擎；带外不吃音符逻辑） */
+    for (const band of [audioMainBand(), partnerBand()]) {
+      if (!band) continue;
       const ahit = clipHitBand(band.ti, e.offsetX, e.offsetY, band.yTop, band.hh);
       if (ahit) {
+        setFocus(band.ti);
         const stretchHold = e.altKey && ahit.zone === 'trim-out';
         if ((store.tool === 'scissors' || e.altKey) && !stretchHold) {
           splitClipAt(band.ti, ahit.idx, tOf(e.offsetX), e.altKey);
@@ -711,16 +783,25 @@ export function init(rollCanvas) {
         canvas.style.cursor = 'grabbing';
         return;
       }
-      clearSel();
-      draw();
-      return;
+      if (e.offsetY >= band.yTop - 6 && e.offsetY <= band.yTop + band.hh + 6) {
+        clearSel();
+        setFocus(band.ti);
+        draw();
+        return;
+      }
     }
     /* M-V8 E5：工具手势分发（仅单轨卷帘视图；智能指针走原逻辑） */
     if (store.viewMode === 'single' && (store.tool || 'smart') !== 'smart') {
       onToolDown(e, store.tool);
       return;
     }
+    /* v0.2 C2：区域路由 —— 不可编辑区（自适配概览/道副区/音频）不吃音符手势 */
+    const r = regionTrack(e.offsetX, e.offsetY);
+    if (store.viewMode === 'single' && (!r || !r.edit)) return;
+    if (r) setFocus(r.ti);
     const hit = hitNote(e.offsetX, e.offsetY);
+    /* v0.2 C2：副区空白不吃铅笔（保「下区双击=对调」手势纯净）；焦点/选区归副轨 */
+    if (r && r.lower && !hit && !e.ctrlKey && !e.shiftKey) { setSelection(r.ti, []); draw(); return; }
     const v = store.view;
 
     /* Ctrl/Shift：只管多选，不拖拽 */
@@ -765,8 +846,8 @@ export function init(rollCanvas) {
       }
     } else {
       /* 铅笔：创建新音符（默认时长 = 半拍，可拖动拉长）
-         修正轮2：单轨写谱模式 → 建到主轨；总谱模式卷帘不可见 */
-      const createTrack = store.viewMode === 'single' ? store.singleTrack : (store.selection.track || 0);
+         v0.2 C2：单轨态建到区域所属轨（上=主轨 / 下=副区）；总谱模式卷帘不可见 */
+      const createTrack = r ? r.ti : (store.viewMode === 'single' ? store.singleTrack : (store.selection.track || 0));
       setSelection(createTrack, []);
       const t0 = Math.max(0, snapT(tOf(e.offsetX)));
       const beat = 60 / tempo();
@@ -832,24 +913,27 @@ export function init(rollCanvas) {
       draw();
       return;
     }
-    /* E3 段1：分界线悬停（row-resize）；E6 段1 补：单轨音频区 = clip 手势光标 */
+    /* E3 段1 / v0.2 C2：分界线悬停（row-resize）；音频带光标（主/副两带共引擎） */
     if (splitOn && Math.abs(e.offsetY - splitH1) <= 6) { canvas.style.cursor = 'row-resize'; return; }
-    if (splitOn && e.offsetY > splitH1) { canvas.style.cursor = 'default'; return; }   /* 叠加区只读 */
-    const band = audioMainBand();
-    if (band) {
+    for (const band of [audioMainBand(), partnerBand()]) {
+      if (!band) continue;
       const hit = clipHitBand(band.ti, e.offsetX, e.offsetY, band.yTop, band.hh);
       if (hit) {
         if (e.altKey && hit.zone === 'trim-out') canvas.style.cursor = 'col-resize';
         else if (hit.zone === 'move') canvas.style.cursor = (store.tool === 'scissors' || e.altKey) ? 'cell' : 'grab';
         else canvas.style.cursor = 'ew-resize';
-      } else {
-        canvas.style.cursor = 'default';
+        return;
       }
-      return;
+      if (e.offsetY >= band.yTop - 6 && e.offsetY <= band.yTop + band.hh + 6) { canvas.style.cursor = 'default'; return; }
     }
     if (store.viewMode === 'single' && (store.tool || 'smart') !== 'smart') {
       canvas.style.cursor = TOOL_CURSORS[store.tool] || 'default';
       return;
+    }
+    /* v0.2 C2：不可编辑区（自适配概览/道副区）→ 默认光标 */
+    if (store.viewMode === 'single') {
+      const rr = regionTrack(e.offsetX, e.offsetY);
+      if (!rr || !rr.edit) { canvas.style.cursor = 'default'; return; }
     }
     const hit = hitNote(e.offsetX, e.offsetY);
     if (hit) {
@@ -869,9 +953,19 @@ export function init(rollCanvas) {
   });
 
   /* M-V3：双击删除音符（命令层即时，一个 commit）
-     E3 段1：① 下区（叠加区）双击 = 交换主轨/叠加；② 主轨为音频时双击波形区 = 试听素材 */
+     E3 段1 / v0.2 C2：① 下区双击 = 命中音符（可编区）则删除、否则主副对调；② 主轨为音频时双击波形区 = 试听素材 */
   canvas.addEventListener('dblclick', async (e) => {
-    if (splitOn && e.offsetY > splitH1) { swapSplit(); return; }
+    if (splitOn && e.offsetY > splitH1) {
+      const rr = regionTrack(e.offsetX, e.offsetY);
+      const lhit = (rr && rr.edit) ? hitNote(e.offsetX, e.offsetY) : null;
+      if (lhit && store.project) {
+        const n = store.score.tracks[lhit.track].notes[lhit.index];
+        await postNoteOp(lhit, [{ op: 'remove', track: lhit.track, index: lhit.index }], '双击删除 ' + midiName(n.pitch_midi));
+        return;
+      }
+      swapSplit();
+      return;
+    }
     const mt = (store.score && store.viewMode === 'single') ? store.score.tracks[store.singleTrack] : null;
     if (mt && mt.kind === 'audio') { previewTrackAudio(mt); return; }
     const hit = hitNote(e.offsetX, e.offsetY);
@@ -894,7 +988,15 @@ export function init(rollCanvas) {
   for (const topic of ['state', 'view', 'selection', 'diff', 'playhead', 'playing', 'tool', 'peaks']) {
     bus.on(topic, draw);
   }
-  bus.on('viewmode', draw);   // 修正轮2：总谱 ↔ 单轨切换重绘
+  /* 修正轮2 / v0.2 C2：总谱 ↔ 单轨切换重绘 + 副区出现/消失时主区重适配 */
+  let lastSplit = false;
+  bus.on('viewmode', () => {
+    const single = store.viewMode === 'single';
+    const has = !!(single && splitPartner());
+    if (single && has !== lastSplit) { lastSplit = has; refitSplit(); return; }
+    lastSplit = has;
+    draw();
+  });
 }
 
 /* 修正轮2：外部（main.js 切换显隐后）主动重算尺寸 + 重绘 */

@@ -5,7 +5,7 @@
    音符编辑在单轨视图（roll.js）；音频 clip 手势经命令层落盘（ADR-0017） */
 
 import { bus } from './events.js';
-import { store, tempo, beatsPerBar, setSelection, toggleOverlay, setView, bookmarks, setSelBookmark, setError, audioClipsOf } from './state.js';
+import { store, tempo, beatsPerBar, setSelection, toggleRef, setView, bookmarks, setSelBookmark, setError, audioClipsOf } from './state.js';
 import { pal, trackColors } from './theme.js';
 import { seekTo } from './playback.js';
 import { api } from './api.js';
@@ -146,9 +146,9 @@ export function draw() {
     if (y0 + rh < 0) continue;
     if (y0 > H) break;
     const selected = store.selection.track === ti;
-    const overlay = store.overlayTracks.has(ti);
+    const ref = store.refs.has(ti);   /* v0.2 C2：参照层（旧灰叠加；仅总谱渲染） */
     const touched = store.agentTracks.has(ti);   // 批B B1-3：本轮 agent 改动过
-    ctx.fillStyle = selected ? p.selSoft : (overlay ? p.rowBlack : p.rollBg);
+    ctx.fillStyle = selected ? p.selSoft : (ref ? p.rowBlack : p.rollBg);
     ctx.fillRect(0, y0, W, rh);
     /* 标签槽 */
     ctx.fillStyle = p.panelBg;
@@ -161,7 +161,7 @@ export function draw() {
     ctx.globalAlpha = trackVisible(ti) ? 1 : 0.4;   // M-V8 E1：隐藏/折叠行减淡
     ctx.fillText((sc.tracks[ti].folder ? '📁' : '') + (nm.length > 8 ? nm.slice(0, 8) + '…' : nm), 9, y0 + Math.min(rh - 8, rh / 2 + 4));
     ctx.globalAlpha = 1;
-    if (overlay) ctx.fillText('叠加', 9, y0 + rh - 8);
+    if (ref) ctx.fillText('参照', 9, y0 + rh - 8);
     if (touched) {   /* 批B B1-3：改动标记（标签槽右缘小方块，agent 语义色） */
       ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--agent').trim() || '#141414';
       ctx.fillRect(KEYS - 9, y0 + rh / 2 - 3, 5, 6);
@@ -226,14 +226,14 @@ export function draw() {
     }
     const notes = trk.notes;
     if (!notes.length) continue;
-    const overlay = store.overlayTracks.has(ti);
+    const ref = store.refs.has(ti);   /* v0.2 C2：参照层（旧灰叠加） */
     const selected = store.selection.track === ti;
     let lo = 127, hi = 0;
     for (const n of notes) { if (n.pitch_midi < lo) lo = n.pitch_midi; if (n.pitch_midi > hi) hi = n.pitch_midi; }
     if (hi <= lo) hi = lo + 1;
     const yOfM = (m) => y0 + pad + (hi - m) / (hi - lo) * (inner - nh);
     ctx.fillStyle = tc[ti % tc.length];
-    ctx.globalAlpha = overlay ? 0.32 : (selected ? 0.95 : 0.78);
+    ctx.globalAlpha = ref ? 0.32 : (selected ? 0.95 : 0.78);
     for (const n of notes) {
       const x = xOf(n.start);
       const w = Math.max(2, (n.end - n.start) * v.pxPerSec);
@@ -325,8 +325,8 @@ export function init(el, opts) {
     if (fl) { setSelBookmark(fl.i); seekTo(fl.b.start); return; }
     const ti = laneAt(e.offsetY);
     if (ti < 0) return;
-    /* E3 段1：叠加集（Ctrl/Shift 单击）对音频轨同样生效（跨类型叠加 → 单轨分屏） */
-    if (e.ctrlKey || e.shiftKey || e.metaKey) { toggleOverlay(ti); return; }
+    /* E3 段1 / v0.2 C2：参照层（Ctrl/Shift 单击）——灰显示仅总谱面用；单轨副区改走左栏手势族 */
+    if (e.ctrlKey || e.shiftKey || e.metaKey) { toggleRef(ti); return; }
     const trk = store.score && store.score.tracks[ti];
     if (trk && trk.kind === 'audio') {   /* M-V8 E2/E6：音频轨手势（移动/修剪/淡化/伸缩/切分） */
       const bd = audioBandOf(ti);
