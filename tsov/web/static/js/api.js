@@ -65,7 +65,8 @@ export const api = {
   chatReset: (project) => post('/api/chat/reset', { project }),
   setTitle: (name, title) => post('/api/projects/' + encodeURIComponent(name) + '/title', { title }),
   exportProject: (name, opts) => post('/api/projects/' + encodeURIComponent(name) + '/export', opts || {}),
-  favorite: (name) => post('/api/projects/' + encodeURIComponent(name) + '/favorite', {}),
+  favorite: (name, label) => post('/api/projects/' + encodeURIComponent(name) + '/favorite', { name: label || null }),
+  renameFavorite: (name, tag, label) => post('/api/projects/' + encodeURIComponent(name) + '/favorites/rename', { tag, name: label }),
   favorites: (name) => req('/api/projects/' + encodeURIComponent(name) + '/favorites'),
   /* 批B B1-2：动作级撤销（快照日志；seq 由 agent_tool 事件给出） */
   actionUndo: (name, seq) =>

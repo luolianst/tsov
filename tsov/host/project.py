@@ -467,6 +467,44 @@ class Project:
         proc = self._git("tag", "-d", str(tag))
         return proc.returncode == 0
 
+    def rename_favorite(self, tag: str, name: str) -> dict:
+        """收藏改名（v0.2 批D P15）：保留 fav/<时间戳> 前缀、替换/追加尾标。
+
+        - 清洗同 favorite()（中英文/数字/-/_，≤32）；清洗后为空 → 拒绝（零改动）。
+        - 新 tag 冲突预检（已存在 → 拒绝，零改动）。
+        - **原子序**：先建新 tag（指向**旧 tag 的 commit**，绝不打 HEAD）→ 成功后才删旧 tag；
+          删除失败 → 回滚新 tag，保持原状。
+        """
+        if not self._has_git():
+            return {"ok": False, "error": "工程无 git 仓库"}
+        old = str(tag or "").strip()
+        if not old.startswith("fav/"):
+            return {"ok": False, "error": f"不是收藏标签：{old!r}（须 fav/ 前缀）"}
+        if (self._git("tag", "--list", old).stdout or "").strip() != old:
+            return {"ok": False, "error": f"收藏不存在：{old!r}"}
+        label = "".join(ch for ch in str(name or "") if (ch.isalnum() or ch in "-_"))[:32]
+        if not label:
+            return {"ok": False, "error": "新名称为空或含非法字符（允许中英文/数字/-/_，≤32）"}
+        parts = old[len("fav/"):].split("-", 2)
+        if len(parts) < 2 or len(parts[0]) != 8 or len(parts[1]) != 6:
+            return {"ok": False, "error": f"收藏标签形态异常，无法解析时间戳：{old!r}"}
+        new_tag = f"fav/{parts[0]}-{parts[1]}-{label}"
+        if new_tag == old:
+            return {"ok": True, "tag": new_tag, "renamed": False, "note": "标签未变化"}
+        if (self._git("tag", "--list", new_tag).stdout or "").strip():
+            return {"ok": False, "error": f"新名称已被占用：{new_tag!r}（零改动）"}
+        commit = (self._git("rev-list", "-n1", old).stdout or "").strip()
+        if not commit:
+            return {"ok": False, "error": f"无法解析收藏指向的 commit：{old!r}"}
+        proc = self._git("tag", new_tag, commit)   # 指向旧 tag 的 commit（≠ HEAD）
+        if proc.returncode != 0:
+            return {"ok": False, "error": (proc.stderr or "git tag 失败").strip()}
+        dproc = self._git("tag", "-d", old)
+        if dproc.returncode != 0:                  # 删旧失败 → 回滚新 tag（保持原状）
+            self._git("tag", "-d", new_tag)
+            return {"ok": False, "error": (dproc.stderr or "git tag -d 失败（已回滚）").strip()}
+        return {"ok": True, "tag": new_tag, "old": old, "commit": commit[:10]}
+
     # ------------------------------------------------------------------
     # 工程摘要（LLM 上下文节流）
     # ------------------------------------------------------------------

@@ -81,6 +81,19 @@ class ChatResetIn(BaseModel):
     project: str
 
 
+class FavRenameIn(BaseModel):
+    """收藏改名（v0.2 批D P15）：tag = 旧收藏标签；name = 新尾标（清洗同 favorite()）。"""
+
+    tag: str
+    name: str
+
+
+class FavNameIn(BaseModel):
+    """收藏命名（v0.2 批D P15）：可空 = 原行为。"""
+
+    name: str | None = None
+
+
 class TitleIn(BaseModel):
     title: str
 

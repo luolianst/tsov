@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 from ...core.score import Score
 from ...host.state import ProjectState, global_settings_path, set_global_settings  # M-V7 D2（ADR-0019）：计数/设置
 from ..helpers import project_state
-from ..models import LlmSettingsIn, LlmTestIn, SettingsIn, WindowJumpIn
+from ..models import FavNameIn, FavRenameIn, LlmSettingsIn, LlmTestIn, SettingsIn, WindowJumpIn
 from ..state import WebState
 
 
@@ -67,10 +67,10 @@ def register(app: FastAPI) -> None:
     # ---------------- 收藏（修正轮2） ----------------
 
     @app.post("/api/projects/{name}/favorite")
-    def favorite(name: str) -> dict:
-        """收藏当前版本（M-V7 D2：commit+tag 二连；强留存 + 恢复入口）。"""
+    def favorite(name: str, body: FavNameIn | None = None) -> dict:
+        """收藏当前版本（M-V7 D2：commit+tag 二连；强留存 + 恢复入口）。v0.2 批D（P15）：可带 name 命名。"""
         proj = st().get_project(name)
-        r = proj.favorite()
+        r = proj.favorite(body.name if body else None)
         if not r.get("ok"):
             raise HTTPException(400, r.get("error") or "收藏失败")
         ps = ProjectState(proj.root)      # 收藏 = 新 git 点 → 计数归零
@@ -89,6 +89,14 @@ def register(app: FastAPI) -> None:
         if not st().get_project(name).delete_favorite(tag):
             raise HTTPException(400, f"删除失败：{tag!r}（不存在或非收藏标签）")
         return {"ok": True, "tag": tag}
+
+    @app.post("/api/projects/{name}/favorites/rename")
+    def favorite_rename(name: str, body: FavRenameIn) -> dict:
+        """收藏改名（v0.2 批D P15）：保留 fav/<时间戳> 前缀、替换/追加尾标；指向旧 tag 的 commit。"""
+        r = st().get_project(name).rename_favorite(body.tag, body.name)
+        if not r.get("ok"):
+            raise HTTPException(400, r.get("error") or "改名失败")
+        return r
 
     @app.get("/api/projects/{name}/agent-actions")
     def agent_actions(name: str, limit: int = 60) -> dict:

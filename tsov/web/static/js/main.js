@@ -685,8 +685,11 @@ function boot() {
   let favPick = null;
   async function doFavorite() {
     if (!store.project) { setError('先打开一个工程'); return; }
+    let label = '';
+    try { label = (window.prompt('收藏命名（可留空 = 默认）：', '') || '').trim(); } catch (e) { label = ''; }
+    /* v0.2 批D（P15）：留空/取消 = 原行为（不带尾标） */
     try {
-      const r = await api.favorite(store.project);
+      const r = await api.favorite(store.project, label || null);
       toast('已收藏 ' + r.tag + '（git tag，可随时恢复）');
     } catch (e) { setError(e.message); }
   }
@@ -725,7 +728,13 @@ function boot() {
             openFavDlg();
           } catch (e) { setError(e.message); }
         });
-        it.appendChild(src); it.appendChild(tg); it.appendChild(inf); it.appendChild(del);
+        /* v0.2 批D（P15）：行内改名 ✎（Enter 确认 / Esc 取消；冲突/非法 → 报错并还原） */
+        const ren = document.createElement('button');
+        ren.className = 'fav-ren';
+        ren.textContent = '✎';
+        ren.title = '重命名该收藏（保留时间戳前缀，替换/追加尾标）';
+        ren.addEventListener('click', (ev2) => { ev2.stopPropagation(); startFavRename(it, f); });
+        it.appendChild(src); it.appendChild(tg); it.appendChild(inf); it.appendChild(ren); it.appendChild(del);
         it.addEventListener('click', () => {
           favPick = f.tag;
           for (const x of Array.from(list.children)) x.classList.toggle('picked', x === it);
@@ -739,6 +748,34 @@ function boot() {
       err.textContent = '读取失败：' + e.message;
       list.appendChild(err);
     }
+  }
+  /* v0.2 批D（P15）：行内改名——编辑框（Enter 确认 / Esc 取消） */
+  function startFavRename(row, f) {
+    if (row.querySelector('.fav-edit')) return;
+    const cur = String(f.tag).replace(/^fav\//, '');
+    const edit = document.createElement('input');
+    edit.className = 'fav-edit';
+    edit.placeholder = '新名（中英文/数字/-/_，≤32）';
+    edit.title = '当前：fav/' + cur;
+    edit.value = cur.split('-').slice(2).join('-').replace(/-(auto|time)$/, '');
+    row.innerHTML = '';
+    row.appendChild(edit);
+    edit.focus();
+    edit.addEventListener('click', (ev2) => ev2.stopPropagation());
+    edit.addEventListener('keydown', async (e) => {
+      if (e.key === 'Escape') { openFavDlg(); return; }
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      try {
+        await api.renameFavorite(store.project, f.tag, edit.value.trim());
+        toast('已重命名收藏');
+        openFavDlg();
+        bus.dispatch('state');   /* 回滚下拉同源刷新 */
+      } catch (err) {
+        setError('改名失败：' + err.message);
+        openFavDlg();
+      }
+    });
   }
   $('fav-cancel').addEventListener('click', () => { dlgFav.hidden = true; });
   $('fav-restore').addEventListener('click', async () => {
