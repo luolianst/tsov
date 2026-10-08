@@ -925,10 +925,18 @@ export function init(rollCanvas) {
         return;
       }
     }
-    /* M-V8 E5：工具手势分发（仅单轨卷帘视图；智能指针走原逻辑） */
+    /* M-V8 E5：工具手势分发（仅单轨卷帘视图；智能指针走原逻辑）
+       v0.2 批C 后段（P1 闸门修正）：范围工具下点住「已在选区」的音符（无修饰键）→ 放行到智能路径
+       做整体拖动；此前一切按下都变成新框选，选区拖不动（框选后须切回智能才可拖） */
     if (store.viewMode === 'single' && (store.tool || 'smart') !== 'smart') {
-      onToolDown(e, store.tool);
-      return;
+      const selHit = (store.tool === 'range' && !e.ctrlKey && !e.shiftKey)
+        ? hitNote(e.offsetX, e.offsetY) : null;
+      const curSel = store.selection;
+      const picksSel = !!(selHit && curSel && curSel.track === selHit.track && curSel.indices.includes(selHit.index));
+      if (!picksSel) {
+        onToolDown(e, store.tool);
+        return;
+      }
     }
     /* v0.2 C2：区域路由 —— 不可编辑区（自适配概览/道副区/音频）不吃音符手势 */
     const r = regionTrack(e.offsetX, e.offsetY);

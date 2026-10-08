@@ -957,10 +957,11 @@ function boot() {
   /* M-V3：标注模式——选区操作挂起为 annotation（随下条对话发送，不发即时请求）
      同（音+动作）重复点击 = 在已挂起值上继续累加（♯+1 点两次 = +2）；删除去重 */
   const ANN_LABELS = { 'pitch-1': '♭−1', 'pitch+1': '♯+1', 'oct-1': '−8', 'oct+1': '+8', 'vel-': '力度−', 'vel+': '力度+', 'delete': '删除' };
-  function pendingBase(index, action) {
+  function pendingBase(index, action, track) {
     let v = null;
     for (const it of store.pendingAnnotations) {
-      if (it.ann.index === index && it.ann.action === action) v = it.ann.value;
+      /* v0.2 批C 后段（P40）：累加口径含轨（同编号不同轨的标注互不串扰） */
+      if (it.ann.index === index && it.ann.action === action && (it.ann.track || 0) === (track || 0)) v = it.ann.value;
     }
     return v;
   }
@@ -973,17 +974,17 @@ function boot() {
       if (!n) continue;
       if (op === 'pitch-1' || op === 'pitch+1' || op === 'oct-1' || op === 'oct+1') {
         const d = op === 'pitch-1' ? -1 : op === 'pitch+1' ? 1 : op === 'oct-1' ? -8 : 8;
-        const base = pendingBase(i, 'pitch');
+        const base = pendingBase(i, 'pitch', sel.track);
         const cur = (base === null) ? n.pitch_midi : base;
-        out.push({ index: i, action: 'pitch', value: Math.max(0, Math.min(127, cur + d)) });
+        out.push({ index: i, track: sel.track, action: 'pitch', value: Math.max(0, Math.min(127, cur + d)) });
       } else if (op === 'vel-' || op === 'vel+') {
         const d = op === 'vel-' ? -0.1 : 0.1;
-        const base = pendingBase(i, 'velocity');
+        const base = pendingBase(i, 'velocity', sel.track);
         const cur = (base === null) ? n.velocity : base;
-        out.push({ index: i, action: 'velocity', value: Math.round(Math.max(0, Math.min(1, cur + d)) * 100) / 100 });
+        out.push({ index: i, track: sel.track, action: 'velocity', value: Math.round(Math.max(0, Math.min(1, cur + d)) * 100) / 100 });
       } else if (op === 'delete') {
-        const dup = store.pendingAnnotations.some((it) => it.ann.index === i && it.ann.action === 'delete');
-        if (!dup) out.push({ index: i, action: 'delete' });
+        const dup = store.pendingAnnotations.some((it) => it.ann.index === i && it.ann.action === 'delete' && (it.ann.track || 0) === (sel.track || 0));
+        if (!dup) out.push({ index: i, track: sel.track, action: 'delete' });
       }
     }
     if (op === 'delete') out.sort((a, b) => b.index - a.index);   // 删除从后往前（index 不漂移）
@@ -1000,8 +1001,8 @@ function boot() {
       const anns = makeAnnotations(op, store.selection);
       if (!anns) { setError('先点选音符'); return; }
       if (!anns.length) { toast('已存在相同标注（未重复挂起）'); return; }
-      const keys = new Set(anns.map((a) => a.index + '|' + a.action));
-      const kept = store.pendingAnnotations.filter((it) => !keys.has(it.ann.index + '|' + it.ann.action));
+      const keys = new Set(anns.map((a) => (a.track || 0) + '|' + a.index + '|' + a.action));
+      const kept = store.pendingAnnotations.filter((it) => !keys.has((it.ann.track || 0) + '|' + it.ann.index + '|' + it.ann.action));
       setAnnotations(kept.concat(anns.map((a) => ({ ann: a, label: ANN_LABELS[op] || op }))));
       toast('已挂起 ' + anns.length + ' 条标注（' + (ANN_LABELS[op] || op) + '），随下条对话发送');
       return;

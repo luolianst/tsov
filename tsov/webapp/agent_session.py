@@ -382,6 +382,32 @@ def _retention_tick(state: WebState, project_name: str, *, agent_turns: int = 0)
     ps.save()
 
 
+def _apply_annotation_groups(score, annotations):
+    """按「挂起轨」分组确定性应用人工标注（v0.2 批C 后段 P40）。
+
+    返回 (new_score, summaries, error)：error 非空 = 拒绝整条（new_score 不采用）。
+    旧数据无 track 键 → 归 0 轨（向后兼容）；多轨混挂逐轨串行应用（顺序 = 轨号升序）。
+    """
+    from ..analysis.edit import edit_score as _edit_annotations
+
+    groups: dict[int, list[dict]] = {}
+    for a in annotations or []:
+        try:
+            t = int(a.get("track")) if a.get("track") is not None else 0
+        except (TypeError, ValueError):
+            t = 0
+        groups.setdefault(t, []).append({k: v for k, v in a.items() if k != "track"})
+    work = score
+    summaries: list[str] = []
+    for t in sorted(groups):
+        res = _edit_annotations(work, annotations=groups[t], llm=False, track=t)
+        if res.error:
+            return work, summaries, res.error
+        work = res.new_score
+        summaries.extend(res.diff_summary[:6])
+    return work, summaries, ""
+
+
 def _run_agent_session(state: WebState, project_name: str, task: str, session_id: str, base_rev: str = "HEAD",
                        annotations: list[dict] | None = None, selection: dict | None = None,
                        user_actions: list[str] | None = None) -> None:
@@ -410,21 +436,20 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
     ann_note = ""
     if annotations:
         try:
-            from ..analysis.edit import edit_score as _edit_annotations
-
-            ann_result = _edit_annotations(proj.score, annotations=annotations, llm=False)
-            if ann_result.error:
+            # v0.2 批C 后段（P40）：按「挂起轨」分组应用（旧数据无 track → 0 轨，向后兼容）
+            work_score, ann_summaries, ann_error = _apply_annotation_groups(proj.score, annotations)
+            if ann_error:
                 bus.publish(project_name, "agent_error",
-                            {"session_id": session_id, "error": f"人工标注非法（拒绝）：{ann_result.error}"})
+                            {"session_id": session_id, "error": f"人工标注非法（拒绝）：{ann_error}"})
                 state.agent_lock.release()
                 return
-            adopted = proj.apply_score(ann_result.new_score, f"人工标注（{len(annotations)} 条）")
+            adopted = proj.apply_score(work_score, f"人工标注（{len(annotations)} 条）")
             if adopted["ok"]:
                 bus.publish(project_name, "diff_applied", {**adopted["diff"], "commit": adopted["commit"], "seq": adopted.get("seq")})
                 bus.publish(project_name, "state_updated", project_state(proj))
                 ann_note = (
                     f"- 用户人工标注已确定性应用（{adopted['diff']['summary']}，快照 #{adopted.get('seq')}）："
-                    + "；".join(ann_result.diff_summary[:6])
+                    + "；".join(ann_summaries[:6])
                     + "\n  这些是用户精确指定的修改：请在结果中保留、不得回退\n"
                 )
         except Exception as e:  # noqa: BLE001 标注应用异常 → 拒绝消息（不泄漏锁）

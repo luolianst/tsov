@@ -170,10 +170,12 @@
       <button class="tool-btn" data-tool="eraser" title="橡皮：拖刷删除（划过即删，可撤销）">🧽 橡皮</button>
       <span class="tl-sep"></span>
       <label class="tl-ck" title="写谱吸附：新建 / 移动 / 微推按网格对齐"><input type="checkbox" id="tl-snap"> 吸附</label>
-      <select id="tl-grid" title="网格：吸附 / 微推步进 / 量化共用（1/4 · 1/8 · 1/16）">
+      <select id="tl-grid" title="网格：吸附 / 微推步进 / 量化共用（1/4 · 1/8 · 1/16 · 三连 8T/16T）">
         <option value="4">1/4</option>
         <option value="8">1/8</option>
         <option value="16" selected>1/16</option>
+        <option value="8T">1/8T 三连</option>
+        <option value="16T">1/16T 三连</option>
       </select>
       <label class="tl-ck" title="Swing：量化到后半格的音符再顺延 0~100% 半格">Swing <input id="tl-swing" type="number" min="0" max="100" step="5" value="0">%</label>
       <button id="tl-quant" title="量化：选区（无选中 = 整轨）对齐网格 + Swing">量化选区</button>

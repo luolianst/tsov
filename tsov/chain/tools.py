@@ -235,7 +235,10 @@ TOOLS: dict[str, dict] = {
         "desc": {"zh": "音符对齐节拍网格（网格跟随 BPM；强度=全吸/半拉）",
                  "en": "Quantize notes to beat grid"},
         "params": {
-            "grid": {"type": "select", "default": 16, "options": [4, 8, 16, 32],
+            "grid": {"type": "select", "default": 16,
+                     "options": [4, 8, 16, 32,
+                                 {"value": 3, "label": {"zh": "1/8 三连", "en": "1/8 triplet"}},
+                                 {"value": 6, "label": {"zh": "1/16 三连", "en": "1/16 triplet"}}],
                      "label": {"zh": "网格", "en": "Grid"}},
             "strength": {"type": "number", "default": 1.0, "min": 0.0, "max": 1.0,
                          "step": 0.05, "label": {"zh": "强度", "en": "Strength"}},

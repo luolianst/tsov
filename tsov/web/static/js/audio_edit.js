@@ -32,7 +32,8 @@ export function r6(x) { return Math.round(Number(x) * 1e6) / 1e6; }
 /* v0.2 批C 前段（R2 地基件）：时间↔x 几何改用共享 geom.js（行为一字不差） */
 
 export function fileDur(rel) {
-  const pv = peaksGet(rel);
+  /* v0.2 批C 后段（C9）：按当前缩放档取峰值（精度不足自动升档重取） */
+  const pv = peaksGet(rel, store.view.pxPerSec);
   return pv && pv.seconds ? pv.seconds : null;
 }
 
@@ -190,7 +191,7 @@ export function drawClipBlocks(ctx, o) {
     ctx.globalAlpha = o.inDrag ? 0.30 : (isSel ? 0.26 : (o.dim ? 0.10 : 0.16));
     ctx.fillRect(x0, o.yTop, w, o.hh);
     ctx.globalAlpha = 1;
-    const pv = peaksGet(c.file);
+    const pv = peaksGet(c.file, store.view.pxPerSec);   /* v0.2 批C 后段（C9）：随缩放选桶数档 */
     if (g.srcSpan != null && g.dur && pv && pv.max && pv.max.length) {
       /* 波形：源区间 [src_offset, +srcSpan) 映射到块内像素（min/max 竖线） */
       const mid = o.yTop + o.hh / 2;

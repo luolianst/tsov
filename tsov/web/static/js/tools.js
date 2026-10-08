@@ -23,13 +23,22 @@ let autoChk = null, autoSel = null;   // M-V8 E5 段2：自动化 lane 开关/�
 let altTemp = false;          // 按住 Alt = 临时剪刀
 let prevTool = 'smart';
 
-/* 网格口径：1/4=1 拍 · 1/8=1/2 拍 · 1/16=1/4 拍
-   gridFrac = 拍比例（吸附用）；gridNum = 命令层 grid（cell=beat/grid → 1/4:1 · 1/8:2 · 1/16:4） */
-function gridDen() { return gridSel ? (Number(gridSel.value) || 16) : 16; }
-function gridFrac() { return 4 / gridDen(); }
-function gridNum() { return gridDen() / 4; }
-function gridStepSec() { return (60 / tempo()) * gridFrac(); }
-function gridLabel() { return '1/' + gridDen(); }
+/* 网格口径：1/4=1 拍 · 1/8=1/2 拍 · 1/16=1/4 拍；三连音 8T=1/3 拍 · 16T=1/6 拍
+   gridFrac = 拍比例（吸附/微推用）；gridNum = 命令层 grid（cell=beat/grid →
+   1/4:1 · 1/8:2 · 1/16:4 · 8T:3 · 16T:6；命令层任意正整数原生支持，零改动）
+   浮点：1/3、1/6 拍的秒换算统一 round 6 位 */
+const GRID_MAP = {
+  '4': { frac: 1, num: 1 },
+  '8': { frac: 0.5, num: 2 },
+  '16': { frac: 0.25, num: 4 },
+  '8T': { frac: 1 / 3, num: 3 },
+  '16T': { frac: 1 / 6, num: 6 },
+};
+function gridSpec() { return GRID_MAP[gridSel ? String(gridSel.value) : '16'] || GRID_MAP['16']; }
+function gridFrac() { return gridSpec().frac; }
+function gridNum() { return gridSpec().num; }
+function gridStepSec() { return Math.round((60 / tempo()) * gridFrac() * 1e6) / 1e6; }
+function gridLabel() { return gridSel ? String(gridSel.value) : '16'; }
 
 function isInput(t) {
   if (!t) return false;

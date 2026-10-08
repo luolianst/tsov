@@ -194,8 +194,14 @@ function renderStep(s, idx) {
       ctl = document.createElement('select');
       for (const opt of (spec.options || [])) {
         const o = document.createElement('option');
-        o.value = String(opt);
-        o.textContent = String(opt);
+        /* v0.2 批C 后段（C7）：选项支持 {value,label} 对象（additive——纯数字/字符串照旧） */
+        if (opt && typeof opt === 'object') {
+          o.value = String(opt.value);
+          o.textContent = String((opt.label && (opt.label.zh || opt.label.en)) || opt.value);
+        } else {
+          o.value = String(opt);
+          o.textContent = String(opt);
+        }
         ctl.appendChild(o);
       }
       ctl.value = String(s.params[key] != null ? s.params[key] : spec.default);

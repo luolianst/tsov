@@ -567,3 +567,31 @@ def test_chain_apply_rest_dual_tracks(env, monkeypatch):
         assert u.status_code == 200
     proj = _proj(env)
     assert [t.name for t in proj.score.tracks] == ["melody", src_name]
+
+def test_quantize_tool_triplet_grid(tmp_path):
+    """v0.2 批C 后段（C7）：三连音网格 grid=3/6（cell = 拍/3、拍/6；命令层/工具层原生支持）。"""
+    proj_root = tmp_path / "proj"
+    run_dir = proj_root / "chain" / "r1"
+    run_dir.mkdir(parents=True)
+    src = proj_root / "audio" / "in.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"x")
+    voice = {"bpm": 120.0, "notes": [
+        {"start": 0.17, "end": 0.33, "pitch_midi": 60, "pitch_hz": 261.6, "deviation_cents": 0.0},
+        {"start": 0.51, "end": 0.68, "pitch_midi": 62, "pitch_hz": 293.7, "deviation_cents": 0.0},
+    ]}
+    (run_dir / "03-voice.json").write_text(json.dumps(voice), encoding="utf-8")
+    ctx = _ctx(proj_root, run_dir, src, "quantize", {"grid": 3, "strength": 1.0},
+               prev=run_dir / "03-voice.json")
+    out = get_tool("quantize")["run"](ctx)
+    q = json.loads((run_dir / out["artifact"]).read_text(encoding="utf-8"))
+    cell = (60.0 / 120.0) / 3.0                      # 1/8 三连 = 1/3 拍 = 0.1666667s
+    assert out["grid"] == 3
+    assert q[0]["start"] == pytest.approx(cell, abs=1e-6)        # 0.17 → 1/3 拍
+    assert q[1]["start"] == pytest.approx(3 * cell, abs=1e-6)    # 0.51 → 1 拍（3 格）
+    ctx6 = _ctx(proj_root, run_dir, src, "quantize", {"grid": 6, "strength": 1.0},
+                prev=run_dir / "03-voice.json")
+    out6 = get_tool("quantize")["run"](ctx6)
+    q6 = json.loads((run_dir / out6["artifact"]).read_text(encoding="utf-8"))
+    cell6 = (60.0 / 120.0) / 6.0                     # 1/16 三连 = 1/6 拍
+    assert q6[0]["start"] == pytest.approx(2 * cell6, abs=1e-6)  # 0.17 → 2/6 拍
