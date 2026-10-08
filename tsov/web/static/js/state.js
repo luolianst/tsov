@@ -55,6 +55,7 @@ export const store = {
   selFolder: '',               // 左栏选中文件夹（M 键作用域 + 高亮）
   collapsedFolders: new Set(), // 折叠的文件夹（lane 列表分组行）
   selBookmark: -1,             // 选中书签下标（score.bookmarks 索引；-1 = 无）
+  collapsedLanes: new Set(),   // v0.2 C2（F4）：轨树道列表折叠的轨（Set<trackIndex>）
 
   /* M-V8 E5：编辑工具集（工具态 / 剪贴板 / 时间区间） */
   tool: 'smart',               // smart 智能指针 | range 范围 | scissors 剪刀 | glue 胶水 | eraser 橡皮
@@ -227,10 +228,11 @@ export function setRange(r) {
   bus.dispatch('tool');
 }
 
-/* M-V8 E5 段2：自动化 lane 开关/参数（视图态，不进谱；数据写走命令层 set_automation） */
+/* M-V8 E5 段2 / v0.2 C2：自动化道栈开关与选中道（视图态，不进谱；数据写走命令层 set_automation）。
+   param = 选中道 param（v0.2 C2 起为任意道 key；缺失 → 回 'volume' 兜底）。 */
 export function setAutoLane(partial) {
   Object.assign(store.autoLane, partial || {});
-  if (!['volume', 'pan', 'both'].includes(store.autoLane.param)) store.autoLane.param = 'volume';
+  if (!store.autoLane.param || typeof store.autoLane.param !== 'string') store.autoLane.param = 'volume';
   bus.dispatch('auto');
 }
 
@@ -345,10 +347,10 @@ export function setSingleTrack(ti) {
 
 /* ---------------- v0.2 批C2（工作台 v2）：副区 / 焦点 / 手势族 ops ---------------- */
 
-/** 该轨的道列表（只读规范形）：已物化取 lanes；缺省派生自 automation dict（存量同构）。 */
+/** 该轨的道列表（只读规范形）：已管理（数组，含空列表=全失活）以此为准；未管理（null）派生自 automation dict。 */
 export function trackLanes(tr) {
   if (!tr) return [];
-  if (Array.isArray(tr.lanes) && tr.lanes.length) {
+  if (Array.isArray(tr.lanes)) {
     return tr.lanes.map((l) => ({ id: l.id || l.param, param: l.param, label: l.name || paramLabel(l.param) }));
   }
   const a = tr.automation || {};
@@ -378,6 +380,17 @@ export function setPartner(ti) {
   const raw = store.partner;
   if (raw && raw.kind === 'track' && raw.ti === t) store.partner = null;   /* 再点同一轨 = 撤下（比原始 partner，partnerOf 为归一化形） */
   else store.partner = { kind: 'track', ti: t };
+  bus.dispatch('viewmode');
+}
+
+/** 道副区（单轨）：轨 ti 的道 param 入副区 / 再设同参撤下。 */
+export function setPartnerLane(ti, param) {
+  const t = Math.max(0, ti | 0);
+  const p = String(param || '');
+  if (store.viewMode !== 'single' || !p) return;
+  const raw = store.partner;
+  if (raw && raw.kind === 'lane' && raw.ti === t && raw.param === p) store.partner = null;
+  else store.partner = { kind: 'lane', ti: t, param: p };
   bus.dispatch('viewmode');
 }
 
@@ -434,6 +447,15 @@ export function setSplitSameAxis(on) {
 export function setSplitRatio(r) {
   store.splitRatio = Math.max(0.15, Math.min(0.85, Number(r) || 0.5));
   bus.dispatch('view');
+}
+
+/** 道快照（__tsovState.lanes 用；CDP 断言面）：单轨主轨的道列表。 */
+export function lanesState() {
+  const single = store.viewMode === 'single';
+  const tr = single && store.score ? store.score.tracks[store.singleTrack] : null;
+  if (!tr) return null;
+  const ls = trackLanes(tr);
+  return { ti: store.singleTrack, count: ls.length, params: ls.map((l) => l.param) };
 }
 
 /** 工作台快照（__tsovState.single 用；CDP 断言面）。 */
@@ -649,6 +671,7 @@ export function snapshot() {
     laneRows: store.laneRows || null,   /* UI 修正轮3.2：左栏行布局表（文件夹行/折叠对齐观测） */
     split: splitState(),   /* M-V8 E3 段1：单轨分屏快照（CDP 断言用） */
     single: singleState(),   /* v0.2 批C2（工作台 v2）：{main, partner, focus, sameAxis}（CDP 断言用） */
+    lanes: lanesState(),   /* v0.2 C2（F4）：单轨主轨道列表 {ti, count, params[]}（CDP 断言用） */
     /* M-V8 E5 段2：自动化道 / 电平表快照（CDP 断言用）；v0.2 批C 前段：+ range（注册表快照同源） */
     automation: {
       open: store.autoLane.open,

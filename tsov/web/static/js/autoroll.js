@@ -1,19 +1,19 @@
-/* autoroll.js —— 自动化道装配（单轨视图底部子道；v0.2 批C 前段：收敛为 lane_render.js 的第一消费例）。
-   全泛化（设计件 D2=A）：渲染/命中/拖拽/提交 = 通用道组件（lane_render.js）；
-   本文件只负责：道定义（音量/声像 → descriptor）、宿主容器装配、显示条件、命令层落盘。
+/* autoroll.js —— 自动化道栈装配（单轨视图底部子道；v0.2 批C 前段让位 lane_render.js；
+   v0.2 批C2（F4）：消费「该轨**全部道、按树序**」渲染堆叠条——道 = Track.lanes（未管理时派生
+   automation 现存键，旧工程同构）；不再固定 volume/pan 双道。#tl-auto 开关与下拉 = 道选择（定位）。
    数据走命令层 set_automation（/batch，ADR-0017 同一动作路径）；
    交互：点空白=加点 ｜ 拖点=移动 ｜ 双击点 / 右键点=删除（每笔一个命令、可撤销）。
    显示：线性折线（与引擎 host/mix.py::_curve 的 np.interp 语义一致：段外取端点值）。 */
 
 import { bus } from './events.js';
 import { api } from './api.js';
-import { store, setError, toast, refTag, paramRange, paramLabel } from './state.js';
+import { store, setError, toast, refTag, paramRange, paramLabel, trackLanes } from './state.js';
 import { createLane } from './lane_render.js';
 
-/* 道定义：title/bottomTag = 画布内标签（与历史 autoroll 一字不差） */
+/* 历史画布内标签（与既有视觉一字不差）；其他道走注册表标签/范围。 */
 const DEFS = {
-  volume: { id: 'volume', title: '音量(0~200%)', bottomTag: '0%' },
-  pan:    { id: 'pan',    title: '声像(L~R)',    bottomTag: 'L' },
+  volume: { title: '音量(0~200%)', bottomTag: '0%' },
+  pan:    { title: '声像(L~R)',    bottomTag: 'L' },
 };
 
 let host = null;
@@ -24,15 +24,15 @@ function owner() {
   return store.score && ti >= 0 && store.score.tracks[ti] ? { ti, track: store.score.tracks[ti] } : null;
 }
 
-/* 当前应开的道（'both' = 音量+声像双道堆叠——框架泛化演示） */
+/* 当前应开的道（v0.2 C2：该轨全部道、按树序——trackLanes 规范形） */
 function activeIds() {
-  const p = store.autoLane.param;
-  if (p === 'both') return ['volume', 'pan'];
-  return [p === 'pan' ? 'pan' : 'volume'];
+  const o = owner();
+  if (!o) return [];
+  return trackLanes(o.track).map((l) => l.param);
 }
 
 function descriptorOf(id) {
-  const def = DEFS[id];
+  const def = DEFS[id] || { title: paramLabel(id), bottomTag: String(paramRange(id)[0]) };
   return {
     id,
     title: def.title,
@@ -66,7 +66,7 @@ async function commit(id, pts, label) {
   } catch (e) { setError(e.message); }
 }
 
-/* ---- 宿主装配（逐道 canvas 堆叠） ---- */
+/* ---- 宿主装配（逐道 canvas 堆叠；无道 → 空态引导） ---- */
 
 function show() {
   return store.viewMode === 'single' && store.autoLane.open && !!owner();
@@ -76,15 +76,26 @@ function reconcile() {
   if (!host) return;
   const ids = activeIds();
   const cur = mounted.map((m) => m.id);
-  if (cur.length === ids.length && cur.every((v, i) => v === ids[i])) { drawAll(); return; }
+  const same = cur.length === ids.length && cur.every((v, i) => v === ids[i]);
+  const hasEmptyEl = !!host.querySelector('.alane-empty');
+  const wantEmpty = ids.length === 0;
+  if (same && hasEmptyEl === wantEmpty) { drawAll(); return; }
   for (const m of mounted) m.lane.destroy();
   mounted = [];
   host.innerHTML = '';
+  if (!ids.length) {
+    const d = document.createElement('div');
+    d.className = 'alane-empty';
+    d.textContent = '尚无自动化道——左栏右键轨道「添加自动化道…」（或点轨行道展开钮 ▸）';
+    host.appendChild(d);
+    return;
+  }
   for (const id of ids) {
     const row = document.createElement('div');
     row.className = 'alane';
+    row.dataset.param = id;
     const cv = document.createElement('canvas');
-    cv.title = '自动化道：点=加点 ｜ 拖=移动 ｜ 双击/右键点=删除（每笔一个命令、可撤销）';
+    cv.title = '道「' + paramLabel(id) + '」：点=加点 ｜ 拖=移动 ｜ 双击/右键点=删除（每笔一个命令、可撤销）';
     row.appendChild(cv);
     host.appendChild(row);
     const lane = createLane(descriptorOf(id));
@@ -95,7 +106,8 @@ function reconcile() {
 
 function drawAll() {
   if (!host) return;
-  host.hidden = !show();
+  const lanePartner = !!(store.partner && store.partner.kind === 'lane');
+  host.hidden = !show() || lanePartner;   /* v0.2 C2：道副区激活时道栈让位（同区空间冲突） */
   if (host.hidden) return;
   for (const m of mounted) m.lane.draw();
 }
@@ -105,7 +117,7 @@ export function init(el) {
   if (!host) return;
   reconcile();
   for (const topic of ['state', 'auto', 'view', 'viewmode', 'playhead', 'batch_applied', 'meta']) {
-    bus.on(topic, () => { if (topic === 'auto') reconcile(); drawAll(); });
+    bus.on(topic, () => { reconcile(); drawAll(); });
   }
   drawAll();
 }

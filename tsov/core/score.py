@@ -1,6 +1,11 @@
 """核心数据模型：Effect / Instrument / Track / Score / KeyCandidate（ADR-0005，schema 冻结）。
 
 字段名与类型严格按 ADR-0005；追加的 to_dict / from_dict 仅为 JSON 落盘镜像服务。
+
+v0.2 批C2 增补（additive + 缺省旧数据同构）：
+- Track.lanes（道实体）——见 docs/v0.2-单轨工作台与道系统v2-设计-2026-10-08.md §3.1；
+  None=未管理（旧数据同构）/ []=已管理且清空 / 列表=显式道（求值范围以此为准）。
+- combine 口：道条目预留 combine="absolute" 缺省字段（他档不实现）。
 """
 
 from __future__ import annotations
@@ -130,12 +135,18 @@ class Track:
     audio: dict = field(default_factory=dict)  # 音频轨元数据：{"file": "audio/xxx.flac", "offset": 0.0}（工程内相对路径；第一刀单 clip/轨）
     # ---- M-V8 E5：Send 支路（additive；post-fader × 量 → 汇入目标总线缓冲）----
     sends: dict = field(default_factory=dict)  # {总线名: 量 0~1}；缺省空 dict = 无支路（旧数据完全同构）
+    # ---- v0.2 批C2（工作台 v2）：自动化道实体（additive；设计件 §3.1）----
+    # None = 未显式管理（求值/UI 派生隐含道 = 现状等价）；[] = 已管理且清空（道全部失活）；
+    # [{"id": "l1", "param": "volume"[, "name"]}, …] = 显式道列表（求值范围以此为准；
+    # 曲线数据仍保留在 automation dict 中，非破坏——移除道即失活，重绑即复活）
+    lanes: list[dict] | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict) -> "Track":
+        lanes_raw = data.get("lanes")
         return cls(
             name=data["name"],
             instrument=Instrument.from_dict(data["instrument"]),
@@ -149,6 +160,7 @@ class Track:
             kind=str(data.get("kind") or "midi"),
             audio=dict(data.get("audio") or {}),
             sends={str(k): float(v) for k, v in (data.get("sends") or {}).items()},
+            lanes=([dict(x) for x in lanes_raw if isinstance(x, dict)] if isinstance(lanes_raw, list) else None),
         )
 
     def audio_clips(self) -> list[dict]:

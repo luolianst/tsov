@@ -58,6 +58,29 @@ def _pan_matrix(lg, rg) -> np.ndarray:
     return np.array([lg, rg], dtype=np.float32)
 
 
+# ---- v0.2 批C2（F5）求值分域（设计件 §3.2）----
+# mix 域 = **乘性级联**：底值 × 各层曲线值（v1 层序：轨道道 ×〔F6 接入文件夹层〕…）；
+# perf 域（预留：CC/弯音等）= 按 kind 合并表——缺省 "last_continue"（末值延续，= Replace2 语义）；
+#   "average" / "modulation" 留表位（P46，本批不实现）。
+# combine 口：道结构预留 combine="absolute" 缺省字段（他档不实现，本批不动数据）。
+PERF_MERGE_DEFAULT = "last_continue"
+PERF_MERGE_TABLE: dict[str, str] = {}   # kind → merge（空表 = 全部走缺省 last_continue）
+
+
+def active_automation(tr) -> dict:
+    """automation 求值范围（v0.2 批C2 求值分域）：
+
+    - lanes 未管理（None）→ automation 全部键（旧工程同构）；
+    - lanes 已物化（含空列表）→ 只取 lanes 内 param 的曲线（空列表 = 无道 = 全部失活；
+      曲线数据仍保留在 dict，非破坏——重新绑回即复活）。"""
+    auto = getattr(tr, "automation", None) or {}
+    lanes = getattr(tr, "lanes", None)
+    if lanes is None:
+        return dict(auto)
+    allowed = {str(l.get("param")) for l in lanes if isinstance(l, dict)}
+    return {k: v for k, v in auto.items() if str(k) in allowed}
+
+
 def render_track_source(ht, samplerate: int, n_frames: int) -> np.ndarray:
     """轨内**前段**（可缓存，ADR-0018）：音源合成 → 效果链（居中双单声道输入）。
 
@@ -80,9 +103,13 @@ def render_track_source(ht, samplerate: int, n_frames: int) -> np.ndarray:
 
 
 def apply_track_mix(stereo: np.ndarray, tr, times: np.ndarray) -> np.ndarray:
-    """轨内**后段**（混音期实时层，永不失效）：推子 → automation 音量 → 声像（平衡律）。"""
+    """轨内**后段**（混音期实时层，永不失效）：推子 → automation 音量 → 声像（平衡律）。
+
+    v0.2 批C2（F5 求值分域）：automation 求值范围 = `active_automation(tr)`——lanes 已物化时
+    只取道内参数（未管理 = 全键，旧工程同构）；mix 域为**乘性级联**（各层曲线逐帧相乘；
+    v1 层 = 轨道道 ×〔F6 接文件夹层〕）。无自动化数据时逐位与旧口径一致。"""
     out = stereo * _num(getattr(tr.instrument, "volume", 1.0), 1.0)
-    auto = getattr(tr, "automation", None) or {}
+    auto = active_automation(tr)
     vol_curve = _curve(auto.get("volume"), times)
     if vol_curve is not None:
         out = out * vol_curve[:, None].astype(np.float32)

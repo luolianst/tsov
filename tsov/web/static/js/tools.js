@@ -5,7 +5,7 @@
 
 import { bus } from './events.js';
 import { api } from './api.js';
-import { store, setTool, setClipboard, setSnap, setError, refTag, toast, tempo, beatsPerBar, scoreBounds, timeSig, setAutoLane } from './state.js';
+import { store, setTool, setClipboard, setSnap, setError, refTag, toast, tempo, beatsPerBar, scoreBounds, timeSig, setAutoLane, trackLanes } from './state.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -62,9 +62,9 @@ export function init(els) {
   if (autoChk) autoChk.addEventListener('change', () => setAutoLane({ open: autoChk.checked }));
   if (autoSel) autoSel.addEventListener('change', () => setAutoLane({ param: autoSel.value }));
   bus.on('auto', renderBar);
-  /* v0.2 批C 前段（R2 地基件）：选项由注册表快照生成（缺快照回退内置；含「音量+声像」双道） */
+  /* v0.2 C2（F4）：道集/视图变化 → 刷新下拉（选项集不变时零重建） */
   fillAutoParamOptions();
-  bus.on('meta', fillAutoParamOptions);
+  for (const topic of ['meta', 'viewmode', 'batch_applied', 'state']) bus.on(topic, fillAutoParamOptions);
 
   document.addEventListener('keydown', onKeydown);
   document.addEventListener('keyup', (e) => {
@@ -96,29 +96,38 @@ export function renderBar() {
   if (autoSel) autoSel.value = store.autoLane.param;
 }
 
-/* v0.2 批C 前段（R2 地基件）：自动化参数选项（注册表快照 → 选项；缺快照回退内置两项）。
-   「音量+声像」= 双道堆叠（通用道框架演示；value=both 由 setAutoLane 校验放行）。 */
+/* v0.2 C2（F4）：自动化下拉 = 当前轨**道选择**（trackLanes 树序；「定位道」语义）。
+   无道 → 禁用态「（无道）」；仅当选项集变化时重建（state 高频安全）。 */
 function fillAutoParamOptions() {
   if (!autoSel) return;
-  const specs = (store.metaParams && store.metaParams.automation) || null;
-  const items = specs
-    ? Object.keys(specs).filter((k) => specs[k] && specs[k].automatable !== false).map((k) => [k, specs[k].label || k])
-    : [['volume', '音量'], ['pan', '声像']];
-  const keep = store.autoLane.param;
-  autoSel.innerHTML = '';
-  for (const [id, label] of items) {
-    const o = document.createElement('option');
-    o.value = id;
-    o.textContent = label;
-    autoSel.appendChild(o);
+  const single = store.viewMode === 'single';
+  const tr = single && store.score ? store.score.tracks[store.singleTrack] : null;
+  const lanes = tr ? trackLanes(tr) : [];
+  const want = lanes.map((l) => [l.param, l.label]);
+  const cur = Array.from(autoSel.options).map((o) => [o.value, o.textContent]);
+  const same = want.length === cur.length && want.every(([v, t], i) => cur[i][0] === v && cur[i][1] === t);
+  if (!same) {
+    autoSel.innerHTML = '';
+    if (!want.length) {
+      const o = document.createElement('option');
+      o.value = '';
+      o.textContent = '（无道）';
+      autoSel.appendChild(o);
+      autoSel.disabled = true;
+    } else {
+      autoSel.disabled = false;
+      for (const [v, t] of want) {
+        const o = document.createElement('option');
+        o.value = v;
+        o.textContent = t;
+        autoSel.appendChild(o);
+      }
+    }
   }
-  if (items.some(([id]) => id === 'volume') && items.some(([id]) => id === 'pan')) {
-    const o2 = document.createElement('option');
-    o2.value = 'both';
-    o2.textContent = '音量+声像';
-    autoSel.appendChild(o2);
+  if (lanes.length) {
+    const keep = store.autoLane.param;
+    autoSel.value = lanes.some((l) => l.param === keep) ? keep : lanes[0].param;
   }
-  autoSel.value = ['volume', 'pan', 'both'].includes(keep) ? keep : 'volume';
 }
 
 /* ---- 状态栏 chips：44.1kHz · 16-bit · 拍号 · 调号 · 时长 ---- */

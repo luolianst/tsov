@@ -2,7 +2,7 @@
 
 import { bus } from './events.js';
 import { api } from './api.js';
-import { KEYS_W, store, tempo, beatsPerBar, segments, scoreBounds, setSelection, setError, partnerOf, setPartner, swapMainPartner, toggleRef, refTag, bookmarks, folderTracks, setLoop, setLoopOn, setSelBookmark, setSelFolder, toggleFolderCollapse, setSingleTrack } from './state.js';
+import { KEYS_W, store, tempo, beatsPerBar, segments, scoreBounds, setSelection, setError, partnerOf, setPartner, swapMainPartner, toggleRef, setPartnerLane, setAutoLane, trackLanes, refTag, bookmarks, folderTracks, setLoop, setLoopOn, setSelBookmark, setSelFolder, toggleFolderCollapse, setSingleTrack } from './state.js';
 import { pal, trackColors } from './theme.js';
 import { seekTo } from './playback.js';
 import { xOf, tOf } from './geom.js';   /* v0.2 批C 前段（R2 地基件）：时间↔x 几何共享 */
@@ -181,6 +181,7 @@ function renderTracks(el) {
   store.score.tracks.forEach((tr, ti) => {
     const isMain = single && store.singleTrack === ti;
     const isPartner = !!(po && po.kind !== 'lane' && po.ti === ti);
+    const lanesOfTr = trackLanes(tr);   /* v0.2 C2（F4）：道列表（树序；道栈渲染在 autoroll） */
     /* M-V8 E1：文件夹分组行（折叠 ▸/▾ + 单击选中为 M 键作用域） */
     if (tr.folder && firstOf[tr.folder] === ti) {
       const hd = document.createElement('div');
@@ -231,6 +232,19 @@ function renderTracks(el) {
       renderTracks(el);
       bus.dispatch('view');
     };
+    /* v0.2 C2（F4）：道列表展开钮（有道的轨才显示） */
+    if (lanesOfTr.length) {
+      const lt = document.createElement('button');
+      lt.className = 'lane-toggle';
+      lt.textContent = store.collapsedLanes.has(ti) ? '▸' : '▾';
+      lt.title = '展开/折叠自动化道（' + lanesOfTr.length + '）';
+      lt.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (store.collapsedLanes.has(ti)) store.collapsedLanes.delete(ti); else store.collapsedLanes.add(ti);
+        renderTracks(el);
+      });
+      top.appendChild(lt);
+    }
     top.appendChild(name);
     const m = document.createElement('button');
     m.className = 'ms' + (tr.mute ? ' on' : '');
@@ -312,6 +326,10 @@ function renderTracks(el) {
           },
         },
         {
+          label: '添加自动化道…',
+          fn: () => openBmMenu(e.clientX, e.clientY, lanePickerItems(ti, tr)),
+        },
+        {
           label: '重命名…',
           fn: () => {
             const v0 = prompt('新轨道名：', tr.name || '');
@@ -352,9 +370,112 @@ function renderTracks(el) {
       ]);
     });
     el.appendChild(item);
+    /* v0.2 C2（F4）：道行（轨树展开；单击=定位道栈 / 双击=入副区 / 右键=删除道） */
+    if (lanesOfTr.length && !store.collapsedLanes.has(ti)) {
+      for (const l of lanesOfTr) {
+        const lr = document.createElement('div');
+        lr.className = 'lane-row';
+        lr.dataset.param = l.param;
+        lr.textContent = '⤷ ' + l.label;
+        lr.title = '道「' + l.label + '」｜ 单击：定位道栈 ｜ 双击：入副区（全宽曲线）｜ 右键：删除道';
+        lr.addEventListener('click', (e) => { e.stopPropagation(); locateLane(ti, l.param); });
+        lr.addEventListener('dblclick', (e) => { e.stopPropagation(); enterLanePartner(ti, l.param); });
+        lr.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openBmMenu(e.clientX, e.clientY, [{ label: '删除道「' + l.label + '」（曲线数据保留）', fn: () => removeLaneOp(ti, l) }]);
+        });
+        el.appendChild(lr);
+      }
+    }
   });
   el.appendChild(trackAddBtn());
   bus.dispatch('rowlayout');   /* UI 修正轮3.2：行布局就绪 → main.js 收集推给卷帘（文件夹行/折叠路径对齐） */
+}
+
+/* ---- v0.2 C2（F3/F4）：道实体 UI——选择器 / 增删 / 定位 / 入副区 ---- */
+
+async function addLaneOp(ti, param, label) {
+  if (!store.project) return;
+  try {
+    const r = await api.postBatch(store.project, '添加自动化道',
+      [{ op: 'add_lane', track: ti, value: { param } }],
+      '添加自动化道：' + (label || param));
+    if (r.applied) {
+      bus.dispatch('toast', '已建道：' + (label || param) + '（下方道栈可编辑）');
+      if (store.collapsedLanes.has(ti)) store.collapsedLanes.delete(ti);
+      setAutoLane({ open: true, param });
+    } else setError('被拒：' + (r.errors || []).join('；'));
+  } catch (e) { setError(e.message); }
+}
+
+async function removeLaneOp(ti, lane) {
+  if (!store.project) return;
+  try {
+    const r = await api.postBatch(store.project, '移除自动化道',
+      [{ op: 'remove_lane', track: ti, value: { id: lane.id || lane.param } }],
+      '移除自动化道：' + lane.label);
+    if (r.applied) bus.dispatch('toast', '已移除道「' + lane.label + '」（曲线数据保留，可 Ctrl+Z 撤销）');
+    else setError('被拒：' + (r.errors || []).join('；'));
+  } catch (e) { setError(e.message); }
+}
+
+/* 两段式选择器（闸门 G2）：mix 域可绑 + 效果链动态参数列出置灰占位（随 P26 批开放）。 */
+function lanePickerItems(ti, tr) {
+  const specs = (store.metaParams && store.metaParams.automation) || null;
+  const auto = specs
+    ? Object.keys(specs).filter((k) => specs[k] && specs[k].automatable !== false)
+    : ['volume', 'pan'];
+  const bound = new Set(trackLanes(tr).map((l) => l.param));
+  const items = [];
+  for (const k of auto) {
+    const lab = (specs && specs[k] && specs[k].label) || (k === 'volume' ? '音量' : k === 'pan' ? '声像' : k);
+    if (bound.has(k)) items.push({ label: '✓ ' + lab + '（已建道）', disabled: true });
+    else items.push({ label: '＋ ' + lab, fn: () => addLaneOp(ti, k, lab) });
+  }
+  const fxSpecs = (store.metaParams && store.metaParams.effects) || {};
+  const chain = ((tr.instrument || {}).effects) || [];
+  let nFx = 0;
+  for (const fx of chain) {
+    const kind = String((fx && fx.type) || '');
+    const table = fxSpecs[kind] || {};
+    for (const pk of Object.keys(table)) {
+      nFx += 1;
+      items.push({ label: '⛔ ' + pk + ' · ' + kind + '（随 P26 批开放）', disabled: true });
+    }
+  }
+  if (!nFx) items.push({ label: '⛔ 效果参数（随 P26 批开放）', disabled: true });
+  return items;
+}
+
+/* 道行单击：定位道栈（必要时先进入该轨单轨态） + 闪烁。 */
+function locateLane(ti, param) {
+  if (store.viewMode !== 'single' || store.singleTrack !== ti) {
+    if (onEnter) onEnter(ti);
+  }
+  setAutoLane({ open: true, param });
+  setTimeout(() => {
+    const row = document.querySelector('#autolanes .alane[data-param="' + param + '"]');
+    if (row) {
+      row.scrollIntoView({ block: 'nearest' });
+      row.classList.add('alane-flash');
+      setTimeout(() => row.classList.remove('alane-flash'), 700);
+    }
+  }, 140);
+}
+
+/* 道行双击：入副区（全宽曲线编辑）；再双击同参撤下。 */
+function enterLanePartner(ti, param) {
+  const go = () => {
+    setPartnerLane(ti, param);
+    const raw = store.partner;
+    const on = !!(raw && raw.kind === 'lane' && raw.ti === ti && raw.param === param);
+    bus.dispatch('toast', on ? '道「' + param + '」入副区' : '已撤下道副区');
+  };
+  if (store.viewMode !== 'single' || store.singleTrack !== ti) {
+    if (onEnter) onEnter(ti);
+    setTimeout(go, 90);
+  } else go();
 }
 
 /* ======================================================================
@@ -487,7 +608,12 @@ export function openBmMenu(x, y, items) {
   for (const it of items) {
     const b = document.createElement('button');
     b.textContent = it.label;
-    b.addEventListener('click', () => { closeBmMenu(); it.fn(); });
+    if (it.disabled) {
+      b.classList.add('bm-disabled');   /* 置灰占位（效果参数——随 P26 批开放） */
+      b.disabled = true;
+    } else {
+      b.addEventListener('click', () => { closeBmMenu(); it.fn(); });
+    }
     menuEl.appendChild(b);
   }
   document.body.appendChild(menuEl);

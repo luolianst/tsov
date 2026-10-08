@@ -31,6 +31,9 @@
 - M-V8 E6 段1 增补（2026-09-27 音频编辑刀）：set_audio_clips（音频轨 clip 组整替——切片/修剪/
   移动/淡入淡出/伸缩统一原子落点；src_len=null 表示到文件尾；stretch∈[0.5,2]；fade_in/fade_out 秒）
   / split_audio_clip（时间线 at 秒切分指定 clip：左段保原 id、右段新 id、接缝零间隙）——与 UI 手势同径
+- v0.2 批C2 增补（2026-10-08 工作台 v2）：add_lane / remove_lane（Track.lanes 显式道实体：
+  param∈注册表 automation 域、重复绑定拒绝；首次显式管理把 automation 现存键**全量物化**；
+  移除即失活——曲线数据保留在 dict，非破坏）
 - 事务协议：EditBatch.apply(score) 在深拷贝上逐条执行——非法命令被拒绝并记录 error，
   合法命令全部生效（部分应用 + 错误清单）；apply 前不脏原 Score。
 - 该命令层 = M-V2 起 agent 工具与 Web UI 共用的编辑通道（docs/05 接口契约）。
@@ -171,6 +174,11 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
         return _apply_set_notes(score, track, c)
     if c.op == "set_track_folder":
         return _apply_set_track_folder(score, track, c)
+    # v0.2 批C2（工作台 v2）：自动化道实体（additive；首次显式管理时物化迁移）
+    if c.op == "add_lane":
+        return _apply_add_lane(score, track, c)
+    if c.op == "remove_lane":
+        return _apply_remove_lane(score, track, c)
     if c.op == "set_instrument":
         return _apply_set_instrument(track, c)
     if c.op == "add_effect":
@@ -1013,6 +1021,74 @@ def _audio_default_name(rel: str) -> str:
     if len(parts) == 2 and re.fullmatch(r"[0-9a-f]{8}", parts[1]):
         stem = parts[0]
     return (stem or "音频")[:64]
+
+
+def _lane_next_id(lanes: list) -> str:
+    used = {str(l.get("id") or "") for l in lanes if isinstance(l, dict)}
+    k = 1
+    while f"l{k}" in used:
+        k += 1
+    return f"l{k}"
+
+
+def _materialize_lanes(track: Track) -> None:
+    """首次显式管理（加/删道）时把 automation dict 现存键**全量**物化为 lanes（volume/pan 在前）。
+
+    此后以 lanes 为准（求值范围 = lanes；曲线数据保留在 dict 中——「移除即失活」天然非破坏）。"""
+    if getattr(track, "lanes", None) is not None:
+        return
+    auto = track.automation or {}
+    keys = sorted(auto.keys(), key=lambda k: (0 if k == "volume" else 1 if k == "pan" else 2, str(k)))
+    track.lanes = [{"id": f"l{i}", "param": str(k)} for i, k in enumerate(keys, start=1)]
+
+
+def _apply_add_lane(score: Score, track: Track, c: EditCommand) -> str | None:
+    """value = {param, name?}；param 须 ∈ 注册表 automation 域（automatable）；重复绑定拒绝。
+
+    首次显式管理 → 先物化现存键（见 _materialize_lanes）；被拒时零副作用（不提前物化）。"""
+    v = c.value if isinstance(c.value, dict) else {}
+    param = str(v.get("param") or "").strip()
+    allowed = [s.id for s in automation_specs().values() if s.automatable]
+    if param not in allowed:
+        return f"add_lane 未知/不可自动化参数：{param!r}（可用：{allowed}）"
+    lanes = track.lanes
+    if lanes is None:
+        if param in {str(k) for k in (track.automation or {})}:
+            return f"add_lane 重复绑定：{param!r} 已在道中"
+        _materialize_lanes(track)
+        lanes = track.lanes or []
+    if any(str(l.get("param")) == param for l in lanes):
+        return f"add_lane 重复绑定：{param!r} 已在道中"
+    entry: dict = {"id": _lane_next_id(lanes), "param": param}
+    name = str(v.get("name") or "").strip()
+    if name:
+        entry["name"] = name[:64]
+    lanes.append(entry)
+    track.lanes = lanes
+    return None
+
+
+def _apply_remove_lane(score: Score, track: Track, c: EditCommand) -> str | None:
+    """value = {id} 或 {param}；从 lanes 移除即**失活**（曲线数据保留在 automation dict，非破坏）。
+
+    未找到时零副作用（不提前物化）。"""
+    v = c.value if isinstance(c.value, dict) else {}
+    key = str(v.get("id") or v.get("param") or "").strip()
+    if not key:
+        return "remove_lane 需 {id} 或 {param}"
+    lanes = track.lanes
+    if lanes is None:
+        # 物化形态预览（不落盘）：未管理时 id 与 param 同词（volume/pan/…），命中才物化
+        if not any(str(k) == key for k in (track.automation or {})):
+            return f"remove_lane 未找到道：{key!r}"
+        _materialize_lanes(track)
+        lanes = track.lanes or []
+    for i, l in enumerate(lanes):
+        if isinstance(l, dict) and (str(l.get("id")) == key or str(l.get("param")) == key):
+            del lanes[i]
+            track.lanes = lanes
+            return None
+    return f"remove_lane 未找到道：{key!r}"
 
 
 def _apply_add_track(score: Score, c: EditCommand) -> str | None:

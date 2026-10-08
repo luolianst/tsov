@@ -2,7 +2,7 @@
 
 import { bus } from './events.js';
 import { api } from './api.js';
-import { KEYS_W, store, scoreBounds, tempo, beatsPerBar, setSelection, setView, refTag, setRange, splitPartner, setSplitRatio, setSingleTrack, fitViewTrack, audioClipsOf, setFocus, swapMainPartner } from './state.js';
+import { KEYS_W, store, scoreBounds, tempo, beatsPerBar, setSelection, setView, refTag, setRange, splitPartner, setSplitRatio, setSingleTrack, fitViewTrack, audioClipsOf, setFocus, swapMainPartner, paramRange, paramLabel } from './state.js';
 import { peaksGet } from './peaks.js';   /* E3 段1：单轨波形峰值（公共管线） */
 import { xOf, tOf } from './geom.js';   /* v0.2 批C 前段（R2 地基件）：时间↔x 几何共享 */
 import { clipHitBand, beginAudioDrag, updateAudioDrag, finishAudioDrag, isDragging, dragPreviewOf, selOf, clearSel, splitClipAt, drawClipBlocks } from './audio_edit.js';   /* E6 段1 补：音频 clip 手势引擎（单轨/总谱共用） */
@@ -249,6 +249,7 @@ const TOOL_CURSORS = { range: 'crosshair', scissors: 'col-resize', glue: 'pointe
 let splitOn = false;      // 当前是否分屏（跨类型叠加对象存在）
 let splitH1 = 0;          // 上区高（像素；非分屏 = 全高）
 let splitDrag = false;    // 分界线拖拽中
+let laneDrag = null;      // v0.2 C2：道副区拖点 {idx, t0, v0, t, v}
 let previewAudioEl = null;   // 波形区双击试听单例
 
 /* E6 段1 补：单轨音频块的带内缩（与 drawRegion 同口径） */
@@ -403,14 +404,141 @@ function drawSplitTail(single, sp) {
   drawPlayheadLine();
 }
 
-/* v0.2 C2：道副区占位渲染（曲线全宽；段2 F4 接 lane_render 全道渲染） */
+/* v0.2 C2（F4）：道副区全宽渲染 + 编辑（点=加点 / 拖=移动 / 双击/右键=删点；同 lane_render 口径） */
+const LANE_PAD = 14;
+
+function laneCtx() {
+  if (store.viewMode !== 'single' || !store.score) return null;
+  const sp = splitPartner();
+  if (!sp || sp.kind !== 'lane') return null;
+  const tr = store.score.tracks[sp.ti];
+  if (!tr) return null;
+  const pts = (((tr.automation || {})[sp.param]) || [])
+    .map((q) => [Number(q[0]), Number(q[1])])
+    .filter((q) => Number.isFinite(q[0]) && Number.isFinite(q[1]))
+    .sort((a, b) => a[0] - b[0]);
+  const [lo, hi] = paramRange(sp.param);
+  return { ti: sp.ti, param: sp.param, tr, pts, lo, hi, y0: splitH1, h: H - splitH1 };
+}
+
+function laneYOf(v, c) { return c.y0 + LANE_PAD + (c.hi - v) / (c.hi - c.lo || 1) * (c.h - LANE_PAD * 2); }
+function laneVOf(y, c) {
+  const raw = c.hi - (y - c.y0 - LANE_PAD) / Math.max(1, c.h - LANE_PAD * 2) * (c.hi - c.lo);
+  return Math.min(c.hi, Math.max(c.lo, raw));
+}
+function laneNearest(x, y, c) {
+  let best = -1, bd = 8;
+  c.pts.forEach((pt, i) => {
+    const d = Math.hypot(xOf(pt[0]) - x, laneYOf(pt[1], c) - y);
+    if (d <= bd) { bd = d; best = i; }
+  });
+  return best;
+}
+async function laneCommit(c, pts, label) {
+  if (!store.project) return;
+  const r6 = (x) => Math.round(x * 1e6) / 1e6;
+  const r4 = (x) => Math.round(x * 1e4) / 1e4;
+  try {
+    const r = await api.postBatch(store.project, '自动化 ' + label,
+      [{ op: 'set_automation', track: c.ti, value: { param: c.param, points: pts.map((q) => [r6(q[0]), r4(q[1])]) } }],
+      '自动化（' + paramLabel(c.param) + '）：' + label);
+    if (r.applied) bus.dispatch('toast', '已' + label + ' ' + refTag(r));
+    else showStatus('被拒：' + (r.errors || []).join('；'), true);
+  } catch (e) { showStatus(e.message, true); }
+}
+function laneMouseDown(e) {
+  const c = laneCtx();
+  if (!c || e.offsetY <= splitH1 + 6) return;
+  const idx = laneNearest(e.offsetX, e.offsetY, c);
+  if (idx >= 0) {
+    laneDrag = { idx, t0: c.pts[idx][0], v0: c.pts[idx][1], t: c.pts[idx][0], v: c.pts[idx][1] };
+    draw();
+    return;
+  }
+  const t = Math.max(0, tOf(e.offsetX));
+  const v = laneVOf(e.offsetY, c);
+  const next = c.pts.map((q) => [q[0], q[1]]);
+  next.push([Math.round(t * 1e6) / 1e6, Math.round(v * 1e4) / 1e4]);
+  next.sort((a, b) => a[0] - b[0]);
+  laneCommit(c, next, '加点');
+}
+function commitLaneDrag() {
+  const d = laneDrag;
+  laneDrag = null;
+  const c = laneCtx();
+  if (!d || !c) { draw(); return; }
+  const moved = Math.abs(d.t - d.t0) > 1e-9 || Math.abs(d.v - d.v0) > 1e-9;
+  if (moved && d.idx >= 0 && d.idx < c.pts.length) {
+    const next = c.pts.map((q, i) => (i === d.idx ? [d.t, d.v] : [q[0], q[1]]));
+    next.sort((a, b) => a[0] - b[0]);
+    laneCommit(c, next, '移动');
+  } else draw();
+}
+function laneRemoveAt(e) {
+  const c = laneCtx();
+  if (!c) return;
+  const idx = laneNearest(e.offsetX, e.offsetY, c);
+  if (idx >= 0) laneCommit(c, c.pts.filter((_, i) => i !== idx), '删除');
+}
+
 function drawLaneRegion(y0, h, sp) {
+  const c = laneCtx();
+  if (!c || c.h <= 8) return;
   const p = pal();
+  /* 底色 + 标题槽 */
   ctx.fillStyle = p.rollBg;
   ctx.fillRect(KEYS_W, y0, Math.max(0, W - KEYS_W), h);
+  ctx.fillStyle = p.panelBg;
+  ctx.fillRect(0, y0, KEYS_W, h);
   ctx.fillStyle = p.laneLabel;
   ctx.font = '11px "Microsoft YaHei UI","PingFang SC",system-ui,sans-serif';
-  ctx.fillText('道：' + (sp.param || ''), 8, y0 + 15);
+  const nm = paramLabel(c.param) + '（曲线）';
+  ctx.fillText(nm.length > 8 ? nm.slice(0, 8) + '…' : nm, 8, y0 + 15);
+  ctx.fillText('副区', 8, Math.min(y0 + 30, y0 + h - 6));
+  /* 值域参考行（5 等分；与 lane_render / mix _curve 语义一致） */
+  ctx.strokeStyle = p.beatLine;
+  for (let i = 0; i <= 4; i++) {
+    const v = c.lo + (c.hi - c.lo) * i / 4;
+    const yy = Math.round(laneYOf(v, c)) + 0.5;
+    ctx.beginPath(); ctx.moveTo(KEYS_W, yy); ctx.lineTo(W, yy); ctx.stroke();
+  }
+  /* 折线（段外端点延伸，与引擎 np.interp 一致） */
+  if (c.pts.length) {
+    const t0 = Math.max(0, tOf(KEYS_W));
+    const t1 = tOf(W);
+    ctx.strokeStyle = p.selStroke;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(xOf(t0), laneYOf(c.pts[0][1], c));
+    for (const q of c.pts) {
+      const x = xOf(q[0]);
+      if (x < KEYS_W - 8) continue;
+      if (x > W + 8) break;
+      ctx.lineTo(x, laneYOf(q[1], c));
+    }
+    ctx.lineTo(xOf(t1), laneYOf(c.pts[c.pts.length - 1][1], c));
+    ctx.stroke();
+    ctx.lineWidth = 1;
+    c.pts.forEach((q, i) => {
+      const x = xOf(q[0]);
+      if (x < KEYS_W - 6 || x > W + 6) return;
+      const y = laneYOf(q[1], c);
+      const active = laneDrag && laneDrag.idx === i;
+      ctx.fillStyle = active ? p.playhead : p.selStroke;
+      ctx.beginPath();
+      ctx.arc(x, y, active ? 5 : 4, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  } else {
+    ctx.fillStyle = p.laneLabel;
+    ctx.fillText('（无点：单击加点）', KEYS_W + 8, y0 + Math.round(h / 2));
+  }
+  /* 拖拽幽灵 */
+  if (laneDrag) {
+    const x = xOf(laneDrag.t), y = laneYOf(laneDrag.v, c);
+    ctx.strokeStyle = p.playhead;
+    ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.stroke();
+  }
 }
 
 function drawSplitBar() {
@@ -797,6 +925,8 @@ export function init(rollCanvas) {
     }
     /* v0.2 C2：区域路由 —— 不可编辑区（自适配概览/道副区/音频）不吃音符手势 */
     const r = regionTrack(e.offsetX, e.offsetY);
+    /* v0.2 C2：道副区手势（点=加点 / 拖=移动；双击/右键=删除——set_automation 同源） */
+    if (r && r.lower && r.lane) { laneMouseDown(e); return; }
     if (store.viewMode === 'single' && (!r || !r.edit)) return;
     if (r) setFocus(r.ti);
     const hit = hitNote(e.offsetX, e.offsetY);
@@ -862,6 +992,15 @@ export function init(rollCanvas) {
     /* E3 段1：分界线拖拽（比例跟随；松手重适配） */
     if (splitDrag) {
       setSplitRatio(e.offsetY / Math.max(1, H));
+      return;
+    }
+    if (laneDrag) {
+      const c = laneCtx();
+      if (c) {
+        laneDrag.t = Math.max(0, tOf(e.offsetX));
+        laneDrag.v = laneVOf(e.offsetY, c);
+        draw();
+      }
       return;
     }
     /* M-V8 E5：工具拖拽（范围框选 / 橡皮拖刷） */
@@ -930,9 +1069,10 @@ export function init(rollCanvas) {
       canvas.style.cursor = TOOL_CURSORS[store.tool] || 'default';
       return;
     }
-    /* v0.2 C2：不可编辑区（自适配概览/道副区）→ 默认光标 */
+    /* v0.2 C2：不可编辑区（自适配概览）→ 默认光标；道副区 → crosshair */
     if (store.viewMode === 'single') {
       const rr = regionTrack(e.offsetX, e.offsetY);
+      if (rr && rr.lane) { canvas.style.cursor = 'crosshair'; return; }
       if (!rr || !rr.edit) { canvas.style.cursor = 'default'; return; }
     }
     const hit = hitNote(e.offsetX, e.offsetY);
@@ -947,6 +1087,7 @@ export function init(rollCanvas) {
   document.addEventListener('mouseup', (e) => {
     if (splitDrag) { splitDrag = false; refitSplit(); }   /* E3 段1：分界线松手 → 按新上区高重适配 */
     if (isDragging()) finishAudioDrag();   /* E6 段1 补：单轨音频手势（松手提交） */
+    if (laneDrag) commitLaneDrag();        /* v0.2 C2：道副区拖点（松手提交） */
     if (drag) submitDrag();
     if (rangeDrag) commitRange();
     if (eraserDrag) commitErase();
@@ -957,6 +1098,7 @@ export function init(rollCanvas) {
   canvas.addEventListener('dblclick', async (e) => {
     if (splitOn && e.offsetY > splitH1) {
       const rr = regionTrack(e.offsetX, e.offsetY);
+      if (rr && rr.lane) { laneRemoveAt(e); return; }   /* v0.2 C2：道副区双击=删点 */
       const lhit = (rr && rr.edit) ? hitNote(e.offsetX, e.offsetY) : null;
       if (lhit && store.project) {
         const n = store.score.tracks[lhit.track].notes[lhit.index];
@@ -977,6 +1119,11 @@ export function init(rollCanvas) {
   /* M-V3：右键菜单（删除 / ±半音 / ±八度） */
   canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();
+    /* v0.2 C2：道副区右键=删点（同 lane_render 口径） */
+    if (splitOn && e.offsetY > splitH1) {
+      const rr = regionTrack(e.offsetX, e.offsetY);
+      if (rr && rr.lane) { laneRemoveAt(e); return; }
+    }
     const hit = hitNote(e.offsetX, e.offsetY);
     if (!hit || !store.project) { closeNoteMenu(); return; }
     openNoteMenu(hit, e.clientX, e.clientY);
