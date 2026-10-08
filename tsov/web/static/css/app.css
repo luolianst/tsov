@@ -1168,10 +1168,23 @@ body.chat-resizing { cursor: col-resize; user-select: none; }
 
 /* ============ v0.2 批D（P6）：对象引用（拖入对话栏）============ */
 
-#chat-input-row.drag-over { outline: 2px dashed var(--accent); outline-offset: -2px; }
+#chat-input-row.drag-over { outline: 2px dashed var(--accent); outline-offset: -2px; background: var(--accent-soft); }
 #chat-log.drag-over { outline: 2px dashed var(--accent); outline-offset: -4px; }
 .ref-chip .ref-x { cursor: pointer; margin-left: 5px; opacity: 0.7; font-size: 10px; }
 .ref-chip .ref-x:hover { opacity: 1; }
+/* 挂载卡片（10-08 修复补充）：拖入成功 = 卡片上墙（Hermes 式：图标 + 名称/元信息 + ✕） */
+#ref-queue { display: flex; flex-direction: column; gap: 5px; padding: 6px 10px; border-top: 1px dashed var(--border); }
+#ref-queue[hidden] { display: none; }
+#ref-queue .rq-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); }
+#ref-queue .rq-head button { font-size: var(--fs-xs); padding: 1px 6px; }
+#ref-queue-list { display: flex; flex-direction: column; gap: 4px; max-height: 168px; overflow-y: auto; }
+.ref-card { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev); }
+.ref-card .ref-ico { flex: none; width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; background: var(--bg-sunken); font-size: 13px; }
+.ref-card .ref-main { flex: 1; min-width: 0; }
+.ref-card .ref-title { font-size: var(--fs-sm); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ref-card .ref-sub { font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); }
+.ref-card .ref-x { flex: none; cursor: pointer; margin-left: 2px; opacity: 0.6; font-size: 11px; }
+.ref-card .ref-x:hover { opacity: 1; color: var(--accent); }
 #ref-drag { cursor: grab; }
 #ref-drag:active { cursor: grabbing; }
 .fx-slot.dragging { opacity: 0.45; }

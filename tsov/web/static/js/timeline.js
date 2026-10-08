@@ -365,6 +365,7 @@ function renderTracks(el) {
         const k = dragKinds(e);
         if (!k.track && !k.folder) return;
         e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
         clearDropMarks(el);
         if (k.folder) {
           const r = hd.getBoundingClientRect();
@@ -402,7 +403,9 @@ function renderTracks(el) {
         e.dataTransfer.setData('application/x-tsov-track', String(ti));
         /* v0.2 批D（P6）：同一拖拽兼作对象引用源（拖到对话栏 = 轨道引用） */
         e.dataTransfer.setData('application/x-tsov-ref', JSON.stringify({ kind: 'track', track: ti }));
-        e.dataTransfer.effectAllowed = 'move';
+        /* 10-08 修复：本拖拽双重语义——轨列表中=排序（move）/ 拖入对话栏=引用（copy）。
+           曾设 'move' 与对话栏落点 dropEffect='copy' 不匹配 → 浏览器静默不投递 drop（真实拖拽必现）。 */
+        e.dataTransfer.effectAllowed = 'copyMove';
       } catch (err) { /* ignore */ }
       item.classList.add('dragging');
     });
@@ -411,6 +414,7 @@ function renderTracks(el) {
       const k = dragKinds(e);
       if (!k.track) return;
       e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
       clearDropMarks(el);
       const r = item.getBoundingClientRect();
       item.classList.add((e.clientY - r.top) < r.height / 2 ? 'drop-before' : 'drop-after');
@@ -616,6 +620,7 @@ function renderTracks(el) {
       const k = dragKinds(e);
       if (!k.track) return;
       e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
       el.classList.add('drop-end');
     });
     el.addEventListener('dragleave', (e) => { if (e.target === el) el.classList.remove('drop-end'); });

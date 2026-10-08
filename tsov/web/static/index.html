@@ -235,9 +235,11 @@
       <button id="btn-ann-clear" title="清空待发送标注">✕</button>
     </div>
     <div id="ref-queue" hidden>
-      <span class="muted small">对象引用：</span>
-      <span id="ref-queue-list"></span>
-      <button id="btn-ref-clear" title="清空对象引用">✕</button>
+      <div class="rq-head">
+        <span class="muted small">对象引用 · 随下条消息发送</span>
+        <button id="btn-ref-clear" title="清空对象引用">✕ 清空</button>
+      </div>
+      <div id="ref-queue-list"></div>
     </div>
     <div id="chat-input-row">
       <textarea id="chat-input" rows="1" placeholder="对乐谱说点什么…（如：改成 D 多利亚调式）｜Enter 发送 / Shift+Enter 换行"></textarea>

@@ -1130,6 +1130,43 @@ function boot() {
     } catch (e) { /* 显示态失配不致命——发送时以后端现场解析为准 */ }
     return '◈ 引用';
   }
+  /* 挂载卡片三件（图标 / 主行 / 副行）——从当前工程态尽力解析（失配不致命；发送时以后端现场解析为准） */
+  function refCardInfo(r) {
+    const sc = store.score;
+    try {
+      if (r.kind === 'track') {
+        const tr = sc && sc.tracks[r.track];
+        const prog = (tr && tr.instrument && tr.instrument.program) || '';
+        const n = tr && tr.notes ? tr.notes.length : null;
+        return { icon: '🎵', title: (tr && tr.name) || ('track ' + r.track),
+                 sub: '轨道 track[' + r.track + ']' + (n != null ? ' · ' + n + ' 音符' : '') + (prog ? ' · ' + prog : '') };
+      }
+      if (r.kind === 'notes') {
+        const tr = sc && sc.tracks[r.track];
+        const idx = r.indices || [];
+        return { icon: '♪', title: '音符 ×' + idx.length,
+                 sub: ((tr && tr.name) || ('track ' + r.track)) + ' · track[' + r.track + ']' };
+      }
+      if (r.kind === 'fx') {
+        let host = '？';
+        let fx = null;
+        if (r.scope === 'track' && sc && sc.tracks[r.track]) {
+          host = sc.tracks[r.track].name || ('track ' + r.track);
+          fx = (((sc.tracks[r.track].instrument || {}).effects) || [])[r.index];
+        } else if (r.scope === 'bus' && sc && (sc.buses || []).some((b) => b.name === r.ref)) {
+          host = r.ref;
+          fx = (((sc.buses.find((x) => x.name === r.ref) || {}).effects) || [])[r.index];
+        } else if (r.scope === 'master' && sc && sc.master) {
+          host = 'master';
+          fx = ((sc.master.effects) || [])[r.index];
+        } else if (r.scope === 'bus') {
+          host = r.ref || 'bus';
+        }
+        return { icon: '◈', title: (fx && fx.type) || 'fx', sub: '效果器 · ' + r.scope + ' · ' + host + ' · #' + r.index };
+      }
+    } catch (e) { /* ignore */ }
+    return { icon: '◈', title: '引用', sub: '' };
+  }
   function refreshRefQueue() {
     const wrap = $('ref-queue');
     const list = $('ref-queue-list');
@@ -1139,16 +1176,30 @@ function boot() {
     wrap.hidden = false;
     list.innerHTML = '';
     q.forEach((r, i) => {
-      const chip = document.createElement('span');
-      chip.className = 'ann-chip ref-chip';
-      chip.textContent = refLabel(r) + ' ';
+      /* 挂载卡片（10-08 修复补充：Hermes 式反馈——拖入必须「看得见」）。
+         ref-chip / ref-x class 保留（历史验收脚本选择器兼容） */
+      const info = refCardInfo(r);
+      const card = document.createElement('div');
+      card.className = 'ref-chip ref-card';
+      const ico = document.createElement('span');
+      ico.className = 'ref-ico';
+      ico.textContent = info.icon;
+      const main = document.createElement('div');
+      main.className = 'ref-main';
+      const ttl = document.createElement('div');
+      ttl.className = 'ref-title';
+      ttl.textContent = info.title;
+      const sub = document.createElement('div');
+      sub.className = 'ref-sub';
+      sub.textContent = info.sub;
+      main.appendChild(ttl); main.appendChild(sub);
       const x = document.createElement('span');
       x.className = 'ref-x';
       x.textContent = '✕';
       x.title = '移除该引用';
       x.addEventListener('click', () => { const arr = store.pendingRefs.slice(); arr.splice(i, 1); setRefs(arr); });
-      chip.appendChild(x);
-      list.appendChild(chip);
+      card.appendChild(ico); card.appendChild(main); card.appendChild(x);
+      list.appendChild(card);
     });
   }
   bus.on('refs', refreshRefQueue);
