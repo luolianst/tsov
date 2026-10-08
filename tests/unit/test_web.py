@@ -88,12 +88,17 @@ def test_health_and_static(env):
 
 
 def test_meta_endpoint(env):
-    """UI 批A：面板元数据（GM 音色名 / 效果类型）。"""
+    """UI 批A：面板元数据（GM 音色名 / 效果类型）。v0.2 批C 前段（R1）：+ params 注册表快照。"""
     r = env["client"].get("/api/meta")
     assert r.status_code == 200
     body = r.json()
     assert "piano" in body["programs"] and "synth_bass" in body["programs"]
     assert set(body["effect_kinds"]) >= {"reverb", "delay", "compressor", "gain"}
+    # R1 快照（additive；前端同源的唯一来源）
+    pa = body["params"]["automation"]
+    assert pa["volume"]["label"] == "音量" and pa["volume"]["hi"] == 2.0
+    assert pa["pan"]["lo"] == -1.0 and pa["pan"]["automatable"] is True
+    assert body["params"]["effects"]["reverb"]["room_size"] == [0.0, 1.0]
 
 
 def test_project_create_list_state(env):

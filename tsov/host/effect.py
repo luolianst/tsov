@@ -21,36 +21,15 @@ import abc
 import numpy as np
 
 from ..core.score import Effect
+from .params import effect_param_ranges
 
 # ------------------------------------------------------------------
 # 效果类型注册表：kind → (pedalboard 类名, 参数白名单[键 → 钳制范围/None])
+# v0.2 批C 前段（R1 地基件）：参数范围数据迁往 host/params.py（单一来源）；
+# 本别名保持既有内部引用与外部导入零改动（形状完全一致）。
 # ------------------------------------------------------------------
 
-_PARAM_RANGES: dict[str, dict[str, tuple[float, float] | None]] = {
-    "reverb": {
-        "room_size": (0.0, 1.0), "damping": (0.0, 1.0), "wet_level": (0.0, 1.0),
-        "dry_level": (0.0, 1.0), "width": (0.0, 1.0), "freeze_mode": (0.0, 1.0),
-    },
-    "delay": {"delay_seconds": (0.0, 10.0), "feedback": (0.0, 1.0), "mix": (0.0, 1.0)},
-    "compressor": {
-        "threshold_db": (-60.0, 0.0), "ratio": (1.0, 20.0),
-        "attack_ms": (0.1, 100.0), "release_ms": (5.0, 2000.0),
-    },
-    "chorus": {
-        "rate_hz": (0.0, 20.0), "depth": (0.0, 1.0), "centre_delay_ms": (0.0, 50.0),
-        "feedback": (0.0, 1.0), "mix": (0.0, 1.0),
-    },
-    "distortion": {"drive_db": (0.0, 60.0)},
-    "gain": {"gain_db": (-60.0, 24.0)},
-    "highpass": {"cutoff_frequency_hz": (10.0, 20000.0)},
-    "lowpass": {"cutoff_frequency_hz": (10.0, 20000.0)},
-    "limiter": {"threshold_db": (-60.0, 0.0), "release_ms": (0.1, 5000.0)},
-    "brickwall": {"ceiling_db": (-60.0, 0.0), "release_ms": (0.1, 5000.0)},
-    "phaser": {
-        "rate_hz": (0.0, 10.0), "depth": (0.0, 1.0), "centre_frequency_hz": (20.0, 20000.0),
-        "feedback": (0.0, 1.0), "mix": (0.0, 1.0),
-    },
-}
+_PARAM_RANGES: dict[str, dict[str, tuple[float, float] | None]] = effect_param_ranges()
 
 _PLUGIN_NAMES: dict[str, str] = {
     "reverb": "Reverb", "delay": "Delay", "compressor": "Compressor", "chorus": "Chorus",

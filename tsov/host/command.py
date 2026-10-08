@@ -49,6 +49,7 @@ from ..core.notes import Note
 from ..core.score import Bookmark, Bus, Effect, Score, Track
 from ..core.snap import snap_out_of_key
 from ..core.units import midi_to_hz
+from .params import automation_specs
 
 
 @dataclass
@@ -793,10 +794,10 @@ def _apply_remove_bus(score: Score, c: EditCommand) -> str | None:
     return None
 
 
-_AUTOMATION_PARAMS = {
-    "volume": (0.0, 2.0),
-    "pan": (-1.0, 1.0),
-}
+# v0.2 批C 前段（R1 地基件）：自动化参数域由 host/params.py 单源派生——
+# 键集/钳制/顺序（volume → pan）与历史一字不差；错误文案同源（_AUTOMATION_NAMES）。
+_AUTOMATION_PARAMS = {pid: (spec.lo, spec.hi) for pid, spec in automation_specs().items()}
+_AUTOMATION_NAMES = " / ".join(_AUTOMATION_PARAMS)
 
 
 def _apply_set_automation(score: Score, c: EditCommand) -> str | None:
@@ -825,7 +826,7 @@ def _apply_set_automation(score: Score, c: EditCommand) -> str | None:
         return f"未知 target：{target!r}（track / bus / master）"
     param = str(v.get("param") or "").strip()
     if param not in _AUTOMATION_PARAMS:
-        return f"未知 param：{param!r}（volume / pan）"
+        return f"未知 param：{param!r}（{_AUTOMATION_NAMES}）"
     raw = v.get("points")
     if raw is None:
         return "set_automation 需要 points（数组；空数组=清除）"
