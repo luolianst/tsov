@@ -34,6 +34,9 @@
 - v0.2 批C2 增补（2026-10-08 工作台 v2）：add_lane / remove_lane（Track.lanes 显式道实体：
   param∈注册表 automation 域、重复绑定拒绝；首次显式管理把 automation 现存键**全量物化**；
   移除即失活——曲线数据保留在 dict，非破坏）
+- v0.2 批C 后段增补（2026-10-08 挂道族）：白名单扩至 perf 曲线（bend / cc1 / cc11 / cc64——
+  数据走 automation 通用键，MIDI 导出转 pitch_bend / CC 事件；perf 仅支持轨道层；
+  力度 = Note.velocity 派生 bars 视图，零新 op）
 - 事务协议：EditBatch.apply(score) 在深拷贝上逐条执行——非法命令被拒绝并记录 error，
   合法命令全部生效（部分应用 + 错误清单）；apply 前不脏原 Score。
 - 该命令层 = M-V2 起 agent 工具与 Web UI 共用的编辑通道（docs/05 接口契约）。
@@ -52,7 +55,7 @@ from ..core.notes import Note
 from ..core.score import Bookmark, Bus, Effect, Score, Track
 from ..core.snap import snap_out_of_key
 from ..core.units import midi_to_hz
-from .params import automation_specs
+from .params import curve_specs
 
 
 @dataclass
@@ -805,10 +808,11 @@ def _apply_remove_bus(score: Score, c: EditCommand) -> str | None:
     return None
 
 
-# v0.2 批C 前段（R1 地基件）：自动化参数域由 host/params.py 单源派生——
-# 键集/钳制/顺序（volume → pan）与历史一字不差；错误文案同源（_AUTOMATION_NAMES）。
-_AUTOMATION_PARAMS = {pid: (spec.lo, spec.hi) for pid, spec in automation_specs().items()}
+# v0.2 批C 前段（R1 地基件）：自动化参数域由 host/params.py 单源派生——键集/钳制/顺序同源。
+# v0.2 批C 后段（挂道族）：白名单扩至曲线全族——volume / pan（mix）+ bend / cc1 / cc11 / cc64（perf）。
+_AUTOMATION_PARAMS = {pid: (spec.lo, spec.hi) for pid, spec in curve_specs().items()}
 _AUTOMATION_NAMES = " / ".join(_AUTOMATION_PARAMS)
+_AUTOMATION_DOMAINS = {pid: spec.domain for pid, spec in curve_specs().items()}
 
 
 def _apply_set_automation(score: Score, c: EditCommand) -> str | None:
@@ -838,6 +842,8 @@ def _apply_set_automation(score: Score, c: EditCommand) -> str | None:
     param = str(v.get("param") or "").strip()
     if param not in _AUTOMATION_PARAMS:
         return f"未知 param：{param!r}（{_AUTOMATION_NAMES}）"
+    if _AUTOMATION_DOMAINS.get(param) == "perf" and target != "track":
+        return f"set_automation {param} 仅支持轨道层（perf 域）"
     raw = v.get("points")
     if raw is None:
         return "set_automation 需要 points（数组；空数组=清除）"
@@ -1082,7 +1088,7 @@ def _apply_add_lane(score: Score, track: Track, c: EditCommand) -> str | None:
     首次显式管理 → 先物化现存键（见 _materialize_lanes）；被拒时零副作用（不提前物化）。"""
     v = c.value if isinstance(c.value, dict) else {}
     param = str(v.get("param") or "").strip()
-    allowed = [s.id for s in automation_specs().values() if s.automatable]
+    allowed = [s.id for s in curve_specs().values() if s.automatable]
     if param not in allowed:
         return f"add_lane 未知/不可自动化参数：{param!r}（可用：{allowed}）"
     lanes = track.lanes

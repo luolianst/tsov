@@ -15,7 +15,8 @@ const FONT = '10px "Microsoft YaHei UI","PingFang SC",system-ui,sans-serif';
 function css(sel) { return getComputedStyle(document.documentElement).getPropertyValue(sel).trim(); }
 
 export function createLane(descriptor) {
-  const lane = { canvas: null, ctx: null, W: 0, H: 0, dpr: 1, drag: null, ro: null };
+  const lane = { canvas: null, ctx: null, W: 0, H: 0, dpr: 1, drag: null, ro: null, sel: new Set(), rubber: null };
+  const isBars = descriptor.kind === 'bars';   /* v0.2 批C 后段：bars 道型（力度柱状） */
 
   function resize() {
     if (!lane.canvas) return;
@@ -59,6 +60,7 @@ export function createLane(descriptor) {
   function draw() {
     if (!lane.canvas || !lane.ctx) return;
     ensureSized();
+    if (isBars) { drawBars(); return; }   /* v0.2 批C 后段：bars 分流 */
     const ctx = lane.ctx, W = lane.W, H = lane.H;
     ctx.clearRect(0, 0, W, H);
     const [lo, hi] = descriptor.range();
@@ -128,6 +130,137 @@ export function createLane(descriptor) {
     }
   }
 
+  /* ---- v0.2 批C 后段（挂道族）：bars 道（力度柱状）——拖=设置 / 框选=批量（一事务） ---- */
+
+  function bars() { return descriptor.readBars ? descriptor.readBars() : []; }
+
+  function drawBars() {
+    const ctx = lane.ctx, W = lane.W, H = lane.H;
+    ctx.clearRect(0, 0, W, H);
+    const [lo, hi] = descriptor.range();
+    const cBg = css('--bg-elev') || '#fff';
+    const cGrid = css('--border') || '#ccc';
+    const cBar = css('--accent') || '#333';
+    const cText = css('--muted') || '#666';
+    const cHead = css('--text') || '#111';
+    ctx.fillStyle = cBg;
+    ctx.fillRect(0, 0, W, H);
+    ctx.font = FONT;
+    const rows = [0, 1, 2, 3, 4].map((i) => lo + (hi - lo) * i / 4);
+    ctx.strokeStyle = cGrid;
+    for (const v of rows) {
+      const y = Math.round(yOfV(v)) + 0.5;
+      ctx.beginPath(); ctx.moveTo(KEYS_W, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+    ctx.fillStyle = cText;
+    ctx.fillText(descriptor.title, 6, yOfV(hi) + 10);
+    ctx.fillText(descriptor.bottomTag, 6, yOfV(lo) - 3);
+    const baseY = yOfV(lo);
+    const list = bars();
+    for (let i = 0; i < list.length; i++) {
+      const b = list[i];
+      const x0 = xOf(b.t0), x1 = Math.max(x0 + 2, xOf(b.t1));
+      if (x1 < KEYS_W - 6 || x0 > W + 6) continue;
+      const v = (lane.drag && lane.drag.pending && lane.drag.pending.has(i)) ? lane.drag.pending.get(i) : b.v;
+      const y = yOfV(v);
+      const sel = lane.sel && lane.sel.has(i);
+      const act = lane.drag && lane.drag.idx === i;
+      ctx.fillStyle = act ? cHead : (sel ? cBar : cText);
+      ctx.globalAlpha = (act || sel) ? 1.0 : 0.8;
+      const bx = Math.max(KEYS_W, x0);
+      ctx.fillRect(bx, y, Math.max(2, Math.min(x1 - x0 - 1, W - bx)), Math.max(1, baseY - y));
+      ctx.globalAlpha = 1;
+    }
+    if (lane.rubber) {
+      const rx0 = lane.rubber.x0, rx1 = lane.rubber.x1;
+      ctx.strokeStyle = cBar;
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(Math.min(rx0, rx1) + 0.5, 0.5, Math.abs(rx1 - rx0), H - 1);
+      ctx.setLineDash([]);
+    }
+    const px = xOf(store.playhead);
+    if (px >= KEYS_W && px <= W) {
+      ctx.strokeStyle = cHead;
+      ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke();
+    }
+  }
+
+  function barAt(x, y) {
+    const list = bars();
+    const lo = descriptor.range()[0];
+    for (let i = list.length - 1; i >= 0; i--) {
+      const b = list[i];
+      const x0 = xOf(b.t0), x1 = Math.max(x0 + 2, xOf(b.t1));
+      if (x >= x0 - 3 && x <= x1 + 3) {
+        const yTop = yOfV(b.v), yBase = yOfV(lo);
+        if (y >= yTop - 6 && y <= yBase + 4) return i;
+      }
+    }
+    return -1;
+  }
+
+  function onDownBars(e) {
+    if (e.button !== 0) return;
+    const list = bars();
+    const idx = barAt(e.offsetX, e.offsetY);
+    if (idx >= 0) {
+      if (!lane.sel.has(idx)) lane.sel = new Set([idx]);
+      const selIdx = Array.from(lane.sel).filter((i) => i < list.length);
+      lane.drag = { idx, v: vOfY(e.offsetY), origs: selIdx.map((i) => [i, list[i].v]), pending: null };
+      draw();
+      return;
+    }
+    lane.rubber = { x0: e.offsetX, x1: e.offsetX, moved: false };
+    draw();
+  }
+
+  function onMoveBars(e) {
+    if (lane.drag) {
+      const dv = vOfY(e.offsetY) - lane.drag.v;
+      const lo = descriptor.range()[0], hi = descriptor.range()[1];
+      lane.drag.pending = new Map(lane.drag.origs.map(([i, v0]) => [i, Math.min(hi, Math.max(lo, v0 + dv))]));
+      draw();
+      return;
+    }
+    if (lane.rubber) {
+      lane.rubber.x1 = e.offsetX;
+      if (Math.abs(lane.rubber.x1 - lane.rubber.x0) > 3) lane.rubber.moved = true;
+      draw();
+    }
+  }
+
+  function onUpBars() {
+    if (lane.drag) {
+      const d = lane.drag;
+      lane.drag = null;
+      if (d.pending) {
+        const changes = [];
+        d.pending.forEach((v, i) => {
+          const orig = d.origs.find((o) => o[0] === i);
+          if (orig && Math.abs(v - orig[1]) > 1e-9) changes.push([i, v]);
+        });
+        if (changes.length) {
+          descriptor.commitBars(changes, changes.length > 1 ? ('批量设置 ' + changes.length + ' 音') : '设置力度');
+        }
+      }
+      draw();
+      return;
+    }
+    if (lane.rubber) {
+      const rb = lane.rubber;
+      lane.rubber = null;
+      if (rb.moved) {
+        const ta = tOf(Math.min(rb.x0, rb.x1)), tb = tOf(Math.max(rb.x0, rb.x1));
+        const sel = new Set();
+        bars().forEach((b, i) => { if (b.t0 >= ta - 1e-9 && b.t0 <= tb + 1e-9) sel.add(i); });
+        lane.sel = sel;
+      } else {
+        lane.sel = new Set();
+      }
+      draw();
+    }
+  }
+
   function sortedWith(pts, t, v) {
     const out = pts.map((q) => [q[0], q[1]]);
     out.push([t, v]);
@@ -144,6 +277,7 @@ export function createLane(descriptor) {
 
   function onDown(e) {
     if (e.button !== 0) return;
+    if (isBars) { onDownBars(e); return; }   /* v0.2 批C 后段：bars 分流 */
     const pts = descriptor.readPoints();
     const idx = nearest(e.offsetX, e.offsetY);
     if (idx >= 0) {
@@ -155,6 +289,7 @@ export function createLane(descriptor) {
   }
 
   function onMove(e) {
+    if (isBars) { onMoveBars(e); return; }   /* v0.2 批C 后段：bars 分流 */
     if (!lane.drag) return;
     lane.drag.t = tOfC(e.offsetX);
     lane.drag.v = vOfY(e.offsetY);
@@ -162,6 +297,7 @@ export function createLane(descriptor) {
   }
 
   function onUp() {
+    if (isBars) { onUpBars(); return; }   /* v0.2 批C 后段：bars 分流 */
     if (!lane.drag) return;
     const d = lane.drag;
     lane.drag = null;
@@ -194,8 +330,8 @@ export function createLane(descriptor) {
     lane.ro.observe(el);
     el.addEventListener('mousedown', onDown);
     el.addEventListener('mousemove', onMove);
-    el.addEventListener('dblclick', (e) => { e.preventDefault(); removeAt(e); });
-    el.addEventListener('contextmenu', (e) => { e.preventDefault(); removeAt(e); });
+    el.addEventListener('dblclick', (e) => { e.preventDefault(); if (!isBars) removeAt(e); });
+    el.addEventListener('contextmenu', (e) => { e.preventDefault(); if (!isBars) removeAt(e); });
     window.addEventListener('mouseup', onUp);
     draw();
   }

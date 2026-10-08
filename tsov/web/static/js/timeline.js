@@ -2,7 +2,7 @@
 
 import { bus } from './events.js';
 import { api } from './api.js';
-import { KEYS_W, store, tempo, beatsPerBar, segments, scoreBounds, setSelection, setError, partnerOf, setPartner, swapMainPartner, toggleRef, setPartnerLane, setAutoLane, trackLanes, refTag, bookmarks, folderTracks, setLoop, setLoopOn, setSelBookmark, setSelFolder, toggleFolderCollapse, setSingleTrack } from './state.js';
+import { KEYS_W, store, tempo, beatsPerBar, segments, scoreBounds, setSelection, setError, partnerOf, setPartner, swapMainPartner, toggleRef, setPartnerLane, setAutoLane, trackLanes, refTag, paramLabel, hasVelocityLane, toggleVelocityLane, bookmarks, folderTracks, setLoop, setLoopOn, setSelBookmark, setSelFolder, toggleFolderCollapse, setSingleTrack } from './state.js';
 import { pal, trackColors } from './theme.js';
 import { seekTo } from './playback.js';
 import { xOf, tOf } from './geom.js';   /* v0.2 批C 前段（R2 地基件）：时间↔x 几何共享 */
@@ -432,6 +432,15 @@ async function addLaneOp(ti, param, label) {
   } catch (e) { setError(e.message); }
 }
 
+/* v0.2 批C 后段（挂道族）：力度道开关（bars 伪道；视图态，不进谱）。 */
+function velocityToggle(ti) {
+  const on = toggleVelocityLane(ti);
+  if (on) {
+    setAutoLane({ open: true, param: 'velocity' });
+    bus.dispatch('toast', '已开力度道（柱状）——单轨视图道栈中编辑；再点菜单项关闭');
+  } else bus.dispatch('toast', '已关力度道');
+}
+
 async function removeLaneOp(ti, lane) {
   if (!store.project) return;
   try {
@@ -443,7 +452,7 @@ async function removeLaneOp(ti, lane) {
   } catch (e) { setError(e.message); }
 }
 
-/* 两段式选择器（闸门 G2）：mix 域可绑 + 效果链动态参数列出置灰占位（随 P26 批开放）。 */
+/* 两段式选择器（闸门 G2；v0.2 批C 后段：+ 力度伪道 + perf 曲线（弯音/CC）；效果参数置灰按 Q3 →「随效果域深化」）。 */
 function lanePickerItems(ti, tr) {
   const specs = (store.metaParams && store.metaParams.automation) || null;
   const auto = specs
@@ -452,10 +461,13 @@ function lanePickerItems(ti, tr) {
   const bound = new Set(trackLanes(tr).map((l) => l.param));
   const items = [];
   for (const k of auto) {
-    const lab = (specs && specs[k] && specs[k].label) || (k === 'volume' ? '音量' : k === 'pan' ? '声像' : k);
+    const lab = (specs && specs[k] && specs[k].label) || paramLabel(k);
     if (bound.has(k)) items.push({ label: '✓ ' + lab + '（已建道）', disabled: true });
     else items.push({ label: '＋ ' + lab, fn: () => addLaneOp(ti, k, lab) });
   }
+  /* v0.2 批C 后段：力度道（bars 伪道开关；零存储——数据 = Note.velocity） */
+  if (hasVelocityLane(ti)) items.push({ label: '✓ 力度（柱状·已开·点击关闭）', fn: () => velocityToggle(ti) });
+  else items.push({ label: '＋ 力度（柱状编辑）', fn: () => velocityToggle(ti) });
   const fxSpecs = (store.metaParams && store.metaParams.effects) || {};
   const chain = ((tr.instrument || {}).effects) || [];
   let nFx = 0;
@@ -464,10 +476,10 @@ function lanePickerItems(ti, tr) {
     const table = fxSpecs[kind] || {};
     for (const pk of Object.keys(table)) {
       nFx += 1;
-      items.push({ label: '⛔ ' + pk + ' · ' + kind + '（随 P26 批开放）', disabled: true });
+      items.push({ label: '⛔ ' + pk + ' · ' + kind + '（随效果域深化）', disabled: true });
     }
   }
-  if (!nFx) items.push({ label: '⛔ 效果参数（随 P26 批开放）', disabled: true });
+  if (!nFx) items.push({ label: '⛔ 效果参数（随效果域深化）', disabled: true });
   return items;
 }
 

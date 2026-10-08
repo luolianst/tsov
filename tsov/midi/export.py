@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import math
+
 import pretty_midi
 
 from ..core.score import Score, parse_time_signature
@@ -110,6 +112,60 @@ def midi_safe_name(name: str) -> str:
         return name.encode("utf-8").decode("latin-1")
 
 
+# ---- v0.2 批C 后段（挂道族）：perf 曲线 → MIDI 事件（断点 + 线性加密） ----
+
+_PERF_CC = {"cc1": 1, "cc11": 11, "cc64": 64}
+_PERF_STEP_V = 2.0 / 128.0        # 值变化阈值（约 2 级 CC，防事件爆量/丢包络）
+
+
+def _perf_step_t(bpm: float) -> float:
+    """相邻加密点最大间隔 = 1/32 拍（秒）。"""
+    return (60.0 / max(1.0, float(bpm or 120.0))) / 32.0
+
+
+def _densify_points(points, bpm: float) -> list[tuple[float, float]]:
+    """[[t, v], …] → 断点 + 线性加密序列（Δv ≥ 2/128 或每 1/32 拍补点；单段 ≤512 步）。"""
+    pts = [(float(p[0]), float(p[1])) for p in (points or [])
+           if p is not None and len(p) >= 2]
+    if not pts:
+        return []
+    step_t = _perf_step_t(bpm)
+    out: list[tuple[float, float]] = [pts[0]]
+    for (t0, v0), (t1, v1) in zip(pts, pts[1:]):
+        dt, dv = t1 - t0, v1 - v0
+        if dt <= 0:
+            out.append((t1, v1))
+            continue
+        n = max(1, int(math.ceil(abs(dv) / _PERF_STEP_V)), int(math.ceil(dt / step_t)))
+        n = min(n, 512)
+        for k in range(1, n):
+            out.append((t0 + dt * k / n, v0 + dv * k / n))
+        out.append((t1, v1))
+    return out
+
+
+def _append_perf_events(inst, track, bpm: float) -> None:
+    """该轨 automation 的 perf 键（bend / cc1 / cc11 / cc64）→ pretty_midi 事件（按时间排序追加）。
+
+    - bend：v ∈ [-1, 1] → pitch_bend ∈ [-8192, 8191]（SoundFont 默认弯音程 ±2 半音）
+    - CC：v ∈ [0, 1] → 0..127
+    - 无 perf 数据 = 零事件（旧工程同构，逐字回归）
+    """
+    auto = getattr(track, "automation", None) or {}
+    ev: list[tuple[float, str, int]] = []
+    for t, v in _densify_points(auto.get("bend"), bpm):
+        ev.append((t, "bend", max(-8192, min(8191, int(round(v * 8192))))))
+    for key, cc in _PERF_CC.items():
+        for t, v in _densify_points(auto.get(key), bpm):
+            ev.append((t, f"cc{cc}", max(0, min(127, int(round(v * 127))))))
+    ev.sort(key=lambda x: x[0])
+    for t, kind, val in ev:
+        if kind == "bend":
+            inst.pitch_bends.append(pretty_midi.PitchBend(int(val), float(t)))
+        else:
+            inst.control_changes.append(pretty_midi.ControlChange(int(kind[2:]), int(val), float(t)))
+
+
 def score_to_midi(score: Score, output_path: str) -> str:
     """Score → MIDI 文件，返回产物路径。
 
@@ -134,6 +190,7 @@ def score_to_midi(score: Score, output_path: str) -> str:
                     end=float(n.end),
                 )
             )
+        _append_perf_events(inst, track, float(score.tempo or 120.0))   # v0.2 批C 后段：perf 曲线 → CC/弯音事件
         midi.instruments.append(inst)
 
     if score.key_candidates and score.key_candidates[0].key:

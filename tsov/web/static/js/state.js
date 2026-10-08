@@ -65,7 +65,8 @@ export const store = {
   range: null,                 // {start, end} 秒：标尺区间 / 范围框选联动（供 E6 选段导出）
 
   /* M-V8 E5 段2：自动化道（单轨视图底部子道）与电平表 */
-  autoLane: { open: false, param: 'volume' },   // param: volume | pan | both（both=双道堆叠；目标恒为单轨视图当前轨）
+  autoLane: { open: false, param: 'volume' },   // param: 任意道 key（volume | pan | bend | …；目标恒为单轨视图当前轨）
+  velocityLanes: new Set(),    // v0.2 批C 后段（挂道族）：开着力度道的轨（bars 伪道；零存储派生视图）
   meter: { l: 0, r: 0, hold_l: 0, hold_r: 0, clip: false },   // 试听通路实时电平（CDP 断言口）
 
   /* v0.2 批C 前段（R1/R2 地基件）：参数注册表快照（/api/meta.params；null = 未到 → 回退内置） */
@@ -236,6 +237,19 @@ export function setAutoLane(partial) {
   bus.dispatch('auto');
 }
 
+/* v0.2 批C 后段（挂道族）：力度道开关（bars 伪道；视图态，不进谱；零存储——数据 = Note.velocity）。 */
+export function toggleVelocityLane(ti) {
+  const t = Math.max(0, ti | 0);
+  if (store.velocityLanes.has(t)) store.velocityLanes.delete(t);
+  else store.velocityLanes.add(t);
+  bus.dispatch('auto');
+  return store.velocityLanes.has(t);
+}
+
+export function hasVelocityLane(ti) {
+  return store.velocityLanes.has(Math.max(0, ti | 0));
+}
+
 /* v0.2 批C 前段（R1/R2 地基件）：注册表快照接入 + 范围/标签查询。
    单一来源 = /api/meta.params（后端 host/params.py）；缺快照回退内置——渐进不翻车。
    前端不再有第三份硬编码参数值域（原 autoroll.js RANGE 已归并至此）。 */
@@ -244,7 +258,26 @@ const PARAM_FALLBACK = {
     volume: { label: '音量', lo: 0.0, hi: 2.0 },
     pan: { label: '声像', lo: -1.0, hi: 1.0 },
   },
+  /* v0.2 批C 后段（挂道族）：perf 域兜底（label/范围；快照缺失时仍可用） */
+  perf: {
+    velocity: { label: '力度', lo: 0.0, hi: 1.0 },
+    bend: { label: '弯音', lo: -1.0, hi: 1.0 },
+    cc1: { label: '调制', lo: 0.0, hi: 1.0 },
+    cc11: { label: '表情', lo: 0.0, hi: 1.0 },
+    cc64: { label: '延音', lo: 0.0, hi: 1.0 },
+  },
 };
+
+/* 快照查询（automation 区 = 曲线白名单（mix+perf 可绑）；perf 区兜底其余条目） */
+function _metaSpec(pid) {
+  const mp = store.metaParams;
+  if (!mp) return null;
+  return (mp.automation && mp.automation[pid]) || (mp.perf && mp.perf[pid]) || null;
+}
+
+function _fallbackSpec(pid) {
+  return PARAM_FALLBACK.automation[pid] || PARAM_FALLBACK.perf[pid] || null;
+}
 
 export function setMetaParams(p) {
   store.metaParams = p || null;
@@ -253,8 +286,8 @@ export function setMetaParams(p) {
 
 /** 自动化域参数范围 [lo, hi]（快照优先；缺快照回退内置）。 */
 export function paramRange(pid) {
-  const m = store.metaParams && store.metaParams.automation && store.metaParams.automation[pid];
-  const f = PARAM_FALLBACK.automation[pid];
+  const m = _metaSpec(pid);
+  const f = _fallbackSpec(pid);
   const lo = (m && Number.isFinite(m.lo)) ? m.lo : (f ? f.lo : 0.0);
   const hi = (m && Number.isFinite(m.hi)) ? m.hi : (f ? f.hi : 1.0);
   return [lo, hi];
@@ -262,8 +295,8 @@ export function paramRange(pid) {
 
 /** 自动化域参数中文名（快照优先；缺快照回退内置）。 */
 export function paramLabel(pid) {
-  const m = store.metaParams && store.metaParams.automation && store.metaParams.automation[pid];
-  const f = PARAM_FALLBACK.automation[pid];
+  const m = _metaSpec(pid);
+  const f = _fallbackSpec(pid);
   return (m && m.label) || (f && f.label) || pid;
 }
 
@@ -354,7 +387,9 @@ export function trackLanes(tr) {
     return tr.lanes.map((l) => ({ id: l.id || l.param, param: l.param, label: l.name || paramLabel(l.param) }));
   }
   const a = tr.automation || {};
-  return Object.keys(a).filter((k) => k === 'volume' || k === 'pan')
+  /* v0.2 批C 后段：未管理派生键 += perf 曲线（bend/cc1/cc11/cc64——旧工程零出现，纯 additive） */
+  const known = (k) => k === 'volume' || k === 'pan' || k === 'bend' || k === 'cc1' || k === 'cc11' || k === 'cc64';
+  return Object.keys(a).filter(known)
     .map((k) => ({ id: k, param: k, label: paramLabel(k) }));
 }
 
@@ -689,6 +724,10 @@ export function snapshot() {
       open: store.autoLane.open,
       param: store.autoLane.param,
       range: { volume: paramRange('volume'), pan: paramRange('pan') },
+    },
+    perf: {
+      /* v0.2 批C 后段（挂道族）：力度道开着的轨（bars 伪道；CDP 断言用） */
+      velocity: Array.from(store.velocityLanes),
     },
     /* M-V8 E6 段1：音频轨 clip 规范快照（CDP 断言用；旧 {file, offset} → 单 clip 同口径） */
     audio: (store.score && Array.isArray(store.score.tracks) ? store.score.tracks : [])

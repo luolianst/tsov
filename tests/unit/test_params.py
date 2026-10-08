@@ -33,7 +33,10 @@ def test_mix_specs_equivalence():
     assert specs["volume"].eval_kind == "curve" and specs["pan"].eval_kind == "curve"
     assert specs["volume"].label == "音量" and specs["pan"].label == "声像"
     # command 层派生等价（逐键逐值）
-    assert command._AUTOMATION_PARAMS == {"volume": (0.0, 2.0), "pan": (-1.0, 1.0)}
+    # v0.2 批C 后段：白名单扩至 perf 曲线（bend/cc1/cc11/cc64 追加）
+    assert command._AUTOMATION_PARAMS == {"volume": (0.0, 2.0), "pan": (-1.0, 1.0),
+                                         "bend": (-1.0, 1.0), "cc1": (0.0, 1.0),
+                                         "cc11": (0.0, 1.0), "cc64": (0.0, 1.0)}
 
 
 def test_effect_ranges_equivalence():
@@ -63,11 +66,11 @@ def test_snapshot_shape():
 
 
 def test_set_automation_error_message_unchanged():
-    """错误文案一字不变（R1 重构的兼容硬条款）。"""
+    """错误文案同源（R1 兼容条款；v0.2 批C 后段白名单扩至 perf 曲线 → 列表随注册表）。"""
     sc = Score(title="t", tracks=[Track(name="a")])
     r = _apply(sc, "set_automation", {"param": "tone", "points": [[0, 0.5]]})
     assert not r.ok
-    assert r.errors[0] == "未知 param：'tone'（volume / pan）"
+    assert r.errors[0] == "未知 param：'tone'（volume / pan / bend / cc1 / cc11 / cc64）"
     # 越界文案同源
     r2 = _apply(sc, "set_automation", {"param": "volume", "points": [[0, 3.0]]})
     assert not r2.ok

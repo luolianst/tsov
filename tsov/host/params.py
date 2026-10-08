@@ -42,6 +42,20 @@ _MIX_SPECS: dict[str, ParamSpec] = {
     "pan": ParamSpec("pan", "mix", "声像", -1.0, 1.0, 0.0, "", True, "curve"),
 }
 
+# ------------------------------------------------------------------
+# perf 域（v0.2 批C 后段·挂道族）：力度（bars 伪道；数据 = Note.velocity 派生，零存储）
+# + CC/弯音（曲线道，经 automation 通用键承载；MIDI 侧由 midi/export 转
+#   control_change / pitch_bend 事件）。D1 定案 = 通用键（设计件 §3.2，零新字段）。
+# ------------------------------------------------------------------
+
+_PERF_SPECS: dict[str, ParamSpec] = {
+    "velocity": ParamSpec("velocity", "perf", "力度", 0.0, 1.0, 0.8, "", False, "bars"),
+    "bend": ParamSpec("bend", "perf", "弯音", -1.0, 1.0, 0.0, "", True, "midi"),
+    "cc1": ParamSpec("cc1", "perf", "调制", 0.0, 1.0, 0.0, "", True, "midi"),
+    "cc11": ParamSpec("cc11", "perf", "表情", 0.0, 1.0, 1.0, "", True, "midi"),
+    "cc64": ParamSpec("cc64", "perf", "延音", 0.0, 1.0, 0.0, "", True, "midi"),
+}
+
 
 # ------------------------------------------------------------------
 # 效果域（自 host/effect.py 迁入；形状 = kind → {键: (lo, hi) | None}）
@@ -79,6 +93,21 @@ def automation_specs() -> dict[str, ParamSpec]:
     return dict(_MIX_SPECS)
 
 
+def curve_specs() -> dict[str, ParamSpec]:
+    """曲线道参数表（mix + perf 可自动化件；= set_automation / add_lane 白名单；
+    顺序稳定：volume → pan → bend → cc1 → cc11 → cc64）。"""
+    out = dict(_MIX_SPECS)
+    for pid, spec in _PERF_SPECS.items():
+        if spec.automatable:
+            out[pid] = spec
+    return out
+
+
+def perf_specs() -> dict[str, ParamSpec]:
+    """perf 域参数表（含 bars 伪道标记；只读快照）。"""
+    return dict(_PERF_SPECS)
+
+
 def effect_param_ranges() -> dict[str, dict[str, tuple[float, float] | None]]:
     """效果域参数范围表（只读快照；形状与历史 effect._PARAM_RANGES 完全一致）。"""
     return _EFFECT_RANGES
@@ -89,7 +118,12 @@ def snapshot() -> dict:
     return {
         "automation": {
             pid: {"label": s.label, "lo": s.lo, "hi": s.hi, "unit": s.unit, "automatable": s.automatable}
-            for pid, s in _MIX_SPECS.items()
+            for pid, s in curve_specs().items()      # v0.2 批C 后段：曲线白名单（mix + perf 可绑）
+        },
+        "perf": {
+            pid: {"label": s.label, "lo": s.lo, "hi": s.hi, "unit": s.unit,
+                  "default": s.default, "automatable": s.automatable, "eval_kind": s.eval_kind}
+            for pid, s in _PERF_SPECS.items()
         },
         "effects": {
             k: {kk: (list(vv) if vv else None) for kk, vv in v.items()}

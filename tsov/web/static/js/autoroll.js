@@ -7,7 +7,7 @@
 
 import { bus } from './events.js';
 import { api } from './api.js';
-import { store, setError, toast, refTag, paramRange, paramLabel, trackLanes } from './state.js';
+import { store, setError, toast, refTag, paramRange, paramLabel, trackLanes, hasVelocityLane } from './state.js';
 import { createLane } from './lane_render.js';
 
 /* 历史画布内标签（与既有视觉一字不差）；其他道走注册表标签/范围。 */
@@ -28,10 +28,13 @@ function owner() {
 function activeIds() {
   const o = owner();
   if (!o) return [];
-  return trackLanes(o.track).map((l) => l.param);
+  const ids = trackLanes(o.track).map((l) => l.param);
+  if (hasVelocityLane(o.ti)) ids.push('velocity');   /* v0.2 批C 后段：力度伪道 */
+  return ids;
 }
 
 function descriptorOf(id) {
+  if (id === 'velocity') return velocityDescriptor();   /* v0.2 批C 后段：力度 bars 伪道 */
   const def = DEFS[id] || { title: paramLabel(id), bottomTag: String(paramRange(id)[0]) };
   return {
     id,
@@ -66,6 +69,47 @@ async function commit(id, pts, label) {
   } catch (e) { setError(e.message); }
 }
 
+/* v0.2 批C 后段（挂道族）：力度 bars 伪道描述子 + 批量提交（set_velocity 一事务；>200 分批）。 */
+
+function velocityDescriptor() {
+  return {
+    id: 'velocity',
+    kind: 'bars',
+    title: '力度(0~100%)',
+    bottomTag: '0%',
+    range: () => paramRange('velocity'),
+    readBars: () => {
+      const o = owner();
+      if (!o) return [];
+      return o.track.notes.map((n, i) => ({
+        t0: Number(n.start),
+        t1: Math.max(Number(n.end), Number(n.start) + 0.001),
+        v: Number(n.velocity),
+        idx: i,
+      }));
+    },
+    commitBars: (changes, label) => commitVelocity(changes, label),
+  };
+}
+
+async function commitVelocity(changes, label) {
+  const o = owner();
+  if (!o || !store.project) return;
+  const r4 = (x) => Math.round(x * 1e4) / 1e4;
+  const cmds = changes.map(([i, v]) => ({ op: 'set_velocity', track: o.ti, index: i, value: r4(v) }));
+  const CHUNK = 200;   /* 单批上限（防超大事务） */
+  try {
+    let applied = 0; const errs = [];
+    for (let k = 0; k < cmds.length; k += CHUNK) {
+      const r = await api.postBatch(store.project, '力度 ' + label, cmds.slice(k, k + CHUNK), '力度（柱状）：' + label);
+      applied += r.applied || 0;
+      errs.push(...(r.errors || []));
+    }
+    if (applied) toast('已' + label + '（' + applied + ' 音，可撤销）');
+    if (errs.length) setError('被拒：' + errs.join('；'));
+  } catch (e) { setError(e.message); }
+}
+
 /* ---- 宿主装配（逐道 canvas 堆叠；无道 → 空态引导） ---- */
 
 function show() {
@@ -86,7 +130,7 @@ function reconcile() {
   if (!ids.length) {
     const d = document.createElement('div');
     d.className = 'alane-empty';
-    d.textContent = '尚无自动化道——左栏右键轨道「添加自动化道…」（或点轨行道展开钮 ▸）';
+    d.textContent = '尚无自动化道——左栏右键轨道「添加自动化道…」（含「力度（柱状）」；或点轨行道展开钮 ▸）';
     host.appendChild(d);
     return;
   }
