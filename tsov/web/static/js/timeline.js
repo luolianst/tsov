@@ -392,8 +392,9 @@ function renderTracks(el) {
       ]);
     });
     el.appendChild(item);
-    /* v0.2 C2（F4）：道行（轨树展开；单击=定位道栈 / 双击=入副区 / 右键=删除道） */
-    if (lanesOfTr.length && !store.collapsedLanes.has(ti)) {
+    /* v0.2 C2（F4）：道行（轨树展开；单击=定位道栈 / 双击=入副区 / 右键=删除道）
+       热修（10-08）：文件夹折叠时道行随折（与行 fold-hidden 同条件——不再孤悬） */
+    if (lanesOfTr.length && !store.collapsedLanes.has(ti) && !(tr.folder && store.collapsedFolders.has(tr.folder))) {
       for (const l of lanesOfTr) {
         const lr = document.createElement('div');
         lr.className = 'lane-row';

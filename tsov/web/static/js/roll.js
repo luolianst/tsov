@@ -883,6 +883,13 @@ export function init(rollCanvas) {
       /* 纵向滚动（音高区） */
       const f = e.deltaY > 0 ? 1 : -1;
       setView({ midiTop: store.view.midiTop + f * Math.max(1, Math.round(3 * 14 / store.view.pxPerSemi)) });
+    } else if (e.shiftKey) {
+      /* 热修（10-08，坑表 P2）：Shift+滚轮 = 音高轴缩放（纵向缩放；锚定光标处音高） */
+      const d = e.deltaY !== 0 ? e.deltaY : e.deltaX;   /* Chromium 下 Shift+滚轮常以 deltaX 投递 */
+      const anchorM = store.view.midiTop - e.offsetY / store.view.pxPerSemi;
+      const f = d < 0 ? 1.15 : 1 / 1.15;
+      const ps = Math.min(64, Math.max(4, store.view.pxPerSemi * f));
+      setView({ pxPerSemi: ps, midiTop: anchorM + e.offsetY / ps });
     } else {
       setView({ scrollSec: Math.max(0, store.view.scrollSec + e.deltaY * 0.02) });
     }
