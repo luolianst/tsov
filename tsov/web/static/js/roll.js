@@ -891,11 +891,28 @@ export function init(rollCanvas) {
       const ps = Math.min(64, Math.max(4, store.view.pxPerSemi * f));
       setView({ pxPerSemi: ps, midiTop: anchorM + e.offsetY / ps });
     } else {
-      setView({ scrollSec: Math.max(0, store.view.scrollSec + e.deltaY * 0.02) });
+      const dx = e.deltaY !== 0 ? e.deltaY : e.deltaX;   /* 横向拨轮/触控板横滑（deltaX）同义支持 */
+      setView({ scrollSec: Math.max(0, store.view.scrollSec + dx * 0.02) });
     }
   }, { passive: false });
 
   canvas.addEventListener('mousedown', (e) => {
+    /* 中键拖动 = 平移视图（DAW 习惯；与滚轮平移同语义；preventDefault 抑制浏览器自动滚动） */
+    if (e.button === 1) {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startScroll = store.view.scrollSec;
+      const move = (ev) => {
+        setView({ scrollSec: Math.max(0, startScroll - (ev.clientX - startX) / store.view.pxPerSec) });
+      };
+      const up = () => {
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+      return;
+    }
     if (e.button !== 0) return;          // 仅左键
     /* E3 段1：分界线拖拽（优先于一切手势） */
     if (splitOn && Math.abs(e.offsetY - splitH1) <= 6) {
