@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-WEB_VERSION = "0.1.1"
+WEB_VERSION = "0.1.5"
 AGENT_SESSION_DIR = "output/agent-sessions"
 # agent 单条消息内最大工具循环轮数（2026-10-03 洛怜拍板：默认 12 → 60——长链编曲任务频繁触线）；
 #   仍可用环境变量 TSOV_AGENT_MAX_TURNS 覆盖（Web server 启动前设置）

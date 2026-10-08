@@ -1,6 +1,6 @@
 """打包「tsov 一键开箱包」（Windows / 网盘分发版）——stdlib-only。
 
-产物结构（<name> = tsov-v0.1.1-win64）：
+产物结构（<name> = tsov-v<version>-win64）：
   <name>/
     启动tsov.bat          双击入口（scripts/bundle-template/start-tsov.bat）
     bootstrap.py          启动引导（搬家修复/自检/起服务；每次启动幂等自愈）
