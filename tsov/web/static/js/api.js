@@ -60,7 +60,7 @@ export const api = {
   play: (name, body) => post('/api/projects/' + encodeURIComponent(name) + '/play', body || {}),
   /* M-V8 E1：停止宿主播放（打断 sounddevice；试听/宿主共用停止按钮） */
   playStop: (name) => post('/api/projects/' + encodeURIComponent(name) + '/play/stop', {}),
-  chat: (project, message, baseRev, annotations, selection, userActions) => post('/api/chat', { project, message, base_rev: baseRev || 'HEAD', annotations: annotations || null, selection: selection || null, user_actions: userActions || null }),
+  chat: (project, message, baseRev, annotations, selection, userActions, refs) => post('/api/chat', { project, message, base_rev: baseRev || 'HEAD', annotations: annotations || null, selection: selection || null, user_actions: userActions || null, refs: refs || null }),
   chatStop: () => post('/api/chat/stop', {}),
   chatReset: (project) => post('/api/chat/reset', { project }),
   setTitle: (name, title) => post('/api/projects/' + encodeURIComponent(name) + '/title', { title }),

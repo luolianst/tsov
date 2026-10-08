@@ -382,6 +382,108 @@ def _retention_tick(state: WebState, project_name: str, *, agent_turns: int = 0)
     ps.save()
 
 
+def build_refs_note(score, refs: list[dict] | None, *, max_refs: int = 16, max_indices: int = 24) -> str:
+    """【对象引用】块（v0.2 批D P6）：发送时现场解析拖入的寻址载荷（不信任前端显示态）。
+
+    形如：
+    【对象引用】（用户拖入，明确指代以下对象）
+    - 轨道 track[2]「melody」：program='violin' · 音符 57 · vol 1.00 / pan 0.00
+    - 音符 track[2] [3,4,5]（3 个）：[3] bar3.2 G4 vel 0.80 · …
+    - 效果器 track[2]「melody」.fx[0] 'reverb'：room_size 0.5 · wet_level 0.3
+    失效兜底：对象已不存在 → 该条渲染「（引用已失效：…）」；不拒绝消息。上限：引用 ≤16、音符索引 ≤24。
+    """
+    if not refs:
+        return ""
+    from ..core.names import midi_to_note_name
+
+    tracks = list(getattr(score, "tracks", None) or [])
+    tempo = float(getattr(score, "tempo", 120.0) or 120.0)
+    beat_s = 60.0 / tempo if tempo > 0 else 0.5
+    bpb = 4.0
+    try:
+        _n, _d = str(getattr(score, "time_signature", "4/4") or "4/4").split("/")
+        bpb = (4.0 * float(_n)) / float(_d)
+    except (ValueError, ZeroDivisionError):
+        bpb = 4.0
+    bar_s = beat_s * bpb
+
+    def _bar_beat(t: float) -> str:
+        t = max(0.0, float(t))
+        return f"bar{int(t // bar_s) + 1}.{int((t % bar_s) // beat_s) + 1}"
+
+    lines = ["【对象引用】（用户拖入，明确指代以下对象）"]
+    for r in list(refs)[:max_refs]:
+        if not isinstance(r, dict):
+            continue
+        kind = str(r.get("kind") or "")
+        if kind == "track":
+            ti = r.get("track")
+            tr = tracks[ti] if isinstance(ti, int) and 0 <= ti < len(tracks) else None
+            if tr is None:
+                lines.append(f"- （引用已失效：轨道 track[{ti}] 不存在）")
+                continue
+            inst = getattr(tr, "instrument", None)
+            prog = (getattr(inst, "program", "") or "default") if inst is not None else "default"
+            vol = float(getattr(inst, "volume", 1.0) or 1.0) if inst is not None else 1.0
+            pan = float(getattr(tr, "pan", 0.0) or 0.0)
+            lines.append(f"- 轨道 track[{ti}]「{tr.name}」：program='{prog}' · 音符 {len(tr.notes)}"
+                         f" · vol {vol:.2f} / pan {pan:+.2f}")
+        elif kind == "notes":
+            ti = r.get("track")
+            tr = tracks[ti] if isinstance(ti, int) and 0 <= ti < len(tracks) else None
+            if tr is None:
+                lines.append(f"- （引用已失效：轨道 track[{ti}] 不存在（音符引用））")
+                continue
+            raw = list(r.get("indices") or [])
+            idxs = [int(i) for i in raw if isinstance(i, (int, float))][:max_indices]
+            parts: list[str] = []
+            for i in idxs:
+                n = tr.notes[i] if 0 <= i < len(tr.notes) else None
+                if n is None:
+                    parts.append(f"[{i}]（已失效）")
+                    continue
+                parts.append(f"[{i}] {_bar_beat(float(n.start))} {midi_to_note_name(int(n.pitch_midi))}"
+                             f" vel {float(n.velocity):.2f}")
+            shown = " · ".join(parts[:8]) + (" · …" if len(parts) > 8 else "")
+            lines.append(f"- 音符 track[{ti}] [{','.join(str(i) for i in idxs)}]（{len(idxs)} 个）：{shown}")
+        elif kind == "fx":
+            scope = str(r.get("scope") or "track")
+            fx_list = None
+            host = ""
+            if scope == "track":
+                ti = r.get("track")
+                tr = tracks[ti] if isinstance(ti, int) and 0 <= ti < len(tracks) else None
+                if tr is not None:
+                    fx_list = (getattr(tr.instrument, "effects", None) or []) if getattr(tr, "instrument", None) else []
+                    host = f"track[{ti}]「{tr.name}」"
+                else:
+                    host = f"track[{ti}]"
+            elif scope == "bus":
+                name = str(r.get("ref") or "")
+                bus = next((b for b in (getattr(score, "buses", None) or []) if b.name == name), None)
+                if bus is not None:
+                    fx_list = bus.effects or []
+                host = f"bus「{name}」"
+            elif scope == "master":
+                m = getattr(score, "master", None)
+                if m is not None:
+                    fx_list = m.effects or []
+                host = "master"
+            idx = r.get("index")
+            fx = None
+            if fx_list is not None and isinstance(idx, int) and 0 <= idx < len(fx_list):
+                fx = fx_list[idx]
+            if fx is None:
+                lines.append(f"- （引用已失效：{host} 的效果器 #{idx} 不存在）")
+                continue
+            params = list((fx.params or {}).items())[:4]
+            ptxt = " · ".join(f"{k} {v}" for k, v in params) or "默认参数"
+            lines.append(f"- 效果器 {host}.fx[{idx}] '{fx.type}'：{ptxt}")
+        else:
+            lines.append(f"- （未知引用类型：{kind!r}）")
+    return "\n".join(lines) + "\n"
+
+
 def _apply_annotation_groups(score, annotations):
     """按「挂起轨」分组确定性应用人工标注（v0.2 批C 后段 P40）。
 
@@ -410,7 +512,7 @@ def _apply_annotation_groups(score, annotations):
 
 def _run_agent_session(state: WebState, project_name: str, task: str, session_id: str, base_rev: str = "HEAD",
                        annotations: list[dict] | None = None, selection: dict | None = None,
-                       user_actions: list[str] | None = None) -> None:
+                       user_actions: list[str] | None = None, refs: list[dict] | None = None) -> None:
     """一次对话框 agent 会话（后台线程跑；agent_lock 由调用方获取，本函数 finally 释放）。
 
     base_rev（议题 ④）：编辑目标版本标识，注入 brief；A 路下始终 = 用户当前工作版本（HEAD），
@@ -487,12 +589,13 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
     if user_actions:
         ua_note = ("- 用户手动操作（自上次对话以来，命令层已落盘；用户说\"我刚改了什么\"时以这些为准）："
                    + "；".join(str(x) for x in list(user_actions)[:10]) + "\n")
+    refs_note = build_refs_note(proj.score, refs)   # v0.2 批D（P6）：对象引用现场解析（发送时；不信任前端显示态）
     brief = (
         f"{task}\n\n"
         f"【工程上下文】\n"
         f"- 当前工程名：{proj.name}；工程 score 路径：{score_path}\n"
         f"- 编辑目标版本：{base_rev}（工程 git 版本标识；请勿自行 git 回滚/切分支，版本切换由宿主负责）\n"
-        f"{ann_note}{sel_note}{ua_note}"
+        f"{ann_note}{sel_note}{refs_note}{ua_note}"
         f"- 工作副本（{config.EDITED_SCORE_NAME}）每轮开头由宿主重置为本轮起点（当前谱副本）；"
         f"若发现「被回收/重置」，属正常机制，直接继续改谱\n"
         f"- 改谱：用 edit_score 工具（score_path 用上面的工程 score 路径，feedback 写用户的修改要求），"

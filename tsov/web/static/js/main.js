@@ -2,7 +2,7 @@
 
 import { api } from './api.js';
 import { bus, connectEvents } from './events.js';
-import { store, setState, setError, toast, fitView, setView, clearDiff, setDiff, setAnnotations, clearAnnotations, setSnap, setViewMode, setSingleTrack, fitViewTrack, refTag, favSource, bookmarks, setSelBookmark, setLoopOn, splitPartner, audioClipsOf, setMetaParams, paramLabel, setSplitSameAxis } from './state.js';
+import { store, setState, setError, toast, fitView, setView, clearDiff, setDiff, setAnnotations, clearAnnotations, setSnap, setViewMode, setSingleTrack, fitViewTrack, refTag, favSource, bookmarks, setSelBookmark, setLoopOn, splitPartner, audioClipsOf, setMetaParams, paramLabel, setSplitSameAxis, setRefs, clearRefs } from './state.js';
 import * as roll from './roll.js';
 import * as timeline from './timeline.js';
 import * as dock from './dock.js';
@@ -1060,6 +1060,74 @@ function boot() {
   bus.on('annotations', refreshAnnQueue);
   bus.on('state', refreshAnnQueue);
   $('btn-ann-clear').addEventListener('click', () => { clearAnnotations(); toast('已清空待发送标注'); });
+
+  /* v0.2 批D（P6）：对象引用队列（拖入对话栏）——chips 渲染（单个 ✕ / 整行清空）+ 选区拖柄 */
+  function refLabel(r) {
+    const sc = store.score;
+    try {
+      if (r.kind === 'track') {
+        const tr = sc && sc.tracks[r.track];
+        return '🎵 ' + (tr ? (tr.name || ('track ' + r.track)) : ('track[' + r.track + ']'));
+      }
+      if (r.kind === 'notes') {
+        const tr = sc && sc.tracks[r.track];
+        return '♪ 音符 ×' + ((r.indices || []).length) + (tr ? (' @' + (tr.name || ('track ' + r.track))) : '');
+      }
+      if (r.kind === 'fx') {
+        let host = '？';
+        let fx = null;
+        if (r.scope === 'track' && sc && sc.tracks[r.track]) {
+          host = sc.tracks[r.track].name || ('track ' + r.track);
+          fx = (((sc.tracks[r.track].instrument || {}).effects) || [])[r.index];
+        } else if (r.scope === 'bus' && sc && (sc.buses || []).some((b) => b.name === r.ref)) {
+          host = r.ref;
+          fx = (((sc.buses.find((x) => x.name === r.ref) || {}).effects) || [])[r.index];
+        } else if (r.scope === 'master' && sc && sc.master) {
+          host = 'master';
+          fx = ((sc.master.effects) || [])[r.index];
+        } else if (r.scope === 'bus') {
+          host = r.ref || 'bus';
+        }
+        return '◈ ' + ((fx && fx.type) || 'fx') + ' @' + host;
+      }
+    } catch (e) { /* 显示态失配不致命——发送时以后端现场解析为准 */ }
+    return '◈ 引用';
+  }
+  function refreshRefQueue() {
+    const wrap = $('ref-queue');
+    const list = $('ref-queue-list');
+    if (!wrap || !list) return;
+    const q = store.pendingRefs || [];
+    if (!q.length) { wrap.hidden = true; list.innerHTML = ''; return; }
+    wrap.hidden = false;
+    list.innerHTML = '';
+    q.forEach((r, i) => {
+      const chip = document.createElement('span');
+      chip.className = 'ann-chip ref-chip';
+      chip.textContent = refLabel(r) + ' ';
+      const x = document.createElement('span');
+      x.className = 'ref-x';
+      x.textContent = '✕';
+      x.title = '移除该引用';
+      x.addEventListener('click', () => { const arr = store.pendingRefs.slice(); arr.splice(i, 1); setRefs(arr); });
+      chip.appendChild(x);
+      list.appendChild(chip);
+    });
+  }
+  bus.on('refs', refreshRefQueue);
+  bus.on('state', refreshRefQueue);
+  $('btn-ref-clear').addEventListener('click', () => { clearRefs(); toast('已清空对象引用'); });
+  const refDragBtn = $('ref-drag');
+  if (refDragBtn) {
+    refDragBtn.addEventListener('dragstart', (e) => {
+      const sel = store.selection;
+      if (!sel || !sel.indices.length) { e.preventDefault(); return; }
+      try {
+        e.dataTransfer.setData('application/x-tsov-ref', JSON.stringify({ kind: 'notes', track: sel.track, indices: sel.indices.slice(0, 24) }));
+        e.dataTransfer.effectAllowed = 'copy';
+      } catch (err) { /* ignore */ }
+    });
+  }
 
   /* M-V3：写谱吸附 */
   $('snap-sel').addEventListener('change', (e) => {

@@ -9,7 +9,7 @@ import { mdToHtml } from './md.js';   // 批B P10：LLM 输出 markdown 安全�
 import { renderAgentsBlock, refreshAgents } from './staging.js';   // D 件：工程上下文折叠条
 import { store, setAgentBusy, clearDiff, toast, setError, clearAnnotations, refTag, favSource,
          setSelection, setSingleTrack, addAgentTracks, clearAgentTracks,
-         peekUserActions, clearUserActions } from './state.js';
+         peekUserActions, clearUserActions, setRefs, clearRefs } from './state.js';
 
 const LF = String.fromCharCode(10);
 const MAX_LOGS = 400;
@@ -575,6 +575,7 @@ async function send(message) {
 
   const baseRev = (cmpSel && cmpSel.value) || 'HEAD';   // 议题 ④：编辑目标版本标识（默认 HEAD）
   const anns = store.pendingAnnotations.map((q) => q.ann);   // M-V3：人工标注（确定性优先，随消息发送）
+  const refs = (store.pendingRefs || []).slice();            // v0.2 批D（P6）：对象引用（拖入对话栏）
   const sel = (store.selection && store.selection.indices.length) ? store.selection : null;
   const ua = peekUserActions();   // 批B B1-4：用户手动操作（回流 agent 上下文）
   clearAgentTracks();             // 批B B1-3：新一轮清上一轮改动标记
@@ -585,12 +586,14 @@ async function send(message) {
   setAgentBusy(true);
   startBusyTicker();
   sysMsg('已发送（' + (anns.length ? '含 ' + anns.length + ' 条人工标注：确定性先行、不走 LLM；' : '')
+    + (refs.length ? '含 ' + refs.length + ' 条对象引用；' : '')
     + (ua.length ? '含 ' + ua.length + ' 条手动操作摘要；' : '')
     + 'SSE 事件流；目标版本 ' + baseRev + '）…');
   try {
-    const res = await api.chat(store.project, message, baseRev, anns.length ? anns : null, sel, ua.length ? ua : null);
+    const res = await api.chat(store.project, message, baseRev, anns.length ? anns : null, sel, ua.length ? ua : null, refs.length ? refs : null);
     sysMsg('session：' + res.session_id);
     if (anns.length) clearAnnotations();   // 已随消息送达（后端确定性应用；失败会出 agent_error）
+    if (refs.length) clearRefs();          // 批D：引用已随消息送达（只读上下文，无回执）
     if (ua.length) clearUserActions();     // 批B B1-4：已送达，清缓冲
   } catch (e) {
     setAgentBusy(false);
@@ -996,6 +999,31 @@ export function init(opts) {
     }
   });
   inputEl.addEventListener('input', autoGrowInput);   // 批B P7：多行自动增高（1–6 行）
+
+  /* v0.2 批D（P6）：对话栏 = 对象引用落点（主靶 #chat-input-row / 次靶 #chat-log；只读上下文通道） */
+  const refHasType = (e) => { try { return Array.from((e.dataTransfer && e.dataTransfer.types) || []).includes('application/x-tsov-ref'); } catch (err) { return false; } };
+  for (const t of [document.getElementById('chat-input-row'), document.getElementById('chat-log')]) {
+    if (!t) continue;
+    t.addEventListener('dragover', (e) => {
+      if (!refHasType(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      t.classList.add('drag-over');
+    });
+    t.addEventListener('dragleave', (e) => { if (e.target === t) t.classList.remove('drag-over'); });
+    t.addEventListener('drop', (e) => {
+      if (!refHasType(e)) return;
+      e.preventDefault();
+      t.classList.remove('drag-over');
+      let ref = null;
+      try { ref = JSON.parse(e.dataTransfer.getData('application/x-tsov-ref') || 'null'); } catch (err) { ref = null; }
+      if (!ref || !ref.kind) return;
+      const q = store.pendingRefs || [];
+      if (q.some((x) => JSON.stringify(x) === JSON.stringify(ref))) { toast('已在引用队列（未重复添加）'); return; }
+      setRefs(q.concat([ref]));
+      toast('已加入对象引用（随下条消息发送）');
+    });
+  }
 
   undoRoundBtn.addEventListener('click', async () => {
     if (!store.project) return;

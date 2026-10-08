@@ -398,7 +398,12 @@ function renderTracks(el) {
     item.draggable = true;
     item.addEventListener('dragstart', (e) => {
       dragTrack = ti;
-      try { e.dataTransfer.setData('application/x-tsov-track', String(ti)); e.dataTransfer.effectAllowed = 'move'; } catch (err) { /* ignore */ }
+      try {
+        e.dataTransfer.setData('application/x-tsov-track', String(ti));
+        /* v0.2 批D（P6）：同一拖拽兼作对象引用源（拖到对话栏 = 轨道引用） */
+        e.dataTransfer.setData('application/x-tsov-ref', JSON.stringify({ kind: 'track', track: ti }));
+        e.dataTransfer.effectAllowed = 'move';
+      } catch (err) { /* ignore */ }
       item.classList.add('dragging');
     });
     item.addEventListener('dragend', () => { dragTrack = -1; item.classList.remove('dragging'); clearDropMarks(el); });

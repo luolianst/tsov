@@ -73,6 +73,8 @@ class ChatIn(BaseModel):
     selection: dict | None = None
     # 批B B1-4：用户手动操作摘要（自上次对话以来；回流进 agent 上下文）
     user_actions: list[str] | None = None
+    # v0.2 批D（P6）：对象引用（拖入对话栏的寻址载荷；发送时后端现场解析，additive）
+    refs: list[dict] | None = None
 
 
 class ChatResetIn(BaseModel):

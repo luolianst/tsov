@@ -42,7 +42,7 @@ def register(app: FastAPI) -> None:
             threading.Thread(
                 target=_run_agent_session,
                 args=(state, body.project, body.message, session_id, body.base_rev,
-                      body.annotations, body.selection, body.user_actions),
+                      body.annotations, body.selection, body.user_actions, body.refs),
                 daemon=True,
                 name=f"tsov-agent-{session_id[-8:]}",
             ).start()

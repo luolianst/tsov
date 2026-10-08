@@ -90,6 +90,16 @@ function renderFx() {
     x.onclick = () => post('移除效果 ' + fx.type, [{ op: 'remove_effect', track: cur.index, index: i, value: Object.assign({}, tbase) }]);
     slot.appendChild(hd);
     slot.appendChild(sub);
+    /* v0.2 批D（P6）：效果器卡 = 对象引用源（拖到对话栏 = 效果器引用） */
+    slot.draggable = true;
+    slot.addEventListener('dragstart', (e) => {
+      const ref = { kind: 'fx', scope: isTrackTarget ? 'track' : fxTarget.mode, index: i };
+      if (ref.scope === 'track') ref.track = cur.index;
+      if (ref.scope === 'bus') ref.ref = fxTarget.ref;
+      try { e.dataTransfer.setData('application/x-tsov-ref', JSON.stringify(ref)); e.dataTransfer.effectAllowed = 'copy'; } catch (err) { /* ignore */ }
+      slot.classList.add('dragging');
+    });
+    slot.addEventListener('dragend', () => slot.classList.remove('dragging'));
     /* v0.2 批C 后段（P26）：⚙ 参数编辑（注册表驱动；一命令 set_effect_params） */
     const gear = document.createElement('button');
     gear.className = 'fx-gear';

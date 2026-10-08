@@ -1164,3 +1164,14 @@ body.chat-resizing { cursor: col-resize; user-select: none; }
 .fx-edit-sld { width: 120px; }
 .fx-edit-num { width: 84px; }
 .fx-edit-ft { margin-top: 6px; display: flex; gap: 8px; }
+
+
+/* ============ v0.2 批D（P6）：对象引用（拖入对话栏）============ */
+
+#chat-input-row.drag-over { outline: 2px dashed var(--accent); outline-offset: -2px; }
+#chat-log.drag-over { outline: 2px dashed var(--accent); outline-offset: -4px; }
+.ref-chip .ref-x { cursor: pointer; margin-left: 5px; opacity: 0.7; font-size: 10px; }
+.ref-chip .ref-x:hover { opacity: 1; }
+#ref-drag { cursor: grab; }
+#ref-drag:active { cursor: grabbing; }
+.fx-slot.dragging { opacity: 0.45; }

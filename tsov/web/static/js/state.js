@@ -46,6 +46,7 @@ export const store = {
 
   /* M-V3：标注队列（[{ann:{index,action,value}, label}]，随下条对话发送）+ 写谱吸附比例（0=关/0.5=1/8/0.25=1/16） */
   pendingAnnotations: [],
+  pendingRefs: [],             /* v0.2 批D（P6）：对象引用队列（拖入对话栏；只读上下文通道） */
   snapFrac: 0,
 
   /* M-V8 E1：定位工具包——循环区间 / 节拍器 / 书签选择 / 文件夹折叠（transport 态，不进谱） */
@@ -145,7 +146,7 @@ export function favSource(tag) {
 /* 用 GET state / state_updated 事件的数据装载 store（保持选区不闪断） */
 export function setState(s, opts) {
   const keep = (opts && opts.preserveSelection) ? store.selection : null;
-  if (store.project && s.project !== store.project) { store.pendingAnnotations = []; bus.dispatch('annotations'); }
+  if (store.project && s.project !== store.project) { store.pendingAnnotations = []; bus.dispatch('annotations'); store.pendingRefs = []; bus.dispatch('refs'); }
   store.project = s.project;
   store.score = s.score;
   store.summary = s.summary || '';
@@ -581,6 +582,21 @@ export function clearAnnotations() {
   store.pendingAnnotations = [];
   bus.dispatch('annotations');
 }
+
+/* v0.2 批D（P6）：对象引用队列（拖入对话栏；寻址载荷，随下条消息发送，后端现场解析） */
+export function pushRefs(items) {
+  store.pendingRefs = store.pendingRefs.concat(items);
+  bus.dispatch('refs');
+}
+export function setRefs(items) {
+  store.pendingRefs = items.slice();
+  bus.dispatch('refs');
+}
+export function clearRefs() {
+  if (!store.pendingRefs.length) return;
+  store.pendingRefs = [];
+  bus.dispatch('refs');
+}
 /* M-V3：写谱吸附（比例=拍；0 关 / 0.5 →1/8 / 0.25 →1/16） */
 export function setSnap(frac) { store.snapFrac = Number(frac) || 0; bus.dispatch('view'); }
 
@@ -698,6 +714,7 @@ export function snapshot() {
     view: Object.assign({}, store.view),
     snapFrac: store.snapFrac,
     pendingAnnotations: store.pendingAnnotations.slice(),
+    refs: store.pendingRefs.slice(),   /* v0.2 批D（P6）：对象引用队列寻址数组（CDP 断言用） */
     agentBusy: store.agentBusy,
     playing: store.playing,
     playhead: store.playhead,
