@@ -2,7 +2,7 @@
 
 import { api } from './api.js';
 import { bus, connectEvents } from './events.js';
-import { store, setState, setError, toast, fitView, setView, clearDiff, setDiff, setAnnotations, clearAnnotations, setSnap, setViewMode, setSingleTrack, fitViewTrack, refTag, favSource, bookmarks, setSelBookmark, setLoopOn, splitPartner, audioClipsOf } from './state.js';
+import { store, setState, setError, toast, fitView, setView, clearDiff, setDiff, setAnnotations, clearAnnotations, setSnap, setViewMode, setSingleTrack, fitViewTrack, refTag, favSource, bookmarks, setSelBookmark, setLoopOn, splitPartner, audioClipsOf, setMetaParams } from './state.js';
 import * as roll from './roll.js';
 import * as timeline from './timeline.js';
 import * as dock from './dock.js';
@@ -308,7 +308,7 @@ function boot() {
     quant: $('tl-quant'),
     chips: $('status-chips'),
   });
-  autoroll.init($('autoroll'));   // M-V8 E5 段2：自动化 lane（单轨视图底部子道）
+  autoroll.init($('autolanes'));   // v0.2 批C 前段（R2）：道宿主容器（原 #autoroll 泛化，逐道 canvas 堆叠）
 
   /* ================= 修正轮2：菜单 / 面板收起 / 视图模式 / 导出 / 收藏 ================= */
 
@@ -1190,6 +1190,9 @@ function boot() {
   bus.on('toast', showToast);
 
   initStepsPanel();   // 对话产物流 C 件：右栏双 tab（对话|步骤）+ 步骤视图
+
+  /* v0.2 批C 前段（R2 地基件）：拉一次参数注册表快照（前端同源的唯一来源；失败静默 → 回退内置） */
+  api.meta().then((r) => { if (r && r.params) setMetaParams(r.params); }).catch(() => {});
 
   loadProjects(false);
 }

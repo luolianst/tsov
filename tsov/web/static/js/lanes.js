@@ -9,6 +9,7 @@ import { store, tempo, beatsPerBar, setSelection, toggleOverlay, setView, bookma
 import { pal, trackColors } from './theme.js';
 import { seekTo } from './playback.js';
 import { api } from './api.js';
+import { xOf, tOf } from './geom.js';   /* v0.2 批C 前段（R2 地基件）：时间↔x 几何共享 */
 import { clipHitBand, beginAudioDrag, updateAudioDrag, finishAudioDrag, isDragging, dragPreviewOf, selOf, clearSel, splitClipAt, drawClipBlocks } from './audio_edit.js';   /* E6 段1 补：音频 clip 手势引擎（总谱/单轨共用） */
 
 const KEYS = 56;   // 左侧标签槽（与卷帘 KEYS_W 对齐）
@@ -54,8 +55,7 @@ function resize() {
   store.lanesScroll = scrollY;
 }
 
-function xOf(t) { return KEYS + (t - store.view.scrollSec) * store.view.pxPerSec; }
-function tOf(x) { return store.view.scrollSec + (x - KEYS) / store.view.pxPerSec; }
+/* v0.2 批C 前段（R2 地基件）：时间↔x 几何改用共享 geom.js（行为一字不差） */
 function laneAt(y) {
   const sc = store.score;
   if (!sc) return -1;

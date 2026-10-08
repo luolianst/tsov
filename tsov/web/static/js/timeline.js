@@ -5,6 +5,7 @@ import { api } from './api.js';
 import { KEYS_W, store, tempo, beatsPerBar, segments, scoreBounds, setSelection, setError, toggleOverlay, refTag, bookmarks, folderTracks, setLoop, setLoopOn, setSelBookmark, setSelFolder, toggleFolderCollapse, setSingleTrack } from './state.js';
 import { pal, trackColors } from './theme.js';
 import { seekTo } from './playback.js';
+import { xOf, tOf } from './geom.js';   /* v0.2 批C 前段（R2 地基件）：时间↔x 几何共享 */
 
 let canvas, ctx, W = 0, H = 0, dpr = 1;
 
@@ -18,8 +19,7 @@ function resize() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
-function xOf(t) { return KEYS_W + (t - store.view.scrollSec) * store.view.pxPerSec; }
-function tOf(x) { return store.view.scrollSec + (x - KEYS_W) / store.view.pxPerSec; }
+/* v0.2 批C 前段（R2 地基件）：时间↔x 几何改用共享 geom.js（行为一字不差） */
 
 /* UI 修正轮3：拍级吸附（循环段 / 乐段创建与调整）；按住 Alt = 临时自由。拍长定义与 playback.js 一致 */
 function beatSec() {

@@ -9,6 +9,7 @@ import { bus } from './events.js';
 import { store, tempo, setError, audioClipsOf } from './state.js';
 import { api } from './api.js';
 import { peaksGet } from './peaks.js';
+import { xOf } from './geom.js';   /* v0.2 批C 前段（R2 地基件）：时间↔x 几何共享 */
 
 const KEYS = 56;          // 左侧标签槽（与 lanes/roll 的 KEYS_W 对齐）
 const FONT_UI = '11px "Microsoft YaHei UI","PingFang SC","MiSans","HarmonyOS Sans SC",system-ui,sans-serif';
@@ -28,7 +29,7 @@ export function dragPreviewOf(ti) { return (drag && drag.ti === ti) ? drag.previ
 
 export function r6(x) { return Math.round(Number(x) * 1e6) / 1e6; }
 
-function xOf(t) { return KEYS + (t - store.view.scrollSec) * store.view.pxPerSec; }
+/* v0.2 批C 前段（R2 地基件）：时间↔x 几何改用共享 geom.js（行为一字不差） */
 
 export function fileDur(rel) {
   const pv = peaksGet(rel);

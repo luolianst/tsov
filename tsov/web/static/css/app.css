@@ -725,14 +725,18 @@ body.chat-resizing { cursor: col-resize; user-select: none; }
 .fader .f-send .fs-row input[type="range"]::-webkit-slider-thumb { margin-left: -3px; height: 10px; width: 8px; }
 .fader .f-send select { width: 100%; font-size: var(--fs-xs); padding: 0 2px; }
 .fader .f-send .fs-x { padding: 0 4px; font-size: var(--fs-xs); line-height: 1.2; }
-/* M-V8 E5 段2：自动化 lane（叠在单轨卷帘底部） */
-#autoroll {
-  position: absolute; left: 0; right: 0; bottom: 0; height: 132px;
-  width: 100%; box-sizing: border-box;   /* 替换元素：必须显式宽度，否则被固有比例反噬 */
-  background: var(--bg-elev); border-top: 1px solid var(--border-strong);
-  z-index: 5; cursor: crosshair;
+/* v0.2 批C 前段（R2 地基件）：道宿主（原 #autoroll 泛化；逐道 canvas 堆叠） */
+#autolanes {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  display: flex; flex-direction: column; z-index: 5;
 }
-#autoroll[hidden] { display: none; }
+#autolanes[hidden] { display: none; }
+#autolanes .alane { position: relative; width: 100%; height: 132px; }
+#autolanes .alane canvas {
+  display: block; width: 100%; height: 100%;
+  background: var(--bg-elev); border-top: 1px solid var(--border-strong);
+  cursor: crosshair;
+}
 
 /* ---------------- 选区工具条 ---------------- */
 #sel-bar {

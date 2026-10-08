@@ -58,9 +58,12 @@ export const store = {
   clipTrack: 0,                // 剪贴板来源轨（粘贴缺省目标参考）
   range: null,                 // {start, end} 秒：标尺区间 / 范围框选联动（供 E6 选段导出）
 
-  /* M-V8 E5 段2：自动化 lane（单轨视图底部子道）与电平表 */
-  autoLane: { open: false, param: 'volume' },   // param: volume | pan（目标恒为单轨视图当前轨）
+  /* M-V8 E5 段2：自动化道（单轨视图底部子道）与电平表 */
+  autoLane: { open: false, param: 'volume' },   // param: volume | pan | both（both=双道堆叠；目标恒为单轨视图当前轨）
   meter: { l: 0, r: 0, hold_l: 0, hold_r: 0, clip: false },   // 试听通路实时电平（CDP 断言口）
+
+  /* v0.2 批C 前段（R1/R2 地基件）：参数注册表快照（/api/meta.params；null = 未到 → 回退内置） */
+  metaParams: null,
 
   /* M-V8 E3 段2：处理链（哼唱快车道）——前端镜像（真值 = 后端 ChainRunner / 工程 chain.json） */
   chain: {
@@ -222,8 +225,39 @@ export function setRange(r) {
 /* M-V8 E5 段2：自动化 lane 开关/参数（视图态，不进谱；数据写走命令层 set_automation） */
 export function setAutoLane(partial) {
   Object.assign(store.autoLane, partial || {});
-  if (store.autoLane.param !== 'pan') store.autoLane.param = 'volume';
+  if (!['volume', 'pan', 'both'].includes(store.autoLane.param)) store.autoLane.param = 'volume';
   bus.dispatch('auto');
+}
+
+/* v0.2 批C 前段（R1/R2 地基件）：注册表快照接入 + 范围/标签查询。
+   单一来源 = /api/meta.params（后端 host/params.py）；缺快照回退内置——渐进不翻车。
+   前端不再有第三份硬编码参数值域（原 autoroll.js RANGE 已归并至此）。 */
+const PARAM_FALLBACK = {
+  automation: {
+    volume: { label: '音量', lo: 0.0, hi: 2.0 },
+    pan: { label: '声像', lo: -1.0, hi: 1.0 },
+  },
+};
+
+export function setMetaParams(p) {
+  store.metaParams = p || null;
+  bus.dispatch('meta');
+}
+
+/** 自动化域参数范围 [lo, hi]（快照优先；缺快照回退内置）。 */
+export function paramRange(pid) {
+  const m = store.metaParams && store.metaParams.automation && store.metaParams.automation[pid];
+  const f = PARAM_FALLBACK.automation[pid];
+  const lo = (m && Number.isFinite(m.lo)) ? m.lo : (f ? f.lo : 0.0);
+  const hi = (m && Number.isFinite(m.hi)) ? m.hi : (f ? f.hi : 1.0);
+  return [lo, hi];
+}
+
+/** 自动化域参数中文名（快照优先；缺快照回退内置）。 */
+export function paramLabel(pid) {
+  const m = store.metaParams && store.metaParams.automation && store.metaParams.automation[pid];
+  const f = PARAM_FALLBACK.automation[pid];
+  return (m && m.label) || (f && f.label) || pid;
 }
 
 /* 高频直写（每帧；不 dispatch——UI 由 playback.js 直接刷 DOM，快照供 CDP 断言） */
@@ -535,8 +569,12 @@ export function snapshot() {
     lanesScroll: store.lanesScroll || 0,
     laneRows: store.laneRows || null,   /* UI 修正轮3.2：左栏行布局表（文件夹行/折叠对齐观测） */
     split: splitState(),   /* M-V8 E3 段1：单轨分屏快照（CDP 断言用） */
-    /* M-V8 E5 段2：自动化 lane / 电平表快照（CDP 断言用） */
-    automation: { open: store.autoLane.open, param: store.autoLane.param },
+    /* M-V8 E5 段2：自动化道 / 电平表快照（CDP 断言用）；v0.2 批C 前段：+ range（注册表快照同源） */
+    automation: {
+      open: store.autoLane.open,
+      param: store.autoLane.param,
+      range: { volume: paramRange('volume'), pan: paramRange('pan') },
+    },
     /* M-V8 E6 段1：音频轨 clip 规范快照（CDP 断言用；旧 {file, offset} → 单 clip 同口径） */
     audio: (store.score && Array.isArray(store.score.tracks) ? store.score.tracks : [])
       .map((t, i) => ((t && t.kind === 'audio') ? { ti: i, name: t.name || '', clips: audioClipsOf(t) } : null))

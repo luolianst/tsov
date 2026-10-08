@@ -4,6 +4,7 @@ import { bus } from './events.js';
 import { api } from './api.js';
 import { KEYS_W, store, scoreBounds, tempo, beatsPerBar, setSelection, setView, refTag, setRange, splitPartner, setSplitRatio, toggleOverlay, setSingleTrack, fitViewTrack, audioClipsOf } from './state.js';
 import { peaksGet } from './peaks.js';   /* E3 段1：单轨波形峰值（公共管线） */
+import { xOf, tOf } from './geom.js';   /* v0.2 批C 前段（R2 地基件）：时间↔x 几何共享 */
 import { clipHitBand, beginAudioDrag, updateAudioDrag, finishAudioDrag, isDragging, dragPreviewOf, selOf, clearSel, splitClipAt, drawClipBlocks } from './audio_edit.js';   /* E6 段1 补：音频 clip 手势引擎（单轨/总谱共用） */
 import { diffLayers } from './diff.js';
 import { pal, trackColors } from './theme.js';
@@ -14,8 +15,8 @@ const NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
 let canvas, ctx, W = 0, H = 0, dpr = 1;
 
-export function xOf(t) { return KEYS_W + (t - store.view.scrollSec) * store.view.pxPerSec; }
-export function tOf(x) { return store.view.scrollSec + (x - KEYS_W) / store.view.pxPerSec; }
+/* v0.2 批C 前段（R2 地基件）：几何实现抽至 geom.js（单一来源）；下方 re-export 兼容既有外部引用 */
+export { xOf, tOf };
 export function yOf(midi) { return (store.view.midiTop - midi) * store.view.pxPerSemi; }
 export function midiOf(y) { return Math.round(store.view.midiTop - y / store.view.pxPerSemi); }
 
