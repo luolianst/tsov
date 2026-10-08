@@ -159,7 +159,16 @@ def render_buses(
     master = np.zeros((n_frames, 2), dtype=np.float32)
     bus_bufs: dict[str, np.ndarray] = {}
 
-    any_solo = any(bool(getattr(ht.track, "solo", False)) for ht in session.tracks)
+    # v0.2 C2（F6）：文件夹层（VCA 式）——音量乘子 × automation 曲线；mute/solo 作用于成员
+    folders_def = getattr(session.score, "folders", None) or {}
+
+    def _folder_mod(tr):
+        name = str(getattr(tr, "folder", "") or "")
+        m = folders_def.get(name) if (name and isinstance(folders_def, dict)) else None
+        return m if isinstance(m, dict) else None
+
+    any_solo = any(bool(getattr(ht.track, "solo", False)) for ht in session.tracks) or \
+        any(bool(m.get("solo")) for m in folders_def.values() if isinstance(m, dict))
 
     send_on = include_bus_processing and only_track is None   # stems（单轨）不含 send 支路
     for idx, ht in enumerate(session.tracks):
@@ -176,7 +185,10 @@ def render_buses(
                     sends_here[str(sname)] = a
         if only_bus is not None and target != only_bus and only_bus not in sends_here:
             continue
-        if bool(getattr(tr, "mute", False)) or (any_solo and not bool(getattr(tr, "solo", False))):
+        fmod = _folder_mod(tr)
+        f_mute = bool(fmod and fmod.get("mute"))
+        f_solo = bool(fmod and fmod.get("solo"))
+        if bool(getattr(tr, "mute", False)) or f_mute or (any_solo and not (bool(getattr(tr, "solo", False)) or f_solo)):
             continue
 
         name = tr.name or f"track-{idx}"
@@ -207,6 +219,16 @@ def render_buses(
 
         # 轨内后段（混音期实时层）：推子 → automation → 声像
         stereo_buf = apply_track_mix(np.asarray(buf, dtype=np.float32), tr, times)
+
+        # v0.2 C2（F6）：文件夹层（VCA）——音量乘子 × 文件夹 automation 曲线（乘性级联；无层零改动）
+        if fmod:
+            fvol = _num(fmod.get("volume"), 1.0)
+            if fvol != 1.0:
+                stereo_buf = stereo_buf * np.float32(fvol)
+            fauto = fmod.get("automation")
+            fcurve = _curve(fauto.get("volume") if isinstance(fauto, dict) else None, times)
+            if fcurve is not None:
+                stereo_buf = stereo_buf * fcurve[:, None].astype(np.float32)
 
         if only_bus is None or target == only_bus:
             if target == "master" or not include_bus_processing:

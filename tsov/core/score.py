@@ -6,6 +6,7 @@ v0.2 批C2 增补（additive + 缺省旧数据同构）：
 - Track.lanes（道实体）——见 docs/v0.2-单轨工作台与道系统v2-设计-2026-10-08.md §3.1；
   None=未管理（旧数据同构）/ []=已管理且清空 / 列表=显式道（求值范围以此为准）。
 - combine 口：道条目预留 combine="absolute" 缺省字段（他档不实现）。
+- Score.folders（文件夹层 v1：音量乘子 + mute/solo + automation，VCA 式不动路由）——见同设计件 §3.4。
 """
 
 from __future__ import annotations
@@ -253,6 +254,10 @@ class Score:
     master: Bus = field(default_factory=lambda: Bus(name="master"))
     # ---- M-V8 E1 字段（向后兼容增补）----
     bookmarks: list[Bookmark] = field(default_factory=list)  # 书签（项目/文件夹/轨道三层，段轨转正）
+    # ---- v0.2 批C2（工作台 v2，F6）：文件夹层混音（additive；设计件 §3.4）----
+    # {名称: {"volume": 1.0, "mute": false, "solo": false, "automation": {}}}；缺省 {} = 旧数据同构。
+    # VCA 式：音量乘子 × 文件夹 automation 曲线（乘性级联）；mute/solo 作用于成员轨；**不改路由**。
+    folders: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -269,4 +274,5 @@ class Score:
             buses=[Bus.from_dict(b) for b in data.get("buses") or []],
             master=Bus.from_dict(data["master"]) if data.get("master") else Bus(name="master"),
             bookmarks=[Bookmark.from_dict(b) for b in data.get("bookmarks") or []],
+            folders=dict(data.get("folders") or {}),
         )

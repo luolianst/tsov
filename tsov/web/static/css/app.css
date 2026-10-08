@@ -1135,3 +1135,7 @@ body.chat-resizing { cursor: col-resize; user-select: none; }
 .bm-menu button.bm-disabled:hover { background: transparent; }
 .alane-empty { padding: 8px 10px; color: var(--muted); font-size: 11px; }
 .alane-flash { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* v0.2 批C2（F6）：文件夹行内联控件 */
+.fold-vol { width: 52px; margin-left: 4px; font-size: 11px; padding: 1px 3px;
+  background: var(--bg-elev); color: var(--text); border: 1px solid var(--border); border-radius: 4px; }

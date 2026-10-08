@@ -197,7 +197,29 @@ function renderTracks(el) {
       nm.textContent = '📁 ' + tr.folder + '（' + folderTracks(tr.folder).length + ' 轨）';
       hd.appendChild(tg);
       hd.appendChild(nm);
-      hd.title = '单击：选中该文件夹（M 键给它建旗）｜ ▾ 折叠/展开';
+      /* v0.2 C2（F6，闸门 G3）：文件夹行内联 M/S + 音量（最小形态；VCA 式不动路由） */
+      const fd = ((store.score.folders || {})[tr.folder]) || {};
+      const fm = document.createElement('button');
+      fm.className = 'ms' + (fd.mute ? ' on' : '');
+      fm.textContent = 'M';
+      fm.title = '文件夹静音（成员轨；VCA 式）';
+      fm.addEventListener('click', (e) => { e.stopPropagation(); postFolderMix(tr.folder, { mute: !fd.mute }); });
+      const fs = document.createElement('button');
+      fs.className = 'ms solo' + (fd.solo ? ' on' : '');
+      fs.textContent = 'S';
+      fs.title = '文件夹独奏（成员轨；VCA 式）';
+      fs.addEventListener('click', (e) => { e.stopPropagation(); postFolderMix(tr.folder, { solo: !fd.solo }); });
+      const fv = document.createElement('input');
+      fv.type = 'number'; fv.min = '0'; fv.max = '2'; fv.step = '0.05';
+      fv.className = 'fold-vol';
+      fv.value = (fd.volume == null ? 1 : fd.volume);
+      fv.title = '文件夹音量乘子（0~2）';
+      fv.addEventListener('click', (e) => e.stopPropagation());
+      fv.addEventListener('change', () => postFolderMix(tr.folder, { volume: Number(fv.value) }));
+      hd.appendChild(fm);
+      hd.appendChild(fs);
+      hd.appendChild(fv);
+      hd.title = '单击：选中该文件夹（M 键给它建旗）｜ ▾ 折叠/展开 ｜ M/S/音量：文件夹层（VCA）';
       hd.addEventListener('click', () => setSelFolder(store.selFolder === tr.folder ? '' : tr.folder));
       el.appendChild(hd);
     }
@@ -462,6 +484,18 @@ function locateLane(ti, param) {
       setTimeout(() => row.classList.remove('alane-flash'), 700);
     }
   }, 140);
+}
+
+/* v0.2 C2（F6）：文件夹行内联控件 → set_folder_mix（命令层同一路径）。 */
+async function postFolderMix(name, patchV) {
+  if (!store.project) return;
+  try {
+    const r = await api.postBatch(store.project, '文件夹混音',
+      [{ op: 'set_folder_mix', value: Object.assign({ folder: name }, patchV) }],
+      '文件夹混音：' + name + ' ' + JSON.stringify(patchV));
+    if (r.applied) bus.dispatch('toast', '文件夹「' + name + '」已更新 ' + refTag(r));
+    else setError('被拒：' + (r.errors || []).join('；'));
+  } catch (e) { setError(e.message); }
 }
 
 /* 道行双击：入副区（全宽曲线编辑）；再双击同参撤下。 */

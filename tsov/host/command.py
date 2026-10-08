@@ -128,6 +128,9 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
         return _apply_scale_time(score, c)
     if c.op == "set_tempo_remap":
         return _apply_set_tempo_remap(score, c)
+    # v0.2 批C2（工作台 v2，F6）：文件夹层混音（工程级寻址；VCA 式不动路由）
+    if c.op == "set_folder_mix":
+        return _apply_set_folder_mix(score, c)
     # M-V8 E1：书签三层（工程级索引寻址；与音符共用事务/快照窗口）
     if c.op == "add_bookmark":
         return _apply_add_bookmark(score, c)
@@ -1021,6 +1024,37 @@ def _audio_default_name(rel: str) -> str:
     if len(parts) == 2 and re.fullmatch(r"[0-9a-f]{8}", parts[1]):
         stem = parts[0]
     return (stem or "音频")[:64]
+
+
+def _apply_set_folder_mix(score: Score, c: EditCommand) -> str | None:
+    """value = {folder, volume?, mute?, solo?}；volume 0~2 钳制；mute/solo bool。
+
+    条目缺省 {volume:1.0, mute:false, solo:false, automation:{}}；文件夹名为键（与轨道 folder 归属同词）。"""
+    v = c.value if isinstance(c.value, dict) else {}
+    name = str(v.get("folder") or "").strip()
+    if not name:
+        return "set_folder_mix 需 {folder: 名称}"
+    if len(name) > 64:
+        return "set_folder_mix 文件夹名过长（≤64）"
+    folders = getattr(score, "folders", None)
+    if not isinstance(folders, dict):
+        folders = {}
+    entry = folders.get(name)
+    if not isinstance(entry, dict):
+        entry = {"volume": 1.0, "mute": False, "solo": False, "automation": {}}
+    if v.get("volume") is not None:
+        try:
+            vol = float(v["volume"])
+        except (TypeError, ValueError):
+            return f"set_folder_mix volume 非法：{v.get('volume')!r}"
+        entry["volume"] = max(0.0, min(2.0, vol))
+    if "mute" in v:
+        entry["mute"] = bool(v["mute"])
+    if "solo" in v:
+        entry["solo"] = bool(v["solo"])
+    folders[name] = entry
+    score.folders = folders
+    return None
 
 
 def _lane_next_id(lanes: list) -> str:

@@ -458,6 +458,17 @@ export function lanesState() {
   return { ti: store.singleTrack, count: ls.length, params: ls.map((l) => l.param) };
 }
 
+/** 文件夹层快照（只读；__tsovState.folders 用）。 */
+export function foldersState() {
+  const f = (store.score && store.score.folders) || {};
+  const out = {};
+  for (const k of Object.keys(f)) {
+    const v = f[k];
+    if (v && typeof v === 'object') out[k] = { volume: v.volume == null ? 1.0 : v.volume, mute: !!v.mute, solo: !!v.solo };
+  }
+  return out;
+}
+
 /** 工作台快照（__tsovState.single 用；CDP 断言面）。 */
 export function singleState() {
   const single = store.viewMode === 'single';
@@ -672,6 +683,7 @@ export function snapshot() {
     split: splitState(),   /* M-V8 E3 段1：单轨分屏快照（CDP 断言用） */
     single: singleState(),   /* v0.2 批C2（工作台 v2）：{main, partner, focus, sameAxis}（CDP 断言用） */
     lanes: lanesState(),   /* v0.2 C2（F4）：单轨主轨道列表 {ti, count, params[]}（CDP 断言用） */
+    folders: foldersState(),   /* v0.2 C2（F6）：文件夹层（volume/mute/solo；CDP 断言用） */
     /* M-V8 E5 段2：自动化道 / 电平表快照（CDP 断言用）；v0.2 批C 前段：+ range（注册表快照同源） */
     automation: {
       open: store.autoLane.open,
