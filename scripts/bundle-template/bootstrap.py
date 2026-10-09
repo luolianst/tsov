@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -61,6 +62,28 @@ def _rewrite_home(cfg: Path, home: str, drop: tuple = ("executable", "command"))
     _write_if_changed(cfg, "\n".join([f"home = {home}"] + lines) + "\n")
 
 
+def _ensure_standard_python(venv_dir: Path) -> None:
+    """把 uv trampoline 版 python.exe/pythonw.exe 换成 python-base 自带的标准 venv 启动器。
+
+    uv 造的启动器嵌死装机绝对路径——换台机器后报
+    「uv trampoline failed to spawn Python child process / entity not found」。
+    标准启动器读 pyvenv.cfg 定位基座，可随包任意路径搬家（幂等：已是标准件即跳过）。
+    """
+    stub_dir = ROOT / "python-base" / "Lib" / "venv" / "scripts" / "nt"
+    scripts = venv_dir / "Scripts"
+    for name in ("python.exe", "pythonw.exe"):
+        target, stub = scripts / name, stub_dir / name
+        if not (target.is_file() and stub.is_file()):
+            continue
+        try:
+            if b"uv trampoline" not in target.read_bytes()[:65536]:
+                continue
+            shutil.copy2(stub, target)
+            print(f"[修复] 已换标准 Python 启动器：{target}")
+        except OSError as e:
+            print(f"[警告] 启动器替换失败：{target} —— {e}")
+
+
 def fixup() -> None:
     """搬家修复：所有写死的绝对路径 → 当前目录（幂等）。"""
     base = str(ROOT / "python-base")
@@ -72,10 +95,12 @@ def fixup() -> None:
             du.unlink()   # 纯元数据，含开发机绝对路径，删掉更干净
         except OSError:
             pass
+    _ensure_standard_python(VENV)
     # GAME venv：基座指向 + 接线（让它能看到主 venv 的 torch 等）
     _rewrite_home(GAME_VENV / "pyvenv.cfg", base)
     _write_if_changed(GAME_VENV / "Lib" / "site-packages" / "tsovvenv.pth",
                       str(VENV / "Lib" / "site-packages") + "\n")
+    _ensure_standard_python(GAME_VENV)
 
 
 def _run(cmd: list[str], timeout: float = 120.0) -> subprocess.CompletedProcess:

@@ -163,6 +163,37 @@ def gate_bat(name_root: Path) -> None:
     print(f"      ✓ 启动器行尾 CRLF×{crlf}")
 
 
+def gate_no_trampoline(name_root: Path) -> None:
+    """门禁：venv 的 python 启动器不得是 uv trampoline（嵌死装机路径，换机拉不起子进程）。"""
+    must = [("tsov/.venv/Scripts/python.exe", True), ("tsov/.venv/Scripts/pythonw.exe", True),
+            ("vendor/GAME/.venv/Scripts/python.exe", True), ("vendor/GAME/.venv/Scripts/pythonw.exe", True),
+            ("python-base/python.exe", True), ("python-base/pythonw.exe", False)]
+    bad = []
+    for rel, required in must:
+        p = name_root / rel
+        if not p.is_file():
+            if required:
+                bad.append(f"缺 {rel}")
+            continue
+        head = p.read_bytes()[:65536]
+        if b"uv trampoline" in head or b"LuoLian" in head:
+            bad.append(rel)
+    if bad:
+        raise SystemExit("启动器门禁未过（uv trampoline / 装机路径残留）：" + "；".join(bad))
+    # 信息级：其余脚本 exe 里仍嵌装机路径的数量（已知存量：uv 脚本 trampoline，不在运行链上）
+    n = 0
+    for d in ("tsov/.venv/Scripts", "vendor/GAME/.venv/Scripts"):
+        for p in (name_root / d).glob("*.exe"):
+            try:
+                if b"LuoLian" in p.read_bytes():
+                    n += 1
+            except OSError:
+                pass
+    if n:
+        print(f"      ℹ 另有 {n} 个脚本 exe 嵌装机路径（存量·不在运行链，未处理）")
+    print("      ✓ 启动器无 uv trampoline / 装机路径")
+
+
 def run_bat_smoke(name_root: Path) -> None:
     """真跑一遍「启动tsov.bat check」—— 门禁必须覆盖 bat 本体的 cmd 解析层。"""
     r = subprocess.run(["cmd.exe", "/c", "启动tsov.bat", "check"],
@@ -284,6 +315,7 @@ def main() -> int:
     bootstrap.fixup()
     gate_stage(name_root, tracked)
     gate_bat(name_root)
+    gate_no_trampoline(name_root)
     run_check(name_root)
     run_bat_smoke(name_root)
     print("[5/6] 自检通过 ✓")
