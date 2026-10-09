@@ -137,6 +137,8 @@ def check() -> int:
 
     engine_files = [
         ("FluidSynth DLL", ROOT / "vendor" / "fluidsynth" / "bin" / "libfluidsynth-3.dll"),
+        ("FluidSynth 依赖 SDL3.dll", ROOT / "vendor" / "fluidsynth" / "bin" / "SDL3.dll"),
+        ("FluidSynth 依赖 sndfile.dll", ROOT / "vendor" / "fluidsynth" / "bin" / "sndfile.dll"),
         ("GM 音色库", ROOT / "vendor" / "soundfonts" / "FluidR3_GM.sf2"),
         ("RMVPE 模型", ROOT / "vendor" / "RMVPE" / "rmvpe.pt"),
     ]
@@ -146,6 +148,8 @@ def check() -> int:
     mark(len(pts) > 0, "GAME 权重（pretrained/*.pt）", f"{len(pts)} 个文件")
     mark(FFMPEG.is_file(), "ffmpeg（音频处理）")
     mark(FFPROBE.is_file(), "ffprobe（时长探测；缺它跑链报 WinError 2）")
+    # git 可选（2026-10-09 打包器审计）：版本回滚/收藏的加分项，缺了其余功能不受影响——信息行不设门禁
+    mark(True, "git（可选·版本回滚/收藏）", shutil.which("git") or "未安装——版本功能自动停用，其余不受影响")
 
     print("=" * 46)
     print("自检结果：" + ("全部通过 ✓ 可以开跑" if ok else "有缺项（见上）——请检查是否完整解压"))

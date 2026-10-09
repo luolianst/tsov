@@ -351,14 +351,23 @@ class Project:
     # ------------------------------------------------------------------
 
     def _git(self, *args: str) -> subprocess.CompletedProcess:
-        return subprocess.run(
-            ["git", *args],
-            cwd=str(self.root),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
+        try:
+            return subprocess.run(
+                ["git", *args],
+                cwd=str(self.root),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except FileNotFoundError:
+            # git 未安装（一键包零安装目标机常态；2026-10-09 打包器审计——与 ffprobe 同族病：
+            # 运行时调用的外部件包里没配对）。合成失败结果（rc=127）：20+ 调用点按既有
+            # returncode/空输出分支自然降级，版本树/回滚/收藏静默停用；
+            # 工程创建/编辑/转录/渲染不受影响。也兜「有 .git 仓库但无 git 二进制」第二形态。
+            return subprocess.CompletedProcess(
+                args=["git", *args], returncode=127, stdout="",
+                stderr="git 未安装（版本/收藏功能自动停用）")
 
     def _has_git(self) -> bool:
         """本目录是否有**有效**的 git 仓库（`.git/HEAD` 存在为准）。

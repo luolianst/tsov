@@ -112,6 +112,8 @@ class GameBackend(TranscribeBackend):
                 cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
                 env=env, timeout=float(cfg["timeout"]),
             )
+        except FileNotFoundError as e:
+            raise RuntimeError(f"找不到 GAME 运行环境（vendor/GAME/.venv 或 infer.py 缺失，检查包完整性）：{e}") from e
         except subprocess.TimeoutExpired as e:
             raise RuntimeError(f"GAME 推理超时（>{cfg['timeout']}s）：{audio_path}") from e
 

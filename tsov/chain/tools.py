@@ -65,7 +65,13 @@ class ChainContext:
 def _ffmpeg(args: list[str]) -> None:
     """ffmpeg 调用（错误带 stderr；与 dsp/preprocess 同口径）。"""
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *args]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            f"ffmpeg 不存在（PATH 与程序目录都找不到）：{e}。"
+            f"若是开箱包：把 ffmpeg.exe/ffprobe.exe 放进 tsov 包的 ffmpeg\\ 文件夹后重启 tsov；"
+            f"若是源码安装：完整 ffmpeg 发行包进 PATH。") from e
     if proc.returncode != 0:
         raise RuntimeError(f"ffmpeg 失败：{' '.join(cmd)}\n{(proc.stderr or '').strip()[:400]}")
 
