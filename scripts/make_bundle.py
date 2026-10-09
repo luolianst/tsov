@@ -9,7 +9,7 @@
     tsov/                 程序本体（源码 + tsov/.venv 全依赖）
     vendor/               引擎五件套（FluidSynth / 音色库 / RMVPE / GAME / VST3）
     scripts/ docs/ README* LICENSE pyproject.toml .env.example
-    ffmpeg/ffmpeg.exe     音频处理
+    ffmpeg/            音频处理（ffmpeg.exe + ffprobe.exe，缺一链路会报 WinError 2）
 
 用法：
   python scripts/make_bundle.py                    # 全流程：stage → 修复 → 自检 → zip 到桌面
@@ -136,11 +136,24 @@ def locate_base_python() -> Path:
     raise SystemExit(f"找不到基座 Python（读 {cfg} 的 home 行失败）")
 
 
-def locate_ffmpeg() -> Path:
+def locate_ffmpeg() -> tuple[Path, Path]:
+    """定位 ffmpeg + ffprobe（ffprobe 优先取 ffmpeg 同目录=同发行版配套）。
+
+    2026-10-09 修复：v0.1.5 只打了 ffmpeg.exe，链路 probe_duration 裸调 ffprobe →
+    目标机 WinError 2（用户实报）。两件必须成对进包。
+    """
     exe = shutil.which("ffmpeg")
     if not exe:
         raise SystemExit("PATH 里找不到 ffmpeg（打包需要它）")
-    return Path(exe)
+    ff = Path(exe)
+    probe = ff.with_name("ffprobe.exe")
+    if not probe.is_file():
+        p2 = shutil.which("ffprobe")
+        if p2:
+            probe = Path(p2)
+    if not probe.is_file():
+        raise SystemExit("找不到 ffprobe.exe（应在 ffmpeg 同目录；缺它目标机跑链报 WinError 2）——中止打包")
+    return ff, probe
 
 
 def run_check(name_root: Path) -> None:
@@ -304,10 +317,12 @@ def main() -> int:
     base_src = locate_base_python()
     copy_tree(base_src, name_root / "python-base")
     print(f"      ✓ python-base ← {base_src}")
-    ff_src = locate_ffmpeg()
+    ff_src, fp_src = locate_ffmpeg()
     (name_root / "ffmpeg").mkdir(exist_ok=True)
     shutil.copy2(ff_src, name_root / "ffmpeg" / "ffmpeg.exe")
+    shutil.copy2(fp_src, name_root / "ffmpeg" / "ffprobe.exe")
     print(f"      ✓ ffmpeg ← {ff_src}（{ff_src.stat().st_size:,}B）")
+    print(f"      ✓ ffprobe ← {fp_src}（{fp_src.stat().st_size:,}B）")
 
     print("[5/6] 搬家修复 + 门禁 + 包内自检 …")
     sys.path.insert(0, str(name_root))

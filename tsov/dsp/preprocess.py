@@ -40,10 +40,17 @@ def _spawn(cmd: list[str], name: str, retries: int = 4):
     """subprocess 启动并重试（Windows 安全软件偶发锁进程：WinError 5 拒绝访问，等 30-60s 重试）。
 
     退避 10/20/30s 递增，总窗口 ~60s；仍失败才抛 RuntimeError。
+    FileNotFoundError（WinError 2）= 可执行文件根本不在——重试无意义，直接给指路报错
+    （2026-10-09：v0.1.5 开箱包漏打 ffprobe.exe，用户跑链吃到裸 WinError 2 无从下手）。
     """
     for attempt in range(retries):
         try:
             return subprocess.run(cmd, capture_output=True, text=True)
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                f"{name} 不存在（PATH 与程序目录都找不到）：{e}。"
+                f"若是开箱包：把 {name}.exe 放进 tsov 包的 ffmpeg\\ 文件夹（与 ffmpeg.exe 同目录）后重启 tsov；"
+                f"若是源码安装：安装完整 ffmpeg 发行包并保证 ffmpeg/ffprobe 在 PATH。") from e
         except PermissionError as e:
             if attempt < retries - 1:
                 time.sleep(10 * (attempt + 1))

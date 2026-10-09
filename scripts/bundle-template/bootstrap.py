@@ -31,6 +31,7 @@ BASE_PY = ROOT / "python-base" / "python.exe"
 GAME_VENV = ROOT / "vendor" / "GAME" / ".venv"
 GAME_PY = GAME_VENV / "Scripts" / "python.exe"
 FFMPEG = ROOT / "ffmpeg" / "ffmpeg.exe"
+FFPROBE = ROOT / "ffmpeg" / "ffprobe.exe"   # 2026-10-09：v0.1.5 漏打此件 → 链路 WinError 2（用户实报）
 
 
 def _utf8_console() -> None:
@@ -144,6 +145,7 @@ def check() -> int:
     pts = sorted((ROOT / "vendor" / "GAME" / "pretrained").glob("*.pt")) if (ROOT / "vendor" / "GAME" / "pretrained").is_dir() else []
     mark(len(pts) > 0, "GAME 权重（pretrained/*.pt）", f"{len(pts)} 个文件")
     mark(FFMPEG.is_file(), "ffmpeg（音频处理）")
+    mark(FFPROBE.is_file(), "ffprobe（时长探测；缺它跑链报 WinError 2）")
 
     print("=" * 46)
     print("自检结果：" + ("全部通过 ✓ 可以开跑" if ok else "有缺项（见上）——请检查是否完整解压"))

@@ -41,7 +41,7 @@ tsov 一键开箱包 v{VERSION} —— 使用说明
   python-base\        自带的 Python 运行时
   tsov\               程序本体（源码 + tsov\.venv 运行环境）
   vendor\             AI 引擎：FluidSynth 音源 / RMVPE 哼唱转录 / GAME 人声转录 / VST3 插件
-  ffmpeg\             音频处理
+  ffmpeg\             音频处理（ffmpeg.exe + ffprobe.exe）
   docs\               文档（功能表 / 术语表 / 引擎说明）
 
 【许可与声明】
