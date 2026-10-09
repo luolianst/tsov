@@ -3,7 +3,7 @@
 字段名与类型严格按 ADR-0005；追加的 to_dict / from_dict 仅为 JSON 落盘镜像服务。
 
 v0.2 批C2 增补（additive + 缺省旧数据同构）：
-- Track.lanes（道实体）——见 docs/v0.2-单轨工作台与道系统v2-设计-2026-10-08.md §3.1；
+- Track.lanes（道实体）——见 docs/tasks/v0.2/v0.2-单轨工作台与道系统v2-设计-2026-10-08.md §3.1；
   None=未管理（旧数据同构）/ []=已管理且清空 / 列表=显式道（求值范围以此为准）。
 - combine 口：道条目预留 combine="absolute" 缺省字段（他档不实现）。
 - Score.folders（文件夹层 v1：音量乘子 + mute/solo + automation，VCA 式不动路由）——见同设计件 §3.4。
