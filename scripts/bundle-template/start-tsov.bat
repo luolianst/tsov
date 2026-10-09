@@ -1,5 +1,8 @@
 @echo off
-rem tsov one-click launcher (ASCII-only on purpose; Chinese UX comes from bootstrap.py)
+rem tsov one-click launcher. MUST keep CRLF line endings - cmd shreds LF-only bats.
+rem Do NOT re-save this file with Unix/LF endings.
+rem The Chinese hint below is intentional - this branch runs when python-base is
+rem missing, so the message cannot come from bootstrap.py.
 setlocal
 title tsov One-Click Bundle
 chcp 65001 >nul

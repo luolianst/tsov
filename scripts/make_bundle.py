@@ -153,6 +153,53 @@ def run_check(name_root: Path) -> None:
         raise SystemExit("包内自检未通过 —— 中止打包（先修问题再重跑）")
 
 
+def gate_bat(name_root: Path) -> None:
+    """启动器字节门禁：批处理必须全 CRLF —— LF-only 会被 cmd 绞碎逐段当命令执行。"""
+    data = (name_root / "启动tsov.bat").read_bytes()
+    crlf = data.count(b"\r\n")
+    lone_lf = data.count(b"\n") - crlf
+    if crlf == 0 or lone_lf > 0:
+        raise SystemExit(f"启动器行尾非法：CRLF={crlf} 孤LF={lone_lf}（必须全 CRLF）—— 中止打包")
+    print(f"      ✓ 启动器行尾 CRLF×{crlf}")
+
+
+def run_bat_smoke(name_root: Path) -> None:
+    """真跑一遍「启动tsov.bat check」—— 门禁必须覆盖 bat 本体的 cmd 解析层。"""
+    r = subprocess.run(["cmd.exe", "/c", "启动tsov.bat", "check"],
+                       capture_output=True, stdin=subprocess.DEVNULL,
+                       cwd=str(name_root), timeout=600, creationflags=0x08000000)
+    raw = r.stdout + r.stderr
+    if ("不是内部或外部命令".encode("gbk") in raw or
+            "不是内部或外部命令".encode("utf-8") in raw):
+        raise SystemExit("启动器冒烟：cmd 解析碎裂（出现「不是内部或外部命令」）—— 中止打包")
+    if not ("全部通过".encode("utf-8") in raw or "全部通过".encode("gbk") in raw):
+        raise SystemExit("启动器冒烟：未见自检通过标记 —— 中止打包\n"
+                         + raw.decode("utf-8", errors="replace")[-2000:])
+    print("      ✓ 启动器本体冒烟（cmd 解析 + 自检标记）")
+
+
+def verify_zip_bat(out: Path, folder: str) -> None:
+    """zip 级静态预验：包内启动器必须全 CRLF（打完 zip 再对一次账）。"""
+    with zipfile.ZipFile(out) as zf:
+        entry = None
+        for i in zf.infolist():
+            n = i.filename
+            try:
+                n = n.encode("cp437").decode("gbk")  # bsdtar 中文名无 UTF-8 标志
+            except Exception:
+                pass
+            if n == f"{folder}/启动tsov.bat":
+                entry = i
+                break
+        if entry is None:
+            raise SystemExit(f"zip 预验：包内找不到 {folder}/启动tsov.bat —— 中止交付")
+        data = zf.read(entry)
+    crlf = data.count(b"\r\n")
+    if crlf == 0 or data.count(b"\n") - crlf > 0:
+        raise SystemExit("zip 预验：包内启动器行尾非法 —— 中止交付")
+    print(f"      ✓ zip 预验：启动器 CRLF×{crlf} 在包")
+
+
 def make_zip(stage: Path, folder: str, out: Path) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists():
@@ -236,7 +283,9 @@ def main() -> int:
     import bootstrap  # noqa: E402 —— 用包内模板做同款修复（bootstrap.ROOT 已由 __file__ 决定）
     bootstrap.fixup()
     gate_stage(name_root, tracked)
+    gate_bat(name_root)
     run_check(name_root)
+    run_bat_smoke(name_root)
     print("[5/6] 自检通过 ✓")
 
     if args.skip_zip:
@@ -245,6 +294,7 @@ def main() -> int:
     print("[6/6] 压缩 zip（GB 级，约 5–20 分钟）…")
     t0 = datetime.now()
     make_zip(stage, folder, out)
+    verify_zip_bat(out, folder)
     dt = (datetime.now() - t0).total_seconds()
     print(f"[6/6] 完成 ✓ {out}（{out.stat().st_size:,}B，{dt:.0f}s）")
     print(f"      （zip 内含顶层目录 {folder}/；解压后双击「启动tsov.bat」即可）")
