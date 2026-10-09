@@ -176,8 +176,18 @@ def gate_bat(name_root: Path) -> None:
     print(f"      ✓ 启动器行尾 CRLF×{crlf}")
 
 
+def _user_needle() -> bytes:
+    r"""本机用户名 = 装机绝对路径（C:\Users\<name>\…）的特征串——运行时动态取值（不硬编码用户名）。"""
+    try:
+        name = Path.home().name or os.environ.get("USERNAME", "")
+    except Exception:
+        name = os.environ.get("USERNAME", "")
+    return name.encode("utf-8", errors="replace") if name else b"\x00\x00\x00"
+
+
 def gate_no_trampoline(name_root: Path) -> None:
     """门禁：venv 的 python 启动器不得是 uv trampoline（嵌死装机路径，换机拉不起子进程）。"""
+    needle = _user_needle()
     must = [("tsov/.venv/Scripts/python.exe", True), ("tsov/.venv/Scripts/pythonw.exe", True),
             ("vendor/GAME/.venv/Scripts/python.exe", True), ("vendor/GAME/.venv/Scripts/pythonw.exe", True),
             ("python-base/python.exe", True), ("python-base/pythonw.exe", False)]
@@ -189,7 +199,7 @@ def gate_no_trampoline(name_root: Path) -> None:
                 bad.append(f"缺 {rel}")
             continue
         head = p.read_bytes()[:65536]
-        if b"uv trampoline" in head or b"LuoLian" in head:
+        if b"uv trampoline" in head or needle in head:
             bad.append(rel)
     if bad:
         raise SystemExit("启动器门禁未过（uv trampoline / 装机路径残留）：" + "；".join(bad))
@@ -198,7 +208,7 @@ def gate_no_trampoline(name_root: Path) -> None:
     for d in ("tsov/.venv/Scripts", "vendor/GAME/.venv/Scripts"):
         for p in (name_root / d).glob("*.exe"):
             try:
-                if b"LuoLian" in p.read_bytes():
+                if needle in p.read_bytes():
                     n += 1
             except OSError:
                 pass
