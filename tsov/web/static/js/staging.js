@@ -610,8 +610,8 @@ export function itemCard(it) {
   } else {
     bits.push('链运行 ' + fmtTs(it.meta && it.meta.run_ts));
     const raw = it.meta && it.meta.notes_raw, proc = it.meta && it.meta.notes_processed;
-    if (raw != null) bits.push('原始 ' + raw + ' 音');
-    if (proc != null) bits.push('处理 ' + proc + ' 音');
+    if (raw != null && proc == null) bits.push('转录 ' + raw + ' 音（未处理）');
+    if (proc != null) bits.push('处理版 ' + proc + ' 音');
     if (!it.ready) bits.push('未跑完（缺 ' + ((it.meta && it.meta.missing) || []).join('、') + '）');
   }
   if (it.handled_at) bits.push((it.state === 'adopted' ? '采纳于 ' : '丢弃于 ') + fmtUnix(it.handled_at));

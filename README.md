@@ -20,7 +20,7 @@ tsov turns “I can hum it, but I can't write it” into a real, editable music 
 | Step | What happens |
 |---|---|
 | 🎤 **Hum** | Record a voice memo and import it (or any audio / MIDI file). |
-| 🎼 **Transcribe** | One click runs the **humming quick-lane**: denoise → loudnorm → transcribe (RMVPE for humming, GAME for produced vocals) → quantize → scale-snap. Every step keeps its artifacts; adopt them to the project as editable MIDI tracks. |
+| 🎼 **Transcribe** | One click runs the **humming quick-lane**: denoise → loudnorm → transcribe (RMVPE for humming, GAME for produced vocals) → quantize → scale-snap. Every step keeps its artifacts; adopt the final result to the project as an editable MIDI track. |
 | 💬 **Talk** | Chat with an agent that edits the project for you: “set the tempo to its natural speed and give me a folk arrangement”, “analyze this melody and orchestrate it”, “guide the mix”, “mix it and export”. Every round shows up as reviewable diffs and action cards — with undo. |
 | 🎛 **Work** | A real workspace in your browser: piano-roll score editor (full score ↔ single-track), multi-track arrangement, buses & effect chains (pedalboard), automation lanes, metering, audio clips with non-destructive editing, recording with monitoring. |
 | 📦 **Export** | Master mix / stems / buses / MIDI; 16/24/32-bit; range export; everything lands in a timestamped `exports/` folder. |

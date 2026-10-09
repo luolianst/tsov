@@ -31,7 +31,7 @@ def register(app: FastAPI) -> None:
 
     @app.post("/api/projects/{name}/staging/{item_id}/adopt")
     def staging_adopt(name: str, item_id: str, body: dict | None = None) -> dict:
-        """采纳（真一键）——producer 分发；chain：双轨进工程（命令层事务）。"""
+        """采纳（真一键）——producer 分发；chain：处理版进工程（命令层事务）。"""
         body = body or {}
         proj = st().get_project(name)
         item = staging.get_item(proj.root, str(item_id))

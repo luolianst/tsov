@@ -2,7 +2,7 @@
 
 - 核心（tsov.staging）：探针形态（就绪/缺件/空目录跳过）；处置记录（.tsov-state.json 保留他键）；
   排序（pending 前→已处置后）；get_item
-- REST：ready 校验 409；采纳走命令层（轨数 +2 / 幂等 already）；丢弃零残留（score.json sha 不变、
+- REST：ready 校验 409；采纳走命令层（轨数 +1 / 幂等 already）；丢弃零残留（score.json sha 不变、
   run 目录保留）；artifact 守卫（200/400 穿越/404）
 """
 
@@ -70,6 +70,14 @@ def test_chain_item_not_ready(tmp_path):
     it = staging.list_items(tmp_path)["items"][0]
     assert it["ready"] is False and it["meta"]["missing"] == ["05-notes-snapped.json"]
     assert it["meta"]["notes_raw"] == 2 and it["meta"]["notes_processed"] is None
+
+
+def test_chain_item_ready_without_raw(tmp_path):
+    """10-09 单轨口径：raw 缺但 05 在 → 仍可采纳（ready=True；missing 如实列 03）。"""
+    _write_run(tmp_path, "20260104-000000", raw=None, proc=2, wavs=False)
+    it = staging.list_items(tmp_path)["items"][0]
+    assert it["ready"] is True and it["meta"]["missing"] == ["03-voice.json"]
+    assert it["meta"]["notes_processed"] == 2
 
 
 def test_records_persist_and_preserve_keys(tmp_path):
@@ -168,11 +176,11 @@ def test_rest_list_empty(env):
     assert body["counts"] == {"pending": 0, "adopted": 0, "discarded": 0}
 
 
-def test_rest_adopt_flow_dual_tracks(env):
-    """采纳 = 命令层事务（与 /chain/apply 同径）：轨数 +2 / 幂等 already / 记录 adopted。"""
+def test_rest_adopt_flow_single_track(env):
+    """采纳 = 命令层事务（与 /chain/apply 同径，10-09 起单轨·处理版）：轨数 +1 / 幂等 already / 记录 adopted。"""
     _make_project(env)
     root = env["dir"] / "p1"
-    _write_run(root, "20990101-000000", raw=2, proc=2)
+    _write_run(root, "20990101-000000", raw=2, proc=3)
     _chain_json(root, "20990101-000000")
     client = env["client"]
 
@@ -183,11 +191,10 @@ def test_rest_adopt_flow_dual_tracks(env):
     a1 = client.post(f"/api/projects/p1/staging/{item_id}/adopt", json={})
     assert a1.status_code == 200, a1.text
     body = a1.json()
-    assert body["ok"] is True and body["tracks"] == 3 and body["record"]["state"] == "adopted"
+    assert body["ok"] is True and body["tracks"] == 2 and body["record"]["state"] == "adopted"
     proj = env["app"].state.tsov.get_project("p1")
-    assert [t.name for t in proj.score.tracks] == ["melody", "melody", "melody · 处理"]
-    assert [n.pitch_midi for n in proj.score.tracks[1].notes] == [60, 61]
-    assert [n.pitch_midi for n in proj.score.tracks[2].notes] == [60, 61]
+    assert [t.name for t in proj.score.tracks] == ["melody", "melody · 处理"]
+    assert [n.pitch_midi for n in proj.score.tracks[1].notes] == [60, 61, 62]   # 处理版音符（3 音）
 
     lst2 = client.get("/api/projects/p1/staging").json()
     assert lst2["counts"] == {"pending": 0, "adopted": 1, "discarded": 0}

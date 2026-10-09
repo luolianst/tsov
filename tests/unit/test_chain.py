@@ -446,7 +446,7 @@ def test_chain_rest_run_and_artifact(env, monkeypatch):
     assert c.status_code == 409
 
 
-# ---------------- 段3：apply 装配（双轨进工程）----------------
+# ---------------- 段3：apply 装配（进工程·处理版单轨，10-09）----------------
 
 
 def test_load_run_notes(tmp_path):
@@ -464,39 +464,37 @@ def test_load_run_notes(tmp_path):
 
 def test_build_apply_first_run():
     tracks = [{"name": "melody", "kind": "midi"}, {"name": "录音", "kind": "audio"}]
-    plan = build_apply_commands(tracks, source_track=1, raw_notes=[1, 2], processed_notes=[3])
+    plan = build_apply_commands(tracks, source_track=1, notes=[3])
     assert [(c["op"], c.get("track")) for c in plan["commands"]] == [
-        ("add_track", 0), ("add_track", 0), ("set_notes", 2), ("set_notes", 3)]
-    assert plan["commands"][0]["value"] == {"name": "录音", "at": 2, "unique": False}
-    assert plan["commands"][1]["value"]["name"] == "录音 · 处理"
-    assert plan["meta"]["names"] == ["录音", "录音 · 处理"]
-    assert plan["meta"]["raw_notes"] == 2 and plan["meta"]["processed_notes"] == 1
+        ("add_track", 0), ("set_notes", 2)]
+    assert plan["commands"][0]["value"] == {"name": "录音 · 处理", "at": 2, "unique": False}
+    assert plan["meta"]["names"] == ["录音 · 处理"]
+    assert plan["meta"]["notes"] == 1
 
 
 def test_build_apply_rerun_idempotent():
     tracks = [{"name": "melody", "kind": "midi"}, {"name": "录音", "kind": "audio"},
               {"name": "录音", "kind": "midi"}, {"name": "录音 · 处理", "kind": "midi"}]
-    plan = build_apply_commands(tracks, source_track=1, raw_notes=[], processed_notes=[])
+    plan = build_apply_commands(tracks, source_track=1, notes=[])
     ops = [(c["op"], c.get("track")) for c in plan["commands"]]
-    assert ops[:2] == [("remove_track", 3), ("remove_track", 2)]        # 从后往前删
-    assert ops[2:] == [("add_track", 0), ("add_track", 0),
-                       ("set_notes", 2), ("set_notes", 3)]
+    assert ops[:2] == [("remove_track", 3), ("remove_track", 2)]        # 从后往前删（含旧版原始轨遗留）
+    assert ops[2:] == [("add_track", 0), ("set_notes", 2)]
     assert plan["meta"]["removed"] == [2, 3]
-    assert plan["meta"]["inserted"] == [2, 3]
+    assert plan["meta"]["inserted"] == [2]
 
 
 def test_build_apply_old_before_source():
     tracks = [{"name": "录音", "kind": "midi"}, {"name": "melody", "kind": "midi"},
               {"name": "录音", "kind": "audio"}]
-    plan = build_apply_commands(tracks, source_track=2, raw_notes=[], processed_notes=[])
+    plan = build_apply_commands(tracks, source_track=2, notes=[])
     assert plan["meta"]["removed"] == [0]
     assert plan["commands"][1]["value"]["at"] == 2                       # 源轨删后前移 → 重算
-    assert plan["meta"]["inserted"] == [2, 3]
+    assert plan["meta"]["inserted"] == [2]
 
 
 def test_build_apply_source_guard():
     with pytest.raises(ValueError):
-        build_apply_commands([], source_track=0, raw_notes=[], processed_notes=[])
+        build_apply_commands([], source_track=0, notes=[])
 
 
 def test_chain_apply_guard_no_run(env):
@@ -515,12 +513,12 @@ def test_chain_apply_guard_missing_artifacts(env):
         {"source_track": 0, "run_ts": "20990101-000000", "preset": "humming-quicklane",
          "steps": []}), encoding="utf-8")
     r = env["client"].post("/api/projects/p1/chain/apply", json={})
-    assert r.status_code == 409 and "缺音符产物" in r.json()["error"]
+    assert r.status_code == 409 and "缺处理版" in r.json()["error"]
 
 
 @pytest.mark.skipif(not _HAS_FFMPEG, reason="需要 ffmpeg")
-def test_chain_apply_rest_dual_tracks(env, monkeypatch):
-    """段3：链产物进工程（双轨）——REST 一条路径：轨数 +2 / 音符落轨 / 幂等 / undo 可回。"""
+def test_chain_apply_rest_single_track(env, monkeypatch):
+    """段3：链产物进工程（处理版单轨，10-09）——REST 一条路径：轨数 +1 / 只落最终音符 / 幂等 / undo 可回。"""
     _project_with_audio(env)
     _patch_tools(monkeypatch)
     client = env["client"]
@@ -544,18 +542,18 @@ def test_chain_apply_rest_dual_tracks(env, monkeypatch):
     a1 = client.post("/api/projects/p1/chain/apply", json={})
     assert a1.status_code == 200, a1.text
     body = a1.json()
-    assert body["ok"] is True and body["tracks"] == 4
+    assert body["ok"] is True and body["tracks"] == 3
+    assert body["names"] == [src_name + " · 处理"]
     proj = _proj(env)
-    assert [t.name for t in proj.score.tracks] == ["melody", src_name, src_name,
+    assert [t.name for t in proj.score.tracks] == ["melody", src_name,
                                                    src_name + " · 处理"]
-    assert [n.pitch_midi for n in proj.score.tracks[2].notes] == [60, 62]
-    assert [n.pitch_midi for n in proj.score.tracks[3].notes] == [60, 63]
+    assert [n.pitch_midi for n in proj.score.tracks[2].notes] == [60, 63]   # 只落最终（处理版）
 
     # 幂等：重跑不增轨（先删旧同名轨）
     a2 = client.post("/api/projects/p1/chain/apply", json={})
-    assert a2.status_code == 200 and a2.json()["tracks"] == 4
+    assert a2.status_code == 200 and a2.json()["tracks"] == 3
     proj = _proj(env)
-    assert [t.name for t in proj.score.tracks] == ["melody", src_name, src_name,
+    assert [t.name for t in proj.score.tracks] == ["melody", src_name,
                                                    src_name + " · 处理"]
 
     # undo 可回（生效即可：journal 线性游标不保证单步——循环撤销直到回退到进工程前）

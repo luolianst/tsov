@@ -155,7 +155,7 @@ async function rerunWithParams(s, idx) {
   doRun(restIds(idx));
 }
 
-/* 段3：链产物进工程（双轨）——REST → 命令层事务；SSE state_updated 自动刷新轨列表 */
+/* 段3：链产物进工程（处理版单轨，10-09）——REST → 命令层事务；SSE state_updated 自动刷新轨列表 */
 async function doApply() {
   if (busy || store.chain.running || !store.project) return;
   busy = true;
@@ -310,8 +310,8 @@ export function renderChain() {
 
   const toProj = el('button', 'chain-btn chain-to-proj', '⇥ 进工程');
   toProj.disabled = store.chain.running || busy || !store.chain.runTs;
-  toProj.title = '把最近一次链产物落成两条 MIDI 轨（原始 + 处理），插在源轨正下方；'
-    + '重跑幂等（先删旧同名轨）；undo 可回';
+  toProj.title = '把最近一次链产物落成一条「处理版」MIDI 轨（量化 + 调内吸附），插在源轨正下方；'
+    + '重跑幂等（先删旧同名轨、含旧版双轨遗留）；undo 可回';
   toProj.onclick = doApply;
   head.appendChild(toProj);
 

@@ -280,7 +280,7 @@ def test_add_track_name_guard():
     assert res.applied == 0 and res.errors
 
 
-# ---------------- add_track at/unique + set_notes（E3 段3 双轨进工程）----------------
+# ---------------- add_track at/unique + set_notes（E3 段3 进工程）----------------
 
 
 def test_add_track_at_inserts_position():

@@ -1,6 +1,6 @@
 """处理链域路由（M-V8 E3 段2/3）。
 
-- run / status / config / cancel / artifact / tools / apply（段3：双轨进工程）
+- run / status / config / cancel / artifact / tools / apply（段3：进工程·处理版单轨）
 - 运行器：每工程一个 ChainRunner（app.state.tsov.chains）；一次一个 run（409）
 - chain.json 工程伴生（参数/mute/源轨）；产物 <project>/chain/<run-ts>/
 - SSE：chain_started / chain_step / chain_log / chain_finished（轮询为主的加成）
@@ -20,9 +20,10 @@ DEFAULT_PRESET = "humming-quicklane"
 
 
 def apply_chain_run(ws: WebState, proj, *, run_ts=None, source_track=None) -> dict:
-    """链产物进工程（双轨）——/chain/apply 与暂存区采纳共用同一动作路径（ADR-0017）。
+    """链产物进工程（单轨·处理版）——/chain/apply 与暂存区采纳共用同一动作路径（ADR-0017）。
 
-    转录原始 + 处理版 → 源轨正下方两条 MIDI 轨（命令层事务）；幂等：先删同名的旧产物轨。
+    最终音符（量化 + 调内吸附）→ 源轨正下方一条「<源轨名> · 处理」MIDI 轨（命令层事务）；
+    幂等：先删同名的旧产物轨（含旧版双轨时代的原始轨遗留）。10-09 洛怜定：只入最终轨。
     run_ts 缺省 = chain.json 最近一次；source_track 缺省 = chain.json 记录。
     """
     saved = load_chain_json(proj.root)
@@ -31,23 +32,21 @@ def apply_chain_run(ws: WebState, proj, *, run_ts=None, source_track=None) -> di
         raise HTTPException(409, "该工程还没有链产物（先运行一次链）")
     run_dir = proj.root / "chain" / run_ts
     got = load_run_notes(run_dir)
-    if not got["raw"] or not got["processed"]:
-        miss = "转录原始（03）" if not got["raw"] else ""
-        miss += ("、" if miss else "") + ("处理版（05）" if not got["processed"] else "")
-        raise HTTPException(409, f"运行 {run_ts} 缺音符产物：{miss}——先跑完转录与处理步")
+    if not got["processed"]:
+        raise HTTPException(409, f"运行 {run_ts} 缺处理版产物（05-notes-snapped.json）——先跑完转录与处理步")
     if source_track is None:
         source_track = saved.get("source_track")
     if source_track is None:
         raise HTTPException(409, "链未记录源轨（先运行一次链或显式给 source_track）")
     try:
         plan = build_apply_commands(list(proj.score.tracks), source_track=int(source_track),
-                                    raw_notes=got["raw"], processed_notes=got["processed"])
+                                    notes=got["processed"])
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    batch = EditBatch(label="转谱进工程（双轨）")
+    batch = EditBatch(label="转谱进工程（处理版）")
     for c in plan["commands"]:
         batch.add(c["op"], track=int(c.get("track", 0)), value=c.get("value"))
-    result = proj.apply_batch(batch, commit_message="转谱进工程：原始 + 处理（双轨）",
+    result = proj.apply_batch(batch, commit_message="转谱进工程：处理版（量化+调内吸附）",
                               source="user")
     if result["applied"] == 0:
         return {"ok": False, "project": proj.name, **plan["meta"], **result}
@@ -189,9 +188,9 @@ def register(app: FastAPI) -> None:
 
     @app.post("/api/projects/{name}/chain/apply")
     def chain_apply(name: str, body: dict | None = None) -> dict:
-        """链产物进工程（双轨）：转录原始 + 处理版 → 源轨正下方两条 MIDI 轨（命令层事务）。
+        """链产物进工程（单轨·处理版）：最终音符 → 源轨正下方一条「<源轨名> · 处理」MIDI 轨（命令层事务）。
 
-        - 幂等：重跑先删同名的旧产物轨再插入；undo 可回（快照窗口）
+        - 幂等：重跑先删同名的旧产物轨再插入（含旧版双轨遗留）；undo 可回（快照窗口）
         - body: {run_ts?（缺省最近一次）、source_track?（缺省 chain.json 记录）}
         """
         body = body or {}

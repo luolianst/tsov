@@ -6,7 +6,7 @@
 - producer: chain | tune | arrange（三段均已接入）
 - kind: notes | audio | commands
 - state: pending → adopted / discarded（pending = 探针动态枚举减去已处置记录）
-- ready: 是否具备采纳条件（链 = 03 原始 + 05 处理都在）
+- ready: 是否具备采纳条件（链 = 05 处理版在；10-09 起采纳只入最终轨）
 
 存储分工：
 - pending：由 producer 探针**动态枚举**（链 = 扫 <工程>/chain/<run_ts>/ 目录），不落盘；
@@ -97,7 +97,7 @@ def _count_notes(p: Path) -> int | None:
 def chain_items(proj_root) -> list[dict]:
     """链产物探针：扫 <工程>/chain/<run_ts>/（新→旧）。
 
-    只列「有内容」的 run（任一已知产物在）；就绪 = 03 原始 + 05 处理都在。
+    只列「有内容」的 run（任一已知产物在）；就绪 = 05 处理版在（10-09 起采纳只入最终轨）。
     """
     root = Path(proj_root) / CHAIN_DIR
     if not root.is_dir():
@@ -124,10 +124,10 @@ def chain_items(proj_root) -> list[dict]:
             "id": f"chain:{d.name}",
             "producer": "chain",
             "kind": "notes",
-            "title": "哼唱链产物（转录双轨）",
+            "title": "哼唱链产物（处理版）",
             "created_at": created,
             "state": "pending",
-            "ready": not missing,
+            "ready": proc_p.is_file(),          # 采纳只依赖处理版（05）——10-09 单轨口径
             "refs": {"run_ts": d.name},
             "meta": {
                 "run_ts": d.name,
