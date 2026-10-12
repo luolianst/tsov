@@ -68,6 +68,27 @@ def load_preset(preset_id: str) -> dict:
     return data
 
 
+def list_presets() -> list[dict]:
+    """全部链预设元数据（{id, name, description, steps_count}）——面板预设选择器用。"""
+    out: list[dict] = []
+    if not PRESET_DIR.is_dir():
+        return out
+    for f in sorted(PRESET_DIR.glob("*.json")):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict) or not isinstance(data.get("steps"), list):
+            continue
+        out.append({
+            "id": str(data.get("id") or f.stem),
+            "name": data.get("name") or {"zh": f.stem, "en": f.stem},
+            "description": data.get("description") or {},
+            "steps_count": len(data["steps"]),
+        })
+    return out
+
+
 # ---------------------------------------------------------------------------
 # 运行器
 # ---------------------------------------------------------------------------
@@ -264,6 +285,14 @@ class ChainRunner:
     def _run(self, targets: list[StepState]) -> None:
         try:
             run_dir = self._run_dir()
+            # E1-7：run 元数据（preset/source_track）——staging 过滤与面板展示用；写失败不阻断
+            try:
+                (run_dir / "run-meta.json").write_text(
+                    json.dumps({"preset": self.preset_id, "source_track": self.source_track,
+                                "created_at": time.strftime("%Y-%m-%dT%H:%M:%S")},
+                               ensure_ascii=False, indent=2), encoding="utf-8")
+            except OSError:
+                pass
             source = self.source_audio_path()
             ctx_base = dict(project_root=self.proj.root, run_dir=run_dir,
                             source_audio=source, score_tempo=float(self.proj.score.tempo or 120.0),
@@ -405,6 +434,7 @@ def apply_config(proj, *, mute: dict | None = None, overrides: dict | None = Non
     if source_track is not None:
         data["source_track"] = int(source_track)
     if preset_id:
+        load_preset(str(preset_id))          # E1-6：未知预设拒绝（ValueError → REST 400）
         data["preset"] = str(preset_id)
     data["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     save_chain_json(proj.root, data)

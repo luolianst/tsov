@@ -80,6 +80,29 @@ def test_chain_item_ready_without_raw(tmp_path):
     assert it["meta"]["notes_processed"] == 2
 
 
+def test_chain_item_decompose_filtered(tmp_path):
+    """E1-7：拆解 run（run-meta.preset=song-decompose）不进暂存；无 meta 旧 run 照旧（兼容）。"""
+    _write_run(tmp_path, "20260101-000000", raw=3, proc=4)
+    d2 = _write_run(tmp_path, "20260102-000000", raw=3, proc=4)
+    # 无 meta 旧 run：两条都列出（兼容）
+    assert {i["id"] for i in staging.list_items(tmp_path)["items"]} == {
+        "chain:20260101-000000", "chain:20260102-000000"}
+    # 标为拆解 → 过滤
+    (d2 / "run-meta.json").write_text(
+        json.dumps({"preset": "song-decompose", "source_track": 0}), encoding="utf-8")
+    ids = [i["id"] for i in staging.list_items(tmp_path)["items"]]
+    assert ids == ["chain:20260101-000000"]
+    # 哼唱 preset 的 meta 不影响（照旧进暂存）
+    (d2 / "run-meta.json").write_text(
+        json.dumps({"preset": "humming-quicklane"}), encoding="utf-8")
+    assert {i["id"] for i in staging.list_items(tmp_path)["items"]} == {
+        "chain:20260101-000000", "chain:20260102-000000"}
+    # get_item 也拿不到拆解 run（与列表口径一致）
+    (d2 / "run-meta.json").write_text(
+        json.dumps({"preset": "song-decompose"}), encoding="utf-8")
+    assert staging.get_item(tmp_path, "chain:20260102-000000") is None
+
+
 def test_records_persist_and_preserve_keys(tmp_path):
     (tmp_path / ".tsov-state.json").write_text(
         json.dumps({"last_commit": "abc123", "iter_counter": 7}), encoding="utf-8")

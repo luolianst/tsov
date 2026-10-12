@@ -8,10 +8,13 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import FastAPI, HTTPException
 
 from ...chain import (ChainRunner, apply_config, auto_run_plan, build_apply_commands,
-                      load_chain_json, load_preset, load_run_notes, list_tools)
+                      build_decompose_commands, list_presets, load_chain_json,
+                      load_decompose_artifacts, load_preset, load_run_notes, list_tools)
 from ...host import EditBatch
 from ..helpers import project_state
 from ..state import WebState
@@ -20,13 +23,17 @@ DEFAULT_PRESET = "humming-quicklane"
 
 
 def apply_chain_run(ws: WebState, proj, *, run_ts=None, source_track=None) -> dict:
-    """链产物进工程（单轨·处理版）——/chain/apply 与暂存区采纳共用同一动作路径（ADR-0017）。
+    """链产物进工程——/chain/apply 与暂存区采纳共用同一动作路径（ADR-0017）。
 
-    最终音符（量化 + 调内吸附）→ 源轨正下方一条「<源轨名> · 处理」MIDI 轨（命令层事务）；
-    幂等：先删同名的旧产物轨（含旧版双轨时代的原始轨遗留）。10-09 洛怜定：只入最终轨。
-    run_ts 缺省 = chain.json 最近一次；source_track 缺省 = chain.json 记录。
+    - 预设 song-decompose → 拆解落位（stems 四路入库＋文件夹＋人声 MIDI；E1-5）
+    - 其余（哼唱）→ 单轨·处理版：最终音符 → 源轨正下方「<源轨名> · 处理」MIDI 轨。
+    幂等：两路皆先清旧产物再重建。run_ts 缺省 = chain.json 最近一次；source_track 缺省同。
     """
     saved = load_chain_json(proj.root)
+    preset_id = str(saved.get("preset") or DEFAULT_PRESET)
+    if preset_id == "song-decompose":
+        return _apply_decompose_run(ws, proj, saved=saved, run_ts=run_ts,
+                                    source_track=source_track)
     run_ts = str(run_ts or saved.get("run_ts") or "")
     if not run_ts:
         raise HTTPException(409, "该工程还没有链产物（先运行一次链）")
@@ -54,6 +61,79 @@ def apply_chain_run(ws: WebState, proj, *, run_ts=None, source_track=None) -> di
                                                "seq": result.get("seq")})
     ws.bus.publish(proj.name, "state_updated", project_state(proj))
     return {"ok": True, "project": proj.name, "run_ts": run_ts, **plan["meta"],
+            "applied": result["applied"], "errors": result.get("errors") or [],
+            "tracks": len(proj.score.tracks)}
+
+
+def _apply_decompose_run(ws: WebState, proj, *, saved: dict, run_ts=None,
+                         source_track=None) -> dict:
+    """拆解落位（E1-5）：四 stems 入库 → 文件夹「拆解 · <源轨名>」＋4 音频轨＋人声 MIDI 轨。
+
+    grid.json 在且 bpm 有效 → 命令层 set_tempo（remap=false，音符秒值不动；读回对拍 applied）；
+    失败不阻断落位（meta 注记）。幂等：文件夹级清旧重建（源轨除外）。
+    """
+    run_ts = str(run_ts or saved.get("run_ts") or "")
+    if not run_ts:
+        raise HTTPException(409, "该工程还没有链产物（先运行一次链）")
+    run_dir = proj.root / "chain" / run_ts
+    art = load_decompose_artifacts(run_dir)
+    missing = [s for s, rel in art["stems"].items() if not rel]
+    if missing:
+        raise HTTPException(409, f"运行 {run_ts} 缺分离产物："
+                                 f"{'、'.join(f'stems/{s}.wav' for s in missing)}——先跑完「分离」步")
+    if art["vocals_notes"] is None:
+        raise HTTPException(409, f"运行 {run_ts} 缺人声转录产物（voice-vocals.json 系）"
+                                 "——先跑完转录/处理步")
+    if source_track is None:
+        source_track = saved.get("source_track")
+    if source_track is None:
+        raise HTTPException(409, "链未记录源轨（先运行一次链或显式给 source_track）")
+
+    # ① 四路入库（内容寻址；重复入库自动去重）
+    stem_files: dict = {}
+    try:
+        for s, rel in art["stems"].items():
+            info = proj.import_audio(run_dir / rel)
+            stem_files[s] = info["file"]
+    except ValueError as e:
+        raise HTTPException(400, f"分离轨入库失败：{e}") from e
+
+    # ② 组装命令（含幂等清旧）
+    midis = [{"stem": "vocals", "notes": art["vocals_notes"]}]
+    try:
+        plan = build_decompose_commands(list(proj.score.tracks), source_track=int(source_track),
+                                        stems=stem_files, midis=midis)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+    # ③ 写 tempo（grid.json 在且 bpm 有效 → set_tempo；失败不阻断落位）
+    tempo_meta = {"from": float(proj.score.tempo or 120.0), "to": None, "applied": False}
+    grid = run_dir / "grid.json"
+    if grid.is_file():
+        try:
+            g = json.loads(grid.read_text(encoding="utf-8"))
+            bpm = float(g.get("bpm") or 0)
+        except (OSError, ValueError):
+            bpm = 0.0
+        if 20.0 <= bpm <= 400.0:
+            tempo_meta["to"] = round(bpm, 3)
+            plan["commands"].append({"op": "set_tempo", "value": {"tempo": tempo_meta["to"]}})
+
+    batch = EditBatch(label="拆解落位")
+    for c in plan["commands"]:
+        batch.add(c["op"], track=int(c.get("track", 0)), value=c.get("value"))
+    result = proj.apply_batch(batch, commit_message="拆解落位：分离轨 + 人声 MIDI",
+                              source="user")
+    if result["applied"] == 0:
+        return {"ok": False, "project": proj.name, "run_ts": run_ts, **plan["meta"],
+                "tempo": tempo_meta, **result}
+    tempo_meta["applied"] = bool(tempo_meta["to"] is not None
+                                 and abs(float(proj.score.tempo or 0) - tempo_meta["to"]) < 1e-6)
+    ws.bus.publish(proj.name, "diff_applied", {**result["diff"], "commit": result["commit"],
+                                               "seq": result.get("seq")})
+    ws.bus.publish(proj.name, "state_updated", project_state(proj))
+    return {"ok": True, "project": proj.name, "run_ts": run_ts, **plan["meta"],
+            "tempo": tempo_meta, "notes_source": art["notes_source"],
             "applied": result["applied"], "errors": result.get("errors") or [],
             "tracks": len(proj.score.tracks)}
 
@@ -104,9 +184,9 @@ def register(app: FastAPI) -> None:
 
     @app.get("/api/projects/{name}/chain/tools")
     def chain_tools(name: str) -> dict:
-        """工具注册表（前端渲染参数表单/槽位名）。"""
+        """工具注册表（前端渲染参数表单/槽位名）＋预设清单（E1-6 面板选择器）。"""
         st().get_project(name)
-        return {"tools": list_tools(), "preset": DEFAULT_PRESET}
+        return {"tools": list_tools(), "preset": DEFAULT_PRESET, "presets": list_presets()}
 
     @app.post("/api/projects/{name}/chain/run")
     def chain_run(name: str, body: dict | None = None) -> dict:

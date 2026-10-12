@@ -175,13 +175,34 @@ async function renameProject() {
 
 /* ---------------- M-V8 E2：音频素材导入（本机路径 / 浏览器文件 / 拖拽） ---------------- */
 
-function openAudioImport() {
+/* P39 共用件：双来源选择器——prompt 路径（{path}）或文件框（{file}）；取消 null。
+   音频 / MIDI / 成品歌拆解三个入口共用（E1-6 新口必用；旧口顺迁，不加第四份拷贝）。 */
+function pickFileSource(promptText, inputId) {
+  return new Promise((resolve) => {
+    const p = prompt(promptText, '');
+    if (p === null) { resolve(null); return; }
+    if (p.trim()) {
+      resolve({ path: p.trim(), label: p.trim().split(/[\\/]/).pop() });
+      return;
+    }
+    const inp = $(inputId);
+    if (!inp) { resolve(null); return; }
+    const onChange = () => {
+      inp.removeEventListener('change', onChange);
+      const f = inp.files && inp.files[0];
+      inp.value = '';
+      resolve(f ? { file: f, label: f.name } : null);
+    };
+    inp.addEventListener('change', onChange);
+    inp.click();
+  });
+}
+
+async function openAudioImport() {
   if (!store.project) { setError('先打开一个工程'); return; }
-  const p = prompt('本机音频路径（留空则打开文件选择框；支持 wav/mp3/flac/m4a/ogg…）：', '');
-  if (p === null) return;
-  if (p.trim()) { importAudioByPath(p.trim()); return; }
-  const inp = $('audio-file-input');
-  if (inp) inp.click();
+  const src = await pickFileSource('本机音频路径（留空则打开文件选择框；支持 wav/mp3/flac/m4a/ogg…）：', 'audio-file-input');
+  if (!src) return;
+  if (src.path) importAudioByPath(src.path); else importAudioFile(src.file);
 }
 
 async function importAudioByPath(path) {
@@ -212,13 +233,11 @@ async function attachAudio(info, fallbackName) {
 
 /* ---------------- M-V8 E5：MIDI 导入（本机路径 / 浏览器文件） ---------------- */
 
-function openMidiImport() {
+async function openMidiImport() {
   if (!store.project) { setError('先打开一个工程'); return; }
-  const p = prompt('本机 MIDI 路径（留空则打开文件选择框；支持 .mid/.midi）：', '');
-  if (p === null) return;
-  if (p.trim()) { importMidiByPath(p.trim()); return; }
-  const inp = $('midi-file-input');
-  if (inp) inp.click();
+  const src = await pickFileSource('本机 MIDI 路径（留空则打开文件选择框；支持 .mid/.midi）：', 'midi-file-input');
+  if (!src) return;
+  if (src.path) importMidiByPath(src.path); else importMidiFile(src.file);
 }
 
 async function importMidiByPath(path) {
@@ -242,6 +261,35 @@ function afterMidiImport(r) {
   bus.dispatch('toast', '已导入 MIDI：+' + r.added + ' 轨 / ' + r.notes + ' 音' +
     (names ? '（' + names + '）' : '') + (r.adopted ? ' · 已采纳文件元数据' : '') +
     (r.skipped ? ' · 跳过空轨 ' + r.skipped : ''));
+}
+
+/* ---------------- 批E 段1（E1-6）：导入成品歌拆解（新工程流） ---------------- */
+
+async function importDecompose() {
+  const src = await pickFileSource('成品歌路径（留空则打开文件选择框；支持 wav/mp3/flac/m4a…）：', 'audio-file-input');
+  if (!src) return;
+  const base = String(src.label || '拆解').replace(/\.[^.]+$/, '');
+  const name = prompt('新工程名（成品歌拆解）：', base);
+  if (!name || !name.trim()) return;
+  const project = name.trim();
+  try {
+    await api.createProject(project);
+    /* ① 素材入库（与「导入音频素材」同动作路径） */
+    const info = src.path ? await api.importAudioPath(project, src.path)
+                          : await api.importAudioUpload(project, src.file);
+    /* ② 清建工程自带空 melody 轨 + 落音频轨（一条命令层 batch；agent 同径） */
+    const rb = await api.postBatch(project, '拆解素材入库', [
+      { op: 'remove_track', track: 0 },
+      { op: 'add_audio_track', value: { file: info.file, name: base || null } },
+    ], '拆解：素材入库');
+    if (!rb.applied) { setError('素材入库被拒：' + (rb.errors || []).join('；')); return; }
+    /* ③ 自动开跑（source_track=0 = 刚落的音频轨） */
+    await api.chainRun(project, { preset: 'song-decompose', source_track: 0 });
+    await loadProjects(false);
+    await openProject(project);
+    bus.dispatch('focus-chain');
+    bus.dispatch('toast', '已建工程「' + project + '」并开跑拆解链——完成后点「⇥ 进工程」落位');
+  } catch (e) { setError('成品歌拆解：' + e.message); }
 }
 
 /* ---------------- 启动 ---------------- */
@@ -332,19 +380,9 @@ function boot() {
   $('mi-rename').addEventListener('click', () => { closeMenus(null); renameProject(); });
   $('mi-import').addEventListener('click', (e) => { e.stopPropagation(); showImportRow(); });
   $('mi-import-audio').addEventListener('click', () => { closeMenus(null); openAudioImport(); });
-  const audioInp = $('audio-file-input');
-  if (audioInp) audioInp.addEventListener('change', () => {
-    const f = audioInp.files && audioInp.files[0];
-    audioInp.value = '';
-    if (f) importAudioFile(f);
-  });
   $('mi-import-midi').addEventListener('click', () => { closeMenus(null); openMidiImport(); });
-  const midiInp = $('midi-file-input');
-  if (midiInp) midiInp.addEventListener('change', () => {
-    const f = midiInp.files && midiInp.files[0];
-    midiInp.value = '';
-    if (f) importMidiFile(f);
-  });
+  /* E1-6：导入成品歌拆解（新工程流：建工程 → 素材入库 → 自动开跑拆解链） */
+  $('mi-import-decompose').addEventListener('click', () => { closeMenus(null); importDecompose(); });
   $('mi-refresh').addEventListener('click', () => { closeMenus(null); loadProjects(true); });
   $('mi-export').addEventListener('click', () => { closeMenus(null); openExport(); });
   $('mi-fav').addEventListener('click', () => { closeMenus(null); doFavorite(); });

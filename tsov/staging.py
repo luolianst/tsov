@@ -106,6 +106,15 @@ def chain_items(proj_root) -> list[dict]:
     for d in sorted(root.iterdir()):
         if not d.is_dir():
             continue
+        # E1-7：拆解 run（run-meta.preset=song-decompose）不进暂存——走链面板「进工程」
+        meta_p = d / "run-meta.json"
+        if meta_p.is_file():
+            try:
+                _meta = json.loads(meta_p.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                _meta = {}
+            if isinstance(_meta, dict) and str(_meta.get("preset") or "") == "song-decompose":
+                continue
         raw_p = d / CHAIN_RAW
         proc_p = d / CHAIN_PROCESSED
         wavs = [w for w in CHAIN_WAVS if (d / w).is_file()]

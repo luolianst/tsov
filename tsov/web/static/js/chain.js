@@ -40,7 +40,8 @@ async function ensureTools() {
   try {
     const r = await api.chainTools(store.project);
     toolsLoaded = true;
-    setChainState({ tools: r.tools || [], preset: r.preset || store.chain.preset });
+    setChainState({ tools: r.tools || [], preset: r.preset || store.chain.preset,
+                    presets: r.presets || store.chain.presets });
   } catch (e) { /* 端点缺失/网络异常：槽位名与参数表单暂缺，运行仍可用 */ }
 }
 
@@ -128,6 +129,19 @@ async function toggleMute(toolId, mute) {
   } catch (e) { setError('mute：' + e.message); }
 }
 
+/* E1-6：链预设切换（存 chain.json → 面板按新预设重渲染；运行中禁切） */
+async function changePreset(presetId) {
+  if (!store.project || store.chain.running || busy) return;
+  if (!presetId || presetId === store.chain.preset) return;
+  try {
+    await api.chainConfig(store.project, { preset: presetId });
+    setChainState({ preset: presetId, needsApply: '', steps: [] });
+    await refreshChain();
+    renderChain();
+    bus.dispatch('toast', '链预设已切换：' + presetId);
+  } catch (e) { setError('预设切换：' + e.message); }
+}
+
 function restIds(fromIdx) {
   return store.chain.steps.slice(fromIdx).map((x) => x.tool_id);
 }
@@ -155,14 +169,25 @@ async function rerunWithParams(s, idx) {
   doRun(restIds(idx));
 }
 
-/* 段3：链产物进工程（处理版单轨，10-09）——REST → 命令层事务；SSE state_updated 自动刷新轨列表 */
+/* 段3：链产物进工程——REST → 命令层事务；SSE state_updated 自动刷新轨列表。
+   哼唱=单轨处理版；拆解（E1-5）=文件夹落位（toast 汇总 folder/轨道数/tempo）。 */
 async function doApply() {
   if (busy || store.chain.running || !store.project) return;
   busy = true;
   try {
     const r = await api.chainApply(store.project, {});
-    bus.dispatch('toast', '已进工程：' + (r.names || []).join(' + ')
-      + '（轨 ' + (r.tracks != null ? r.tracks : '?') + '，命令 ' + (r.applied || 0) + '）');
+    if (r.folder) {
+      const nA = (r.audio_tracks || []).length;
+      const nM = (r.midi_tracks || []).length;
+      let msg = '已落位「' + r.folder + '」：' + nA + ' 音频轨' + (nM ? ' + ' + nM + ' MIDI 轨' : '');
+      if (r.tempo && r.tempo.to != null) {
+        msg += '；tempo ' + r.tempo.from + ' → ' + r.tempo.to + (r.tempo.applied ? '' : '（未生效）');
+      }
+      bus.dispatch('toast', msg);
+    } else {
+      bus.dispatch('toast', '已进工程：' + (r.names || []).join(' + ')
+        + '（轨 ' + (r.tracks != null ? r.tracks : '?') + '，命令 ' + (r.applied || 0) + '）');
+    }
   } catch (e) {
     setError('进工程：' + e.message);
   } finally {
@@ -294,9 +319,29 @@ export function renderChain() {
   const wrap = el('div', 'chain-wrap');
 
   const head = el('div', 'chain-head');
-  const title = el('span', 'chain-title', '哼唱快车道');
-  title.title = '降噪 → 响度 → 转录 → 量化 → 调内吸附（一句哼唱 → 可编辑音符）｜快档（降噪/响度/量化/吸附）改参即自动顺跑；转录为秒级 → 改参后点「应用」｜静音=跳过该步｜产物在 chain/<运行时间戳>/';
+  const presetMeta = (store.chain.presets || []).find((p) => p.id === store.chain.preset) || null;
+  const title = el('span', 'chain-title',
+    (presetMeta && presetMeta.name && (presetMeta.name.zh || presetMeta.name.en)) || '处理链');
+  title.title = (presetMeta && presetMeta.description
+    && (presetMeta.description.zh || presetMeta.description.en))
+    || '链 = 预设里的工具序列 + 参数；快档改参即自动顺跑，慢档改参后点「应用」｜静音=跳过该步｜产物在 chain/<运行时间戳>/';
   head.appendChild(title);
+
+  /* E1-6：预设选择器（切换 → 存 chain.json → 面板按新预设重渲染；运行中禁切） */
+  const presetSel = document.createElement('select');
+  presetSel.id = 'chain-preset-select';
+  presetSel.className = 'chain-preset-select';
+  presetSel.title = store.chain.running ? '运行中不可切换预设' : '链预设（哼唱快车道 / 成品歌拆解）';
+  for (const p of (store.chain.presets || [])) {
+    const o = document.createElement('option');
+    o.value = p.id;
+    o.textContent = (p.name && (p.name.zh || p.name.en)) || p.id;
+    presetSel.appendChild(o);
+  }
+  presetSel.value = store.chain.preset;
+  presetSel.disabled = store.chain.running || busy;
+  presetSel.addEventListener('change', () => changePreset(presetSel.value));
+  head.appendChild(presetSel);
 
   const runAll = el('button', 'chain-btn chain-run', store.chain.running ? '运行中…' : '▶ 运行全链');
   runAll.disabled = store.chain.running || busy;
@@ -310,17 +355,28 @@ export function renderChain() {
 
   const toProj = el('button', 'chain-btn chain-to-proj', '⇥ 进工程');
   toProj.disabled = store.chain.running || busy || !store.chain.runTs;
-  toProj.title = '把最近一次链产物落成一条「处理版」MIDI 轨（量化 + 调内吸附），插在源轨正下方；'
-    + '重跑幂等（先删旧同名轨、含旧版双轨遗留）；undo 可回';
+  toProj.title = (store.chain.preset === 'song-decompose')
+    ? '把最近一次拆解落成「拆解 · <源轨名>」文件夹（4 音频轨 + 转录 MIDI，并写入网格 tempo）；重跑幂等；undo 可回'
+    : '把最近一次链产物落成一条「处理版」MIDI 轨（量化 + 调内吸附），插在源轨正下方；'
+      + '重跑幂等（先删旧同名轨、含旧版双轨遗留）；undo 可回';
   toProj.onclick = doApply;
   head.appendChild(toProj);
 
   head.appendChild(el('span', 'chain-sub',
     store.chain.running ? '运行中…' : (store.chain.runTs ? ('最近运行 ' + store.chain.runTs) : '未运行')));
-  if (store.chain.sourceTrack != null) {
-    const tr = store.score && store.score.tracks[store.chain.sourceTrack];
-    head.appendChild(el('span', 'chain-sub',
-      '源轨：' + store.chain.sourceTrack + (tr && tr.name ? ('（' + tr.name + '）') : '')));
+  /* E1-7（P50）：显示当前应用轨道（缺省=第一条音频轨，标注「自动」） */
+  {
+    const tracks = (store.score && store.score.tracks) || [];
+    let idx = store.chain.sourceTrack;
+    let auto = false;
+    if (idx == null) {
+      idx = tracks.findIndex((t) => t.kind === 'audio');
+      auto = true;
+    }
+    if (typeof idx === 'number' && idx >= 0 && tracks[idx]) {
+      head.appendChild(el('span', 'chain-sub chain-applied',
+        '应用到：轨 ' + (idx + 1) + ' · ' + (tracks[idx].name || '未命名') + (auto ? '（自动）' : '')));
+    }
   }
   if (store.chain.error) head.appendChild(el('span', 'chain-err', store.chain.error));
   wrap.appendChild(head);

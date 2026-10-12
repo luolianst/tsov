@@ -78,6 +78,7 @@ export const store = {
     tools: [],                 // 工具 schema（/chain/tools：id/tier/params）
     steps: [],                 // 槽位状态（/chain/status：params/mute/status/artifact/stats）
     preset: 'humming-quicklane',
+    presets: [],               // 预设清单（/chain/tools：id/name/description；E1-6 选择器）
     sourceTrack: null,
     runTs: '',
     running: false,
@@ -754,6 +755,7 @@ export function snapshot() {
     /* M-V8 E3 段2：处理链快照（CDP 断言用；steps 浅拷贝防外部持引用） */
     chain: {
       preset: store.chain.preset,
+      presetIds: store.chain.presets.map((p) => p.id),
       sourceTrack: store.chain.sourceTrack,
       runTs: store.chain.runTs,
       running: store.chain.running,
