@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import time
 from pathlib import Path
 
 import numpy as np
@@ -95,12 +96,41 @@ class StemStore:
         return np.ascontiguousarray(audio, dtype=np.float32)
 
     def save(self, key: str, audio: np.ndarray, samplerate: int) -> Path:
+        """写入 stem（原子替换 + 撞占自愈，P55）。
+
+        Windows 上 `os.replace` 会因目标被占用而失败（WinError 32/5）：并发渲染的
+        读写、播放流或杀软/索引扫描都可能短暂持有句柄。策略（有界、保语义）：
+        1) 有界重试（5 次指数退避，总窗口 ~1.55s）——覆盖瞬时占用；
+        2) 每次失败后若目标已可完整读出 → 直接认账返回（键 = 内容指纹，
+           同键必同内容：并发写者的胜方文件即可用），清 tmp；
+        3) 全程失败 → 清 tmp + 抛可读 RuntimeError（上层转 5xx：稍后重试即可）。
+        """
         p = self.path_for(key)
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_name(p.name + ".tmp")
         sf.write(str(tmp), audio, int(samplerate), subtype="FLOAT", format="WAV")
-        tmp.replace(p)   # 原子替换：并发读不会拿到半截文件
-        return p
+        last_err: PermissionError | None = None
+        for attempt in range(6):
+            try:
+                tmp.replace(p)   # 原子替换：并发读不会拿到半截文件
+                return p
+            except PermissionError as e:   # WinError 32（占用）/ 5（拒绝访问）
+                last_err = e
+            if self.load(key) is not None:   # 目标此刻可完整读出 → 认账（见 docstring ②）
+                try:
+                    tmp.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                return p
+            if attempt < 5:
+                time.sleep(0.05 * (2 ** attempt))   # 0.05→0.8s 退避
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise RuntimeError(
+            f"stem 缓存写入被占用（{p.name}）：文件可能正在播放或被扫描，请稍后重试"
+        ) from last_err
 
     # ---- 管理 ----
     def keys(self) -> set[str]:

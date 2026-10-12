@@ -160,3 +160,81 @@ def test_export_matrix_with_cache_identical():
         assert np.array_equal(s1, s2)
     finally:
         rmtree_force(ws)
+def test_cache_save_retries_transient_lock(monkeypatch):
+    """P55：目标瞬时被占用（杀软扫描/短读）→ 有界重试自愈，tmp 不残留。"""
+    from tsov.host import cache as cache_mod
+
+    ws = _ws()
+    try:
+        store = StemStore(ws)
+        key = "c" * 24
+        audio = np.zeros((100, 2), dtype=np.float32)
+        calls = {"n": 0}
+        real_replace = Path.replace
+
+        def flaky_replace(self, target):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise PermissionError(32, "另一个程序正在使用此文件。")
+            return real_replace(self, target)
+
+        monkeypatch.setattr(Path, "replace", flaky_replace)
+        monkeypatch.setattr(cache_mod.time, "sleep", lambda _s: None)
+        p = store.save(key, audio, SR)
+        assert calls["n"] == 2 and p.is_file()
+        assert not p.with_name(p.name + ".tmp").exists()
+    finally:
+        rmtree_force(ws)
+
+
+def test_cache_save_accepts_concurrent_winner(monkeypatch):
+    """P55：并发写者已落成同键文件（替换恒失败）→ 认账返回，tmp 清理。"""
+    from tsov.host import cache as cache_mod
+
+    ws = _ws()
+    try:
+        store = StemStore(ws)
+        key = "d" * 24
+        audio = np.zeros((64, 2), dtype=np.float32)
+        p = store.path_for(key)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        sf.write(str(p), audio, SR, subtype="FLOAT", format="WAV")   # 「胜方」产物
+
+        def deny_replace(self, target):
+            raise PermissionError(32, "另一个程序正在使用此文件。")
+
+        monkeypatch.setattr(Path, "replace", deny_replace)
+        monkeypatch.setattr(cache_mod.time, "sleep", lambda _s: None)
+        got = store.save(key, audio, SR)   # 同键=同内容：认账返回既有文件
+        assert got == p and p.is_file()
+        assert not p.with_name(p.name + ".tmp").exists()
+    finally:
+        rmtree_force(ws)
+
+
+def test_cache_save_locked_unreadable_raises_friendly(monkeypatch):
+    """P55 终态：替换恒失败且目标不可读 → 清 tmp + 可读 RuntimeError（非裸 WinError 32）。"""
+    from tsov.host import cache as cache_mod
+
+    ws = _ws()
+    try:
+        store = StemStore(ws)
+        key = "e" * 24
+        audio = np.zeros((64, 2), dtype=np.float32)
+
+        def deny_replace(self, target):
+            raise PermissionError(32, "另一个程序正在使用此文件。")
+
+        monkeypatch.setattr(Path, "replace", deny_replace)
+        monkeypatch.setattr(cache_mod.time, "sleep", lambda _s: None)
+        raised = False
+        try:
+            store.save(key, audio, SR)
+        except RuntimeError as e:
+            raised = True
+            assert "被占用" in str(e) and "重试" in str(e)
+        assert raised
+        p = store.path_for(key)
+        assert not p.exists() and not p.with_name(p.name + ".tmp").exists()
+    finally:
+        rmtree_force(ws)
