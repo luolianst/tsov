@@ -23,14 +23,17 @@ from fastapi.testclient import TestClient
 
 import tsov.web
 from tsov.chain import (ChainRunner, apply_config, auto_run_plan, build_apply_commands,
-                        list_tools, load_chain_json, load_preset, load_run_notes)
+                        build_decompose_commands, list_presets, list_tools, load_chain_json,
+                        load_preset, load_run_notes)
 from tsov.chain.tools import TOOLS, ChainContext, get_tool
 from tsov.web import create_app
 
 from unit._cleanup import rmtree_force
 
 _HAS_FFMPEG = shutil.which("ffmpeg") is not None
-_ORDER = ["denoise", "loudnorm", "transcribe", "quantize", "snap_scale"]
+_ORDER = ["analyze_grid", "separate", "denoise", "loudnorm", "transcribe", "quantize",
+          "snap_scale"]                                                                     # 工具全集序
+_HUMMING = ["denoise", "loudnorm", "transcribe", "quantize", "snap_scale"]               # 哼唱链预设序
 
 
 @pytest.fixture()
@@ -134,12 +137,13 @@ def test_tool_registry_shape():
     tools = list_tools()
     assert [t["id"] for t in tools] == _ORDER
     assert {t["id"]: t["tier"] for t in tools} == {
+        "analyze_grid": "fast", "separate": "slow",
         "denoise": "fast", "loudnorm": "fast", "transcribe": "slow",
         "quantize": "fast", "snap_scale": "fast"}
     for t in tools:
         assert callable(TOOLS[t["id"]]["run"]) and t["name"]["zh"] and t["params"]
         assert "run" not in t
-    assert [s["tool"] for s in load_preset("humming-quicklane")["steps"]] == _ORDER
+    assert [s["tool"] for s in load_preset("humming-quicklane")["steps"]] == _HUMMING
     with pytest.raises(ValueError):
         load_preset("nope-preset")
 
@@ -228,10 +232,10 @@ def test_runner_full_mocked(env, monkeypatch):
     r = ChainRunner(_proj(env))
     r.start()
     st = _wait_runner(r)
-    assert calls == _ORDER
+    assert calls == _HUMMING
     assert [s["status"] for s in st["steps"]] == ["done"] * 5
     saved = load_chain_json(env["dir"] / "p1")
-    assert saved["run_ts"] and [s["tool"] for s in saved["steps"]] == _ORDER
+    assert saved["run_ts"] and [s["tool"] for s in saved["steps"]] == _HUMMING
     run_dir = env["dir"] / "p1" / "chain" / saved["run_ts"]
     assert (run_dir / "denoise.out").is_file() and (run_dir / "snap_scale.out").is_file()
 
@@ -409,7 +413,7 @@ def test_chain_status_static_slots(env):
     _make_project(env)
     body = env["client"].get("/api/projects/p1/chain/status").json()
     assert body["running"] is False and body["saved_only"] is True
-    assert [s["tool_id"] for s in body["steps"]] == _ORDER
+    assert [s["tool_id"] for s in body["steps"]] == _HUMMING
     assert all(s["status"] == "pending" for s in body["steps"])
     assert body["progress"] == {"done": 0, "total": 5}
 
@@ -418,6 +422,54 @@ def test_chain_tools_endpoint(env):
     _make_project(env)
     body = env["client"].get("/api/projects/p1/chain/tools").json()
     assert [t["id"] for t in body["tools"]] == _ORDER
+    # E1-6：预设清单随 tools 返回
+    ids = [p["id"] for p in body["presets"]]
+    assert "humming-quicklane" in ids and "song-decompose" in ids
+
+
+def test_list_presets_scan():
+    """E1-6：预设清单全量扫 presets/chains/（shape 与关键项）。"""
+    presets = list_presets()
+    ids = [p["id"] for p in presets]
+    assert "humming-quicklane" in ids and "song-decompose" in ids
+    sd = next(p for p in presets if p["id"] == "song-decompose")
+    assert sd["name"]["zh"] == "成品歌拆解" and sd["steps_count"] == 5
+    assert all({"id", "name", "description", "steps_count"} <= set(p.keys())
+               for p in presets)
+
+
+def test_chain_preset_switch_endpoint(env):
+    """E1-6：chain/config 切预设——静态槽位按新预设；非法预设 400（不脏档）。"""
+    _make_project(env)
+    c = env["client"]
+    r = c.post("/api/projects/p1/chain/config", json={"preset": "song-decompose"})
+    assert r.status_code == 200 and r.json()["config"]["preset"] == "song-decompose"
+    body = c.get("/api/projects/p1/chain/status").json()
+    assert body["saved_only"] is True and body["preset"] == "song-decompose"
+    assert [s["tool_id"] for s in body["steps"]] == [
+        "analyze_grid", "separate", "transcribe", "quantize", "snap_scale"]
+    assert body["progress"] == {"done": 0, "total": 5}
+    r2 = c.post("/api/projects/p1/chain/config", json={"preset": "humming-quicklane"})
+    assert r2.status_code == 200
+    assert [s["tool_id"] for s in
+            c.get("/api/projects/p1/chain/status").json()["steps"]] == _HUMMING
+    r3 = c.post("/api/projects/p1/chain/config", json={"preset": "nope"})
+    assert r3.status_code == 400
+    assert load_chain_json(env["dir"] / "p1")["preset"] == "humming-quicklane"
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="需要 ffmpeg")
+def test_runner_writes_run_meta(env, monkeypatch):
+    """E1-7：开跑即写 chain/<run_ts>/run-meta.json（preset/source_track/created_at）。"""
+    _project_with_audio(env)
+    _patch_tools(monkeypatch)
+    r = ChainRunner(_proj(env))
+    r.start()
+    st = _wait_runner(r)
+    meta = json.loads((env["dir"] / "p1" / "chain" / st["run_ts"] / "run-meta.json")
+                      .read_text(encoding="utf-8"))
+    assert meta["preset"] == "humming-quicklane" and meta["created_at"]
+    assert meta["source_track"] == r.source_track
 
 
 def test_chain_artifact_guard_no_run(env):
@@ -593,3 +645,566 @@ def test_quantize_tool_triplet_grid(tmp_path):
     q6 = json.loads((run_dir / out6["artifact"]).read_text(encoding="utf-8"))
     cell6 = (60.0 / 120.0) / 6.0                     # 1/16 三连 = 1/6 拍
     assert q6[0]["start"] == pytest.approx(2 * cell6, abs=1e-6)  # 0.17 → 2/6 拍
+
+
+# ---------------- 批E 段1：定速与对齐（E1-1）----------------
+
+
+def _write_click_wav(path, *, bpm=130.0, phase=0.2, seconds=15.0, sr=22050):
+    """合成拍点素材：每拍短脉冲（噪声衰减包络），拍点位于 phase + k·周期。"""
+    rng = np.random.default_rng(42)
+    y = np.zeros(int(seconds * sr), dtype=np.float32)
+    period = 60.0 / bpm
+    t = phase
+    while t < seconds - 0.25:
+        i = int(round(t * sr))
+        n = min(600, len(y) - i)
+        env = np.exp(-np.arange(n) / 80.0).astype(np.float32)
+        y[i:i + n] += (0.9 * env * rng.standard_normal(n)).astype(np.float32)
+        t += period
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(str(path), y, sr, subtype="FLOAT")
+    return path
+
+
+def test_quantize_notes_phase_regression():
+    """E1-1：phase_s 缺省 = 旧行为逐字一致；给定相位 → 音符吸到相位网格。"""
+    from tsov.core.notes import Note
+    from tsov.dsp.quantize import quantize_notes
+
+    def note(s, e):
+        return Note(start=s, end=e, pitch_midi=60, pitch_hz=261.6, deviation_cents=0.0)
+
+    notes = [note(0.03, 0.26), note(0.51, 0.74), note(0.98, 1.2)]
+    bpm, grid = 120.0, 16
+    cell = (60.0 / bpm) / grid
+    got = quantize_notes(notes, bpm=bpm, grid=grid)
+    exp = [(round(n.start / cell) * cell, round(n.end / cell) * cell) for n in notes]
+    assert [(x.start, x.end) for x in got] == [(round(s, 6), round(e, 6)) for s, e in exp]
+
+    phase = 0.013
+    pn = [note(phase + 2 * cell + 0.004, phase + 4 * cell - 0.001),
+          note(phase + 8 * cell + 0.006, phase + 9 * cell - 0.003)]
+    pq = quantize_notes(pn, bpm=bpm, grid=grid, phase_s=phase)
+    assert pq[0].start == pytest.approx(phase + 2 * cell, abs=1e-9)
+    assert pq[0].end == pytest.approx(phase + 4 * cell, abs=1e-9)
+    assert pq[1].start == pytest.approx(phase + 8 * cell, abs=1e-9)
+
+
+def test_analyze_grid_tool_synthetic(tmp_path):
+    """E1-1：合成拍点素材真跑——BPM 130±0.5、相位 ±15ms、grid.json 五字段。"""
+    proj_root = tmp_path / "proj"
+    run_dir = proj_root / "chain" / "r1"
+    run_dir.mkdir(parents=True)
+    src = _write_click_wav(proj_root / "audio" / "click.wav", bpm=130.0, phase=0.2, seconds=15.0)
+    ctx = _ctx(proj_root, run_dir, src, "analyze_grid", {})
+    out = get_tool("analyze_grid")["run"](ctx)
+    assert abs(out["bpm"] - 130.0) <= 0.5, out
+    assert abs(out["beat_offset"] - 0.2) <= 0.015, out
+    assert out["beats_count"] >= 20
+    assert out["duration_sec"] == pytest.approx(15.0, abs=0.1)
+    data = json.loads((run_dir / "grid.json").read_text(encoding="utf-8"))
+    assert set(data) == {"bpm", "beat_offset", "beats", "confidence", "duration_sec"}
+    assert len(data["beats"]) == out["beats_count"]
+
+
+def test_analyze_grid_override_offset(tmp_path):
+    """E1-1：bpm_override / offset_ms 手调口生效。"""
+    proj_root = tmp_path / "proj"
+    run_dir = proj_root / "chain" / "r1"
+    run_dir.mkdir(parents=True)
+    src = _write_click_wav(proj_root / "audio" / "click.wav", bpm=130.0, phase=0.2)
+    tool_run = get_tool("analyze_grid")["run"]
+
+    ctx = _ctx(proj_root, run_dir, src, "analyze_grid", {"bpm_override": "131"})
+    out = tool_run(ctx)
+    assert out["bpm"] == 131.0 and out["bpm_detected"] != 131.0
+
+    base = tool_run(_ctx(proj_root, run_dir, src, "analyze_grid", {}))
+    ctx2 = _ctx(proj_root, run_dir, src, "analyze_grid", {"offset_ms": 100})
+    out2 = tool_run(ctx2)
+    period = 60.0 / out2["bpm"]
+    expect = (base["beat_offset"] + 0.1) % period
+    assert out2["beat_offset"] == pytest.approx(expect, abs=0.02)
+
+
+def test_quantize_reads_grid_history(tmp_path):
+    """E1-1：_run_quantize 读 grid.json——bpm 优先 grid、相位应用；历史 run 回退。"""
+    proj_root = tmp_path / "proj"
+    hist = proj_root / "chain" / "r1"       # 历史 run（grid.json 在此）
+    run_dir = proj_root / "chain" / "r2"    # 本次 run（「只重跑下游步」）
+    hist.mkdir(parents=True)
+    run_dir.mkdir(parents=True)
+    src = proj_root / "audio" / "in.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"x")
+
+    bpm, phase = 130.0, 0.2
+    (hist / "grid.json").write_text(json.dumps(
+        {"bpm": bpm, "beat_offset": phase, "beats": [], "confidence": 1.0, "duration_sec": 10.0}),
+        encoding="utf-8")
+    voice = {"bpm": 90.0, "notes": [
+        {"start": phase + 0.01, "end": phase + 0.3, "pitch_midi": 60, "pitch_hz": 261.6,
+         "deviation_cents": 0.0},
+        {"start": phase + 0.5, "end": phase + 0.9, "pitch_midi": 62, "pitch_hz": 293.7,
+         "deviation_cents": 0.0}]}
+    (run_dir / "03-voice.json").write_text(json.dumps(voice), encoding="utf-8")
+    ctx = _ctx(proj_root, run_dir, src, "quantize", {"grid": 4, "strength": 1.0},
+               prev=run_dir / "03-voice.json")
+    out = get_tool("quantize")["run"](ctx)
+    assert out["bpm"] == bpm and out["bpm_source"] == "grid"
+    assert out["phase_s"] == pytest.approx(phase, abs=1e-9)
+    q = json.loads((run_dir / out["artifact"]).read_text(encoding="utf-8"))
+    cell = (60.0 / bpm) / 4
+    for n in q:
+        rel = (n["start"] - phase) / cell
+        assert abs(rel - round(rel)) < 1e-3, n
+
+
+def test_quantize_bpm_priority(tmp_path):
+    """E1-1：bpm 优先级 步参数 > grid > 音符文件 > 工程 tempo；覆盖时相位按新周期重算。"""
+    proj_root = tmp_path / "proj"
+    run_dir = proj_root / "chain" / "r1"
+    run_dir.mkdir(parents=True)
+    src = proj_root / "audio" / "in.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"x")
+    beats = [0.2 + k * (60.0 / 130.0) for k in range(64)]
+    (run_dir / "grid.json").write_text(json.dumps(
+        {"bpm": 130.0, "beat_offset": 0.2, "beats": beats, "confidence": 1.0,
+         "duration_sec": 30.0}), encoding="utf-8")
+    voice = {"bpm": 90.0, "notes": [
+        {"start": 0.21, "end": 0.5, "pitch_midi": 60, "pitch_hz": 261.6, "deviation_cents": 0.0}]}
+    (run_dir / "03-voice.json").write_text(json.dumps(voice), encoding="utf-8")
+
+    # 1) 步参数覆盖：140 → 相位按 beats × 新周期重算
+    ctx = _ctx(proj_root, run_dir, src, "quantize", {"grid": 4, "strength": 1.0, "bpm": "140"},
+               prev=run_dir / "03-voice.json")
+    out = get_tool("quantize")["run"](ctx)
+    assert out["bpm"] == 140.0 and out["bpm_source"] == "param"
+    exp_phase = float(np.median(np.mod(np.asarray(beats, dtype=float), 60.0 / 140.0)))
+    assert out["phase_s"] == pytest.approx(exp_phase, abs=1e-6)
+
+    # 2) 无步参数 → grid 优先（bpm=130、相位=beat_offset）
+    ctx2 = _ctx(proj_root, run_dir, src, "quantize", {"grid": 4, "strength": 1.0},
+                prev=run_dir / "03-voice.json")
+    out2 = get_tool("quantize")["run"](ctx2)
+    assert out2["bpm"] == 130.0 and out2["bpm_source"] == "grid"
+    assert out2["phase_s"] == pytest.approx(0.2, abs=1e-9)
+
+    # 3) 无 grid → 音符文件 bpm；再无 → 工程 tempo
+    (run_dir / "grid.json").unlink()          # 清掉历史网格（本情形测「无 grid」路径）
+    run2 = proj_root / "chain" / "r2"
+    run2.mkdir()
+    (run2 / "03-voice.json").write_text(json.dumps(voice), encoding="utf-8")
+    ctx3 = _ctx(proj_root, run2, src, "quantize", {"grid": 4, "strength": 1.0},
+                prev=run2 / "03-voice.json")
+    out3 = get_tool("quantize")["run"](ctx3)
+    assert out3["bpm"] == 90.0 and out3["bpm_source"] == "voice" and out3["phase_s"] == 0.0
+
+    voice2 = {"notes": voice["notes"]}
+    (run2 / "03-voice.json").write_text(json.dumps(voice2), encoding="utf-8")
+    out4 = get_tool("quantize")["run"](_ctx(proj_root, run2, src, "quantize",
+                                            {"grid": 4, "strength": 1.0},
+                                            prev=run2 / "03-voice.json"))
+    assert out4["bpm"] == 120.0 and out4["bpm_source"] == "project"
+
+
+# ---------------- 批E 段1：分离（E1-2）----------------
+
+
+def test_separate_tool_mocked(tmp_path, monkeypatch):
+    """E1-2：separate 快档——假 demucs 产出 → 整理 / manifest / stats。"""
+    import tsov.chain.tools as ct
+
+    proj_root = tmp_path / "proj"
+    run_dir = proj_root / "chain" / "r1"
+    run_dir.mkdir(parents=True)
+    src = proj_root / "audio" / "in.wav"
+    _write_wav(src, seconds=1.0, sr=16000)
+
+    def fake_exec(ctx, cmd, *, label, eta_sec, env_extra=None, on_cancel=None,
+                  heartbeat_sec=10.0):
+        out_dir = Path(cmd[cmd.index("-o") + 1])
+        track = out_dir / "htdemucs" / "in"
+        track.mkdir(parents=True)
+        for s in ("vocals", "drums", "bass", "other"):
+            (track / f"{s}.wav").write_bytes(b"RIFF" + s.encode())
+        assert env_extra and env_extra.get("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD") == "1"
+        return 0, ["fake demucs ok"], 1.5
+
+    monkeypatch.setattr(ct, "_exec_child", fake_exec)
+    ctx = _ctx(proj_root, run_dir, src, "separate", {"quality": "fast"})
+    out = get_tool("separate")["run"](ctx)
+    assert out["artifact"] == "stems/manifest.json"
+    assert set(out["stems"]) == {"vocals", "drums", "bass", "other"}
+    assert out["elapsed_sec"] == 1.5
+    stems_dir = run_dir / "stems"
+    for s in ("vocals", "drums", "bass", "other"):
+        assert (stems_dir / f"{s}.wav").is_file()
+    mf = json.loads((stems_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert mf["quality"] == "fast" and mf["model"] == "htdemucs"
+    assert mf["stems"]["vocals"]["bytes"] == len(b"RIFFvocals")
+    assert not (stems_dir / "_raw").exists()
+
+
+def test_separate_failure_paths(tmp_path, monkeypatch):
+    """E1-2：失败路径——rc≠0 指路报错 / 无产出报错 / quality 档未接入报错。"""
+    import tsov.chain.tools as ct
+
+    proj_root = tmp_path / "proj"
+    run_dir = proj_root / "chain" / "r1"
+    run_dir.mkdir(parents=True)
+    src = proj_root / "audio" / "in.wav"
+    _write_wav(src, seconds=1.0, sr=16000)
+    tool_run = get_tool("separate")["run"]
+
+    def fail_exec(ctx, cmd, **kw):
+        return 1, ["CUDA out of memory", "boom"], 2.0
+
+    monkeypatch.setattr(ct, "_exec_child", fail_exec)
+    with pytest.raises(RuntimeError, match="显存不足"):
+        tool_run(_ctx(proj_root, run_dir, src, "separate", {"quality": "fast"}))
+
+    def empty_exec(ctx, cmd, **kw):
+        return 0, ["no output"], 2.0
+
+    monkeypatch.setattr(ct, "_exec_child", empty_exec)
+    with pytest.raises(RuntimeError, match="未按预期产出"):
+        tool_run(_ctx(proj_root, run_dir, src, "separate", {"quality": "fast"}))
+
+
+def test_separate_quality_orchestration(tmp_path, monkeypatch):
+    """E1-3：质量档——ft 四轨 + Roformer 人声合并；vocals 取 Roformer 版。"""
+    import tsov.chain.tools as ct
+
+    proj_root = tmp_path / "proj"
+    run_dir = proj_root / "chain" / "r1"
+    run_dir.mkdir(parents=True)
+    src = proj_root / "audio" / "in.wav"
+    _write_wav(src, seconds=1.0, sr=16000)
+
+    def fake_exec(ctx, cmd, *, label, eta_sec, env_extra=None, on_cancel=None,
+                  heartbeat_sec=10.0):
+        if "demucs" in cmd:  # 路① ft
+            out = Path(cmd[cmd.index("-o") + 1])
+            track = out / "htdemucs_ft" / "in"
+            track.mkdir(parents=True)
+            for s in ("vocals", "drums", "bass", "other"):
+                (track / f"{s}.wav").write_bytes(b"FT" + s.encode())
+        else:  # 路② audio-separator
+            out = Path(cmd[cmd.index("--output_dir") + 1])
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "in_(vocals)_vocals_mel_band_roformer.wav").write_bytes(b"ROFORMER-vocals")
+            assert env_extra and "AUDIO_SEPARATOR_MODEL_DIR" in env_extra
+        return 0, ["fake ok"], 1.0
+
+    monkeypatch.setattr(ct, "_exec_child", fake_exec)
+    monkeypatch.setattr(ct, "_sep_assets_check", lambda: (True, ""))
+    out = get_tool("separate")["run"](
+        _ctx(proj_root, run_dir, src, "separate", {"quality": "quality"}))
+    assert out["quality"] == "quality"
+    assert out["model"] == "htdemucs_ft+vocals_mel_band_roformer"
+    assert out["degraded"] is False and out["elapsed_sec"] == 2.0
+    assert (run_dir / "stems" / "vocals.wav").read_bytes() == b"ROFORMER-vocals"  # 人声走 Roformer
+    assert (run_dir / "stems" / "drums.wav").read_bytes() == b"FTdrums"          # 其余走 ft
+    mf = json.loads((run_dir / "stems" / "manifest.json").read_text(encoding="utf-8"))
+    assert mf["degraded"] is False and "roformer" in mf["model"]
+
+
+def test_separate_quality_degrade(tmp_path, monkeypatch):
+    """E1-3：质量档缺件 → 自动降级纯 ft（vocals 也用 ft）；日志/stats 指路。"""
+    import tsov.chain.tools as ct
+
+    proj_root = tmp_path / "proj"
+    run_dir = proj_root / "chain" / "r1"
+    run_dir.mkdir(parents=True)
+    src = proj_root / "audio" / "in.wav"
+    _write_wav(src, seconds=1.0, sr=16000)
+
+    def fake_exec(ctx, cmd, *, label, eta_sec, env_extra=None, on_cancel=None,
+                  heartbeat_sec=10.0):
+        assert "audio-separator" not in " ".join(cmd)  # 降级后不得跑人声路
+        out = Path(cmd[cmd.index("-o") + 1])
+        track = out / "htdemucs_ft" / "in"
+        track.mkdir(parents=True)
+        for s in ("vocals", "drums", "bass", "other"):
+            (track / f"{s}.wav").write_bytes(b"FT" + s.encode())
+        return 0, ["fake ok"], 1.0
+
+    monkeypatch.setattr(ct, "_exec_child", fake_exec)
+    monkeypatch.setattr(ct, "_sep_assets_check",
+                        lambda: (False, "模型缺失。指路：fetch_engines --only sep-model"))
+    logs: list = []
+    ctx = _ctx(proj_root, run_dir, src, "separate", {"quality": "quality"})
+    ctx.on_log = logs.append
+    out = get_tool("separate")["run"](ctx)
+    assert out["degraded"] is True and out["model"] == "htdemucs_ft"
+    assert any("fetch_engines" in m for m in logs)
+    assert (run_dir / "stems" / "vocals.wav").read_bytes() == b"FTvocals"
+    mf = json.loads((run_dir / "stems" / "manifest.json").read_text(encoding="utf-8"))
+    assert mf["degraded"] is True and mf["degrade_reason"]
+
+
+# ---------------- 批E 段1：转录 stem 参数 + 链预设（E1-4）----------------
+
+
+def test_transcribe_stem_input_and_naming(tmp_path, monkeypatch):
+    """E1-4：stem=vocals——输入取 stems/vocals.wav（本 run→历史回退）、产物 voice-vocals.json。"""
+    import importlib
+
+    class FakeVoice:
+        bpm = 130.0
+        notes: list = []
+
+        def to_dict(self):
+            return {"bpm": self.bpm, "notes": []}
+
+    seen: dict = {}
+
+    def fake_transcribe(path, backend="rmvpe", **kw):
+        seen.update({"path": str(path), "backend": backend})
+        return FakeVoice()
+
+    mod = importlib.import_module("tsov.dsp.transcribe")
+    monkeypatch.setattr(mod, "transcribe", fake_transcribe)
+
+    proj_root = tmp_path / "proj"
+    run_dir = proj_root / "chain" / "r2"      # 本次 run（无 stems）
+    hist = proj_root / "chain" / "r1"         # 历史 run（有 stems）
+    (hist / "stems").mkdir(parents=True)
+    run_dir.mkdir(parents=True)
+    src = proj_root / "audio" / "in.wav"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"x")
+    (hist / "stems" / "vocals.wav").write_bytes(b"RIFFx")
+
+    ctx = _ctx(proj_root, run_dir, src, "transcribe", {"stem": "vocals", "backend": "rmvpe"})
+    out = get_tool("transcribe")["run"](ctx)
+    assert out["stem"] == "vocals" and out["artifact"] == "voice-vocals.json"
+    assert "r1" in seen["path"] and seen["path"].endswith("vocals.wav")   # 历史回退命中
+
+    # 本 run 有 stems → 优先本 run
+    (run_dir / "stems").mkdir()
+    (run_dir / "stems" / "vocals.wav").write_bytes(b"RIFFy")
+    seen.clear()
+    out2 = get_tool("transcribe")["run"](
+        _ctx(proj_root, run_dir, src, "transcribe", {"stem": "vocals", "backend": "rmvpe"}))
+    assert out2["artifact"] == "voice-vocals.json"
+    assert "r2" in seen["path"]
+
+    # 全缺 → 明确报错
+    with pytest.raises(RuntimeError, match="找不到声部轨"):
+        get_tool("transcribe")["run"](
+            _ctx(proj_root, run_dir, src, "transcribe", {"stem": "drums"}))
+
+
+def test_quantize_snap_stem_naming(tmp_path):
+    """E1-4：量化/吸附产物命名随输入派生（voice-vocals → notes-vocals-quantized → -snapped）。"""
+    proj_root = tmp_path / "proj"
+    run_dir = proj_root / "chain" / "r1"
+    run_dir.mkdir(parents=True)
+    src = proj_root / "audio" / "in.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"x")
+    (run_dir / "voice-vocals.json").write_text(json.dumps(
+        {"bpm": 120.0, "notes": [{"start": 0.03, "end": 0.26, "pitch_midi": 60,
+                                  "pitch_hz": 261.6, "deviation_cents": 0.0}]}),
+        encoding="utf-8")
+    ctx = _ctx(proj_root, run_dir, src, "quantize", {"grid": 16, "strength": 1.0},
+               prev=run_dir / "voice-vocals.json")
+    out = get_tool("quantize")["run"](ctx)
+    assert out["artifact"] == "notes-vocals-quantized.json"
+    ctx2 = _ctx(proj_root, run_dir, src, "snap_scale", {"key": "auto"},
+                prev=run_dir / out["artifact"])
+    out2 = get_tool("snap_scale")["run"](ctx2)
+    assert out2["artifact"] == "notes-vocals-snapped.json"
+
+
+def test_song_decompose_preset_shape():
+    """E1-4：song-decompose 预设在案、步序与关键参数正确。"""
+    p = load_preset("song-decompose")
+    assert p["id"] == "song-decompose"
+    assert [s["tool"] for s in p["steps"]] == [
+        "analyze_grid", "separate", "transcribe", "quantize", "snap_scale"]
+    d = {s["tool"]: (s.get("params") or {}) for s in p["steps"]}
+    assert d["separate"]["quality"] == "quality"
+    assert d["transcribe"] == {"stem": "vocals", "backend": "game"}
+
+
+# ---------------- 批E 段1：多轨落位（E1-5）----------------
+
+_DEC_STEMS = {"vocals": "audio/v-1.flac", "drums": "audio/d-1.flac",
+              "bass": "audio/b-1.flac", "other": "audio/o-1.flac"}
+_DEC_MIDIS = [{"stem": "vocals", "notes": [{"start": 0.0, "end": 1.0, "pitch_midi": 60}]}]
+
+
+def test_build_decompose_first_run():
+    """E1-5：首次落位——4 音频追加 + 1 MIDI 轨 + 挂文件夹；索引/meta 正确。"""
+    tracks = [{"name": "melody", "kind": "midi"}, {"name": "录音", "kind": "audio"}]
+    plan = build_decompose_commands(tracks, source_track=1, stems=_DEC_STEMS, midis=_DEC_MIDIS)
+    ops = [(c["op"], c.get("track")) for c in plan["commands"]]
+    assert ops == [("add_audio_track", None)] * 4 + [("add_track", 0), ("set_notes", 6)] \
+        + [("set_track_folder", i) for i in (2, 3, 4, 5, 6)]
+    assert plan["commands"][0]["value"] == {"file": "audio/v-1.flac", "name": "人声"}
+    assert plan["commands"][4]["value"] == {"name": "人声 MIDI", "at": 6, "unique": False}
+    assert plan["commands"][5]["value"]["notes"][0]["pitch_midi"] == 60
+    assert plan["meta"]["folder"] == "拆解 · 录音"
+    assert plan["meta"]["audio_tracks"] == [2, 3, 4, 5]
+    assert plan["meta"]["midi_tracks"] == [6]
+    assert plan["meta"]["names"] == ["人声", "鼓", "贝斯", "其他", "人声 MIDI"]
+    assert plan["meta"]["removed"] == []
+
+
+def test_build_decompose_rerun_idempotent():
+    """E1-5：重跑——先删同文件夹旧产物（倒序）再重建，索引重算。"""
+    tracks = [{"name": "melody", "kind": "midi"},
+              {"name": "录音", "kind": "audio"},
+              {"name": "人声", "kind": "audio", "folder": "拆解 · 录音"},
+              {"name": "鼓", "kind": "audio", "folder": "拆解 · 录音"},
+              {"name": "贝斯", "kind": "audio", "folder": "拆解 · 录音"},
+              {"name": "其他", "kind": "audio", "folder": "拆解 · 录音"},
+              {"name": "人声 MIDI", "kind": "midi", "folder": "拆解 · 录音"}]
+    plan = build_decompose_commands(tracks, source_track=1, stems=_DEC_STEMS, midis=_DEC_MIDIS)
+    assert plan["meta"]["removed"] == [2, 3, 4, 5, 6]
+    ops = [(c["op"], c.get("track")) for c in plan["commands"]]
+    assert ops[:5] == [("remove_track", i) for i in (6, 5, 4, 3, 2)]
+    assert plan["meta"]["audio_tracks"] == [2, 3, 4, 5]
+    assert plan["meta"]["midi_tracks"] == [6]
+
+
+def test_build_decompose_folder_scope():
+    """E1-5：清理范围＝同文件夹（别文件夹同名轨不删；源轨即使在该文件夹也不删）；缺参报错。"""
+    tracks = [{"name": "melody", "kind": "midi"},
+              {"name": "录音", "kind": "audio", "folder": "拆解 · 录音"},
+              {"name": "人声", "kind": "audio", "folder": "别的文件夹"}]
+    plan = build_decompose_commands(tracks, source_track=1, stems=_DEC_STEMS, midis=[])
+    assert plan["meta"]["removed"] == []
+    assert plan["meta"]["midi_tracks"] == []
+    with pytest.raises(ValueError):
+        build_decompose_commands(tracks, source_track=0, stems={"vocals": "x"}, midis=[])
+    with pytest.raises(ValueError):
+        build_decompose_commands(tracks, source_track=9, stems=_DEC_STEMS, midis=[])
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="需要 ffmpeg")
+def test_decompose_apply_rest(env):
+    """E1-5 双通道·agent 路：假拆解产物 → REST apply → 文件夹/4 音频/1 MIDI/tempo/幂等/undo。"""
+    _project_with_audio(env)
+    client = env["client"]
+    root = env["dir"] / "p1"
+    proj = _proj(env)
+    src_name = proj.score.tracks[1].name
+    folder = f"拆解 · {src_name}"
+
+    run_ts = "20990101-000000"
+    run_dir = root / "chain" / run_ts
+    (run_dir / "stems").mkdir(parents=True)
+    for s in ("vocals", "drums", "bass", "other"):
+        _write_wav(run_dir / "stems" / f"{s}.wav", seconds=0.5, sr=16000)
+    notes = [{"start": 0.0, "end": 0.4, "pitch_midi": 60},
+             {"start": 0.5, "end": 0.9, "pitch_midi": 63}]
+    (run_dir / "notes-vocals-snapped.json").write_text(
+        json.dumps({"notes": notes}), encoding="utf-8")
+    (run_dir / "grid.json").write_text(json.dumps(
+        {"bpm": 129.999, "beat_offset": 0.003, "beats": [], "confidence": 1.0,
+         "duration_sec": 1.0}), encoding="utf-8")
+    (root / "chain.json").write_text(json.dumps(
+        {"source_track": 1, "preset": "song-decompose", "run_ts": run_ts, "steps": []}),
+        encoding="utf-8")
+
+    r = client.post("/api/projects/p1/chain/apply", json={})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True and body["folder"] == folder
+    assert body["audio_tracks"] == [2, 3, 4, 5] and body["midi_tracks"] == [6]
+    assert body["tempo"]["to"] == 129.999 and body["tempo"]["applied"] is True
+    assert body["notes_source"] == "notes-vocals-snapped.json"
+
+    proj = _proj(env)
+    assert [t.name for t in proj.score.tracks] == ["melody", src_name, "人声", "鼓", "贝斯",
+                                                   "其他", "人声 MIDI"]
+    assert proj.score.tempo == 129.999
+    for t in proj.score.tracks[2:6]:
+        assert t.kind == "audio" and t.folder == folder
+        assert (proj.root / t.audio["file"]).is_file()
+    mid = proj.score.tracks[6]
+    assert mid.kind == "midi" and mid.folder == folder and len(mid.notes) == 2
+    assert [n.pitch_midi for n in mid.notes] == [60, 63]
+
+    # 幂等：重跑不增轨、名字不变
+    r2 = client.post("/api/projects/p1/chain/apply", json={})
+    assert r2.status_code == 200 and r2.json()["removed"] == [2, 3, 4, 5, 6]
+    proj = _proj(env)
+    assert [t.name for t in proj.score.tracks] == ["melody", src_name, "人声", "鼓", "贝斯",
+                                                   "其他", "人声 MIDI"]
+
+    # undo 可回（循环撤销直到回退到落位前）
+    for _ in range(16):
+        proj = _proj(env)
+        if len(proj.score.tracks) == 2:
+            break
+        u = client.post("/api/projects/p1/undo")
+        assert u.status_code == 200
+    proj = _proj(env)
+    assert [t.name for t in proj.score.tracks] == ["melody", src_name]
+
+
+def test_exec_child_normal_and_cancel(tmp_path):
+    """E1-2：_exec_child——正常收集输出；取消→杀子进程树（ChainCancelled + pid 检死）。"""
+    import subprocess
+    import sys
+
+    from tsov.chain.tools import _exec_child
+
+    proj_root = tmp_path / "proj"
+    run_dir = proj_root / "chain" / "r1"
+    run_dir.mkdir(parents=True)
+    src = proj_root / "audio" / "in.wav"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"x")
+
+    def ctx_new():
+        return _ctx(proj_root, run_dir, src, "separate", {})
+
+    # 1) 正常：输出收集
+    ctx = ctx_new()
+    rc, tail, _el = _exec_child(ctx, [sys.executable, "-c", "print('hello-child')"],
+                                label="测试", eta_sec=1.0, heartbeat_sec=0.1)
+    assert rc == 0 and any("hello-child" in ln for ln in tail)
+
+    # 2) 取消：子进程写 pid 后长眠 → cancel → 杀树；pid 随后检死
+    pid_file = tmp_path / "child.pid"
+    code = ("import os,sys,time\n"
+            "open(sys.argv[1], 'w').write(str(os.getpid()))\n"
+            "time.sleep(120)\n")
+    ctx2 = ctx_new()
+    cleaned: list = []
+
+    def killer():
+        time.sleep(2.0)
+        ctx2.cancel.set()
+
+    threading.Thread(target=killer, daemon=True).start()
+    t0 = time.time()
+    with pytest.raises(Exception, match="已取消"):
+        _exec_child(ctx2, [sys.executable, "-c", code, str(pid_file)],
+                    label="测试", eta_sec=120.0, heartbeat_sec=5.0,
+                    on_cancel=lambda: cleaned.append(True))
+    assert time.time() - t0 < 40
+    assert cleaned == [True]
+    assert pid_file.is_file()
+    pid = int(pid_file.read_text(encoding="utf-8"))
+
+    def pid_alive() -> bool:
+        r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        return str(pid) in (r.stdout or "")
+
+    alive = pid_alive()
+    for _ in range(10):
+        if not alive:
+            break
+        time.sleep(0.5)
+        alive = pid_alive()
+    assert not alive, f"子进程 {pid} 未被杀干净"

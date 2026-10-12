@@ -1,0 +1,15 @@
+{
+  "id": "song-decompose",
+  "name": {"zh": "成品歌拆解", "en": "Song decompose"},
+  "description": {
+    "zh": "定速与对齐 → 分离四轨 → 人声转录（GAME）→ 量化 → 调内吸附；成品歌 → 分离轨 + 可编辑人声 MIDI",
+    "en": "Detect grid → separate stems → vocal transcription (GAME) → quantize → scale-snap"
+  },
+  "steps": [
+    {"tool": "analyze_grid", "params": {}},
+    {"tool": "separate", "params": {"quality": "quality"}},
+    {"tool": "transcribe", "params": {"stem": "vocals", "backend": "game"}},
+    {"tool": "quantize", "params": {"grid": 16, "strength": 1.0}},
+    {"tool": "snap_scale", "params": {"key": "auto", "threshold_cents": 42.0}}
+  ]
+}

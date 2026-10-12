@@ -13,10 +13,12 @@ from ..core.notes import Note
 from ..core.units import hz_to_deviation_cents
 
 
-def quantize_notes(notes: list[Note], bpm: float = 120.0, grid: int = 16, **params) -> list[Note]:
+def quantize_notes(notes: list[Note], bpm: float = 120.0, grid: int = 16,
+                   phase_s: float = 0.0, **params) -> list[Note]:
     """规则量化：把 DSP 直出的原始音符对齐到节拍网格。
 
     - grid：每拍细分数（16 = 16 分音符网格；8 = 八分音符）
+    - phase_s：网格相位（秒）＝首拍锚点偏移（拆解链对齐源曲栅格用；缺省 0 = 锚 t=0，逐字旧行为）
     - 音高：pitch_midi 保持不变（原始层已量化到半音）；deviation_cents 按 pitch_hz 重算
     - 时值：start/end 取整到最近网格点；end<=start 时补一个网格单元
     """
@@ -24,8 +26,12 @@ def quantize_notes(notes: list[Note], bpm: float = 120.0, grid: int = 16, **para
     cell_s = beat_s / grid
     out: list[Note] = []
     for n in notes:
-        start = round(n.start / cell_s) * cell_s
-        end = round(n.end / cell_s) * cell_s
+        if phase_s:
+            start = round((n.start - phase_s) / cell_s) * cell_s + phase_s
+            end = round((n.end - phase_s) / cell_s) * cell_s + phase_s
+        else:
+            start = round(n.start / cell_s) * cell_s
+            end = round(n.end / cell_s) * cell_s
         if end <= start:
             end = start + cell_s
         out.append(

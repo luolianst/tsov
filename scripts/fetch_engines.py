@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -55,7 +56,7 @@ UA = {"User-Agent": "tsov-fetch-engines/1.1"}
 # Tested pins (see docs/setup-engines.md)
 GAME_COMMIT = "4ad815c90dfe2442730f3fdc866fd23e737cbc97"
 RMVPE_COMMIT = "a6db1cd7d26014aa739383367afd9bab57fc624c"
-DEFAULT_STEPS = ["fluidsynth", "soundfont", "rmvpe", "game", "vst3"]
+DEFAULT_STEPS = ["fluidsynth", "soundfont", "rmvpe", "game", "vst3", "demucs", "sep-model"]
 URLS = {
     "game_weights": "https://github.com/openvpi/GAME/releases/download/v1.0.0/GAME-1.0-medium.zip",
     "game_repo": "https://github.com/openvpi/GAME.git",
@@ -72,6 +73,10 @@ URLS = {
     "fluidsynth_api": "https://api.github.com/repos/FluidSynth/fluidsynth/releases/latest",
     "dexed": "https://github.com/asb2m10/dexed/releases/download/v1.0.1/Dexed-1.0.1-win.zip",
     "tal": "https://tal-software.com/downloads/plugins/install_TAL-Chorus-LX.zip",
+    "sep_ckpt": "https://github.com/nomadkaraoke/python-audio-separator/releases/download/model-configs/vocals_mel_band_roformer.ckpt",
+    "sep_yaml": "https://github.com/nomadkaraoke/python-audio-separator/releases/download/model-configs/vocals_mel_band_roformer.yaml",
+    "sep_checks": "https://raw.githubusercontent.com/TRvlvr/application_data/main/filelists/download_checks.json",
+    "demucs_hf_repos": ["adefossez/HTDemucs", "adefossez/HTDemucs-ft"],
 }
 
 # Packages that must resolve from the TSOV venv — never duplicated inside GAME's venv.
@@ -103,7 +108,8 @@ def fail(msg: str) -> None:
 
 
 def mirror(url: str, gh_mirror: str | None) -> str:
-    if gh_mirror and url.startswith(("https://github.com/", "https://api.github.com/")):
+    if gh_mirror and url.startswith(("https://github.com/", "https://api.github.com/",
+                                     "https://raw.githubusercontent.com/")):
         return gh_mirror.rstrip("/") + "/" + url
     return url
 
@@ -126,27 +132,40 @@ def probe(url: str, timeout: int = 60):
 
 
 def download(url: str, dest: Path, label: str | None = None) -> None:
+    """流式下载 + 断点续传（.part 落盘保留，重跑接续）；Content-Length 对账防静默截断。"""
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
     label = label or dest.name
+    got = tmp.stat().st_size if tmp.exists() else 0
     req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=90) as r, open(tmp, "wb") as f:
+    if got:
+        req.add_header("Range", f"bytes={got}-")
+    with urllib.request.urlopen(req, timeout=90) as r:
+        mode = "wb"
         total = int(r.headers.get("Content-Length") or 0)
-        got = 0
-        next_mark = 0
-        while True:
-            chunk = r.read(1 << 20)
-            if not chunk:
-                break
-            f.write(chunk)
-            got += len(chunk)
-            if got >= next_mark:
-                pct = f"{got * 100 // total}%" if total else f"{got // (1 << 20)} MB"
-                log(f"    {label}: {pct}")
-                next_mark += 32 << 20
+        if got and getattr(r, "status", 200) == 206:
+            mode = "ab"
+            total += got
+            log(f"    {label}: resuming at {got:,} B")
+        elif got:  # 服务端不支持 Range → 从头
+            got, total, mode = 0, int(r.headers.get("Content-Length") or 0), "wb"
+        cr = r.headers.get("Content-Range")
+        if cr and "/" in cr:
+            total = int(cr.rsplit("/", 1)[1])
+        with open(tmp, mode) as f:
+            next_mark = got
+            while True:
+                chunk = r.read(1 << 20)
+                if not chunk:
+                    break
+                f.write(chunk)
+                got += len(chunk)
+                if got >= next_mark:
+                    pct = f"{got * 100 // total}%" if total else f"{got // (1 << 20)} MB"
+                    log(f"    {label}: {pct}")
+                    next_mark += 32 << 20
     if total and got < total:
-        tmp.unlink(missing_ok=True)
-        raise OSError(f"incomplete download: got {got:,} of {total:,} B")
+        raise OSError(f"incomplete download: got {got:,} of {total:,} B（.part 已保留，重跑续传）")
     tmp.replace(dest)
     log(f"    saved {dest.relative_to(REPO) if dest.is_relative_to(REPO) else dest} ({dest.stat().st_size:,} B)")
 
@@ -500,7 +519,70 @@ def fetch_vst3(dest: Path, args) -> bool:
     return ok_all
 
 
-STEPS = {"fluidsynth": fetch_fluidsynth, "soundfont": fetch_soundfont, "rmvpe": fetch_rmvpe, "game": fetch_game, "vst3": fetch_vst3}
+def hf_cache_hub() -> Path:
+    """HuggingFace 标准缓存 hub 目录（HF_HOME 感知）。"""
+    base = os.environ.get("HF_HOME") or (Path.home() / ".cache" / "huggingface")
+    return Path(base) / "hub"
+
+
+def fetch_demucs(dest: Path, args) -> bool:
+    """demucs 权重（htdemucs + htdemucs_ft）→ HuggingFace 标准缓存（hf CLI；--hf-mirror 生效）。"""
+    py = tsov_venv_python()
+    hf = (py.parent / ("hf.exe" if IS_WIN else "hf")) if py else None
+    if hf is None or not hf.is_file():
+        fail("  hf CLI 不在 tsov venv（huggingface_hub 未装）——无法预置 demucs 权重")
+        return False
+    env = {**os.environ, "PYTHONUTF8": "1"}
+    if args.hf_mirror:
+        env["HF_ENDPOINT"] = args.hf_mirror
+    ok = True
+    for repo in URLS["demucs_hf_repos"]:
+        cmd = [str(hf), "download", repo]
+        if args.force:
+            cmd.append("--force-download")
+        p = run(cmd, env=env, cwd=str(REPO))
+        if p.returncode != 0:
+            fail(f"  {repo}: 下载失败：\n{(p.stderr or p.stdout or '')[-800:]}")
+            ok = False
+        else:
+            log(f"  {repo}: ok → {hf_cache_hub() / ('models--' + repo.replace('/', '--'))}")
+    return ok
+
+
+def fetch_sep_model(dest: Path, args) -> bool:
+    """Roformer 人声模型三件 → vendor/audio-separator-models/（ghfast 前缀法，见拉取手册）。"""
+    out = dest / "audio-separator-models"
+    out.mkdir(parents=True, exist_ok=True)
+    expected = {
+        "vocals_mel_band_roformer.ckpt": 913106900,
+        "vocals_mel_band_roformer.yaml": 944,
+        "download_checks.json": 28267,
+    }
+    items = [
+        ("vocals_mel_band_roformer.ckpt", URLS["sep_ckpt"]),
+        ("vocals_mel_band_roformer.yaml", URLS["sep_yaml"]),
+        ("download_checks.json", URLS["sep_checks"]),
+    ]
+    ok = True
+    for name, url in items:
+        target = out / name
+        want = expected[name]
+        if target.is_file() and target.stat().st_size == want and not args.force:
+            log(f"  {name}: 已就位（{want:,} B），跳过")
+            continue
+        if not try_download([url], target, name, args.gh_mirror):
+            ok = False
+            continue
+        got = target.stat().st_size
+        if got != want:
+            fail(f"  {name}: 尺寸不符（{got:,} != {want:,}）——可能是截断，重跑可续传")
+            ok = False
+    return ok
+
+
+STEPS = {"fluidsynth": fetch_fluidsynth, "soundfont": fetch_soundfont, "rmvpe": fetch_rmvpe,
+         "game": fetch_game, "vst3": fetch_vst3, "demucs": fetch_demucs,
+         "sep-model": fetch_sep_model}
 
 
 # ---------------------------------------------------------------------------
@@ -517,14 +599,21 @@ def do_check(args) -> int:
     urls.append(("game weights", URLS["game_weights"]))
     urls.append(("dexed", URLS["dexed"]))
     urls.append(("tal", URLS["tal"]))
+    urls.append(("demucs (hf yaml)", "https://huggingface.co/adefossez/HTDemucs/resolve/main/htdemucs.yaml"))
+    urls.append(("sep ckpt", URLS["sep_ckpt"]))
+    urls.append(("sep checks", URLS["sep_checks"]))
     rc = 0
     for label, u in urls:
-        st, total, note = probe(mirror(u, args.gh_mirror))
+        if "huggingface.co" in u and args.hf_mirror:
+            u_probe = u.replace("https://huggingface.co", args.hf_mirror.rstrip("/"))
+        else:
+            u_probe = mirror(u, args.gh_mirror)
+        st, total, note = probe(u_probe)
         size = f"{total:,} B" if total else "?"
         mark = "OK " if st and st < 400 else "FAIL"
         if mark == "FAIL":
             rc = 1
-        log(f"  [{mark}] {label:16s} status={st} size={size:>16s}  {u}  ({note})")
+        log(f"  [{mark}] {label:16s} status={st} size={size:>16s}  {u_probe}  ({note})")
     return rc
 
 
@@ -581,6 +670,26 @@ def do_verify(dest: Path) -> int:
          f"t=load_plugin({str(dest / 'vst3/TAL-Chorus-LX.vst3/Contents/x86_64-win/TAL-Chorus-LX.vst3')!r});"
          "assert d.is_instrument and not t.is_instrument;print('instrument+effect load ok')"],
         dest / "vst3" / "TAL-Chorus-LX.vst3",
+    )
+    rc |= 0 if ok else 1
+    ok = _check(
+        "demucs weights (load htdemucs)",
+        [str(tsv), "-c",
+         "from demucs.pretrained import get_model;m=get_model('htdemucs');"
+         "print('demucs ok, bag of', len(m.models))"],
+        hf_cache_hub() / "models--adefossez--HTDemucs",
+    )
+    rc |= 0 if ok else 1
+    sep_dir = dest / "audio-separator-models"
+    ok = _check(
+        "audio-separator roformer (load)",
+        [str(tsv), "-c",
+         f"import os;from pathlib import Path;d=Path({str(sep_dir)!r});"
+         f"os.environ.setdefault('AUDIO_SEPARATOR_MODEL_DIR', str(d));"
+         f"from audio_separator.separator import Separator;"
+         f"s=Separator(model_file_dir=str(d), output_dir={str(Path(tempfile.gettempdir()) / 'sep-verify')!r}, log_level=30);"
+         "s.load_model('vocals_mel_band_roformer.ckpt');print('roformer load ok')"],
+        sep_dir / "vocals_mel_band_roformer.ckpt",
     )
     rc |= 0 if ok else 1
     log("verify done" if rc == 0 else "verify FAILED — see messages above")
