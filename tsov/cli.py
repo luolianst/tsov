@@ -285,7 +285,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--port", type=int, default=8790, help="监听端口（默认 8790）")
     p.set_defaults(func=_cmd_web)
 
+    p = sub.add_parser("mcp", help="MCP server（stdio，v0.2 批F）：外部 agent 读写 tsov 工程（Experimental）")
+    p.add_argument("--root", default=None, help="仓库根（默认=本包所在仓库）")
+    p.add_argument("--allow-write", action="store_true", help="开放写/重操作工具（默认只读）")
+    p.add_argument("--web-guard", choices=["warn", "strict", "off"], default="warn", help="Web 壳共存守卫（默认 warn）")
+    p.set_defaults(func=_cmd_mcp)
+
     return parser
+
+
+def _cmd_mcp(args: argparse.Namespace) -> int:
+    """MCP server（stdio；v0.2 批F）——外部 agent 读写 tsov 工程。"""
+    from .mcp import main as mcp_main
+
+    return mcp_main(args)
 
 
 def _cmd_edit(args: argparse.Namespace) -> int:
