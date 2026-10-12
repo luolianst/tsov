@@ -184,9 +184,14 @@ def register(app: FastAPI) -> None:
 
     @app.get("/api/projects/{name}/chain/tools")
     def chain_tools(name: str) -> dict:
-        """工具注册表（前端渲染参数表单/槽位名）＋预设清单（E1-6 面板选择器）。"""
-        st().get_project(name)
-        return {"tools": list_tools(), "preset": DEFAULT_PRESET, "presets": list_presets()}
+        """工具注册表（前端渲染参数表单/槽位名）＋预设清单（E1-6 面板选择器）。
+
+        preset＝chain.json 当前预设（缺省默认）——面板进入即回读（10-12 修复，曾硬编码默认）。
+        """
+        proj = st().get_project(name)
+        saved = load_chain_json(proj.root)
+        return {"tools": list_tools(), "presets": list_presets(),
+                "preset": str(saved.get("preset") or DEFAULT_PRESET)}
 
     @app.post("/api/projects/{name}/chain/run")
     def chain_run(name: str, body: dict | None = None) -> dict:
@@ -196,9 +201,13 @@ def register(app: FastAPI) -> None:
         if cur is not None and cur.running:
             raise HTTPException(409, "链正在运行中（先取消或等完成）")
         try:
+            proj = st().get_project(name)
+            saved = load_chain_json(proj.root)
             runner = ChainRunner(
-                st().get_project(name),
-                preset_id=str(body.get("preset") or DEFAULT_PRESET),
+                proj,
+                # 预设优先级：显式 body > chain.json 当前预设 > 默认
+                #（10-12 修复：面板切换预设后「▶ 运行」不带头跑，曾丢回默认哼唱）
+                preset_id=str(body.get("preset") or saved.get("preset") or DEFAULT_PRESET),
                 source_track=body.get("source_track"),
                 overrides=body.get("overrides") or {},
             )

@@ -458,6 +458,40 @@ def test_chain_preset_switch_endpoint(env):
     assert load_chain_json(env["dir"] / "p1")["preset"] == "humming-quicklane"
 
 
+def test_chain_run_uses_saved_preset(env, monkeypatch):
+    """E 段1 修复：/chain/run 未带 preset → 回读 chain.json 预设（面板「▶ 运行」路径；曾丢成默认哼唱）。"""
+    _project_with_audio(env)
+    apply_config(_proj(env), preset_id="song-decompose")
+    import tsov.webapp.routes.chain as rc
+    captured = {}
+
+    class FakeRunner:
+        def __init__(self, proj_, **kw):
+            captured.clear()
+            captured.update(kw)
+            self.running = False
+
+        def start(self, steps=None):
+            return {"running": False, "steps": []}
+
+    monkeypatch.setattr(rc, "ChainRunner", FakeRunner)
+    c = env["client"]
+    r = c.post("/api/projects/p1/chain/run", json={})
+    assert r.status_code == 200, r.text
+    assert captured["preset_id"] == "song-decompose"
+    r2 = c.post("/api/projects/p1/chain/run", json={"preset": "humming-quicklane"})
+    assert r2.status_code == 200 and captured["preset_id"] == "humming-quicklane"
+
+
+def test_chain_tools_reports_saved_preset(env):
+    """E 段1 修复：/chain/tools 的 preset 回读 chain.json（面板进入不再闪回默认）。"""
+    _make_project(env)
+    c = env["client"]
+    assert c.get("/api/projects/p1/chain/tools").json()["preset"] == "humming-quicklane"
+    c.post("/api/projects/p1/chain/config", json={"preset": "song-decompose"})
+    assert c.get("/api/projects/p1/chain/tools").json()["preset"] == "song-decompose"
+
+
 @pytest.mark.skipif(not _HAS_FFMPEG, reason="需要 ffmpeg")
 def test_runner_writes_run_meta(env, monkeypatch):
     """E1-7：开跑即写 chain/<run_ts>/run-meta.json（preset/source_track/created_at）。"""
