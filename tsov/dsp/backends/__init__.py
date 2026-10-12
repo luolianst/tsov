@@ -4,6 +4,7 @@
 pipeline / CLI / eval 零改动，只认 get_backend / list_backends。
 
 M4 定案：game（成品歌）+ rmvpe（哼唱）双后端（CREPE/basic-pitch 已弃用删除）。
+E 段2：+ adtof（鼓，vendored 直载）。
 """
 
 from __future__ import annotations
@@ -43,5 +44,7 @@ def list_backends() -> list[str]:
 
 from . import game  # noqa: E402,F401  导入即注册（成品歌底座）
 from . import rmvpe  # noqa: E402,F401  导入即注册（哼唱底座）
+from . import adtof  # noqa: E402,F401  导入即注册（鼓·批E段2）
+from . import mt3  # noqa: E402,F401  导入即注册（多器乐·批E段2）
 
-__all__ = ["TranscribeBackend", "get_backend", "list_backends", "game", "rmvpe"]
+__all__ = ["TranscribeBackend", "get_backend", "list_backends", "game", "rmvpe", "adtof", "mt3"]

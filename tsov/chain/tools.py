@@ -609,12 +609,56 @@ def _wav_peak_dbfs(path) -> float:
     return float(20.0 * np.log10(max(peak, 1e-9)))
 
 
+# 子进程形态后端（U1）：重模型转录走独立进程——可杀进程取消、崩了不拖垮服务
+_SPAWN_BACKENDS = ("adtof", "mt3")
+
+
+def _run_transcribe_spawn(ctx: ChainContext, backend: str, stem: str, src: Path,
+                          out_name: str) -> dict:
+    """转录·子进程形态（E 段2）：spawn 模块拉起 → 原子产物读回；取消＝杀进程树＋清半成品。"""
+    import sys
+
+    from ..dsp.preprocess import probe_duration
+
+    root = Path(__file__).resolve().parents[2]
+    out = ctx.artifact(out_name)
+    params = {k: v for k, v in ctx.params.items() if k not in ("stem", "backend")}
+    try:
+        duration = float(probe_duration(src))
+    except Exception:  # noqa: BLE001 时长仅用于 ETA——探测失败不拖累转录
+        duration = 0.0
+    eta = 8.0 + 0.05 * duration
+    ctx.log(f"转录中（{backend}）：预计 ~{int(eta)}s（素材 {duration:.0f}s）")
+
+    def _cleanup() -> None:
+        for p in (out, out.with_name(out.name + ".tmp")):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+
+    cmd = [sys.executable, "-m", "tsov.dsp.backends.spawn", backend, str(src), str(out),
+           json.dumps(params, ensure_ascii=False)]
+    rc, tail, elapsed = _exec_child(
+        ctx, cmd, label=f"转录中（{backend}）", eta_sec=eta,
+        env_extra={"PYTHONPATH": str(root), "PYTHONUTF8": "1"}, on_cancel=_cleanup)
+    if rc != 0 or not out.is_file():
+        _cleanup()
+        raise RuntimeError(f"转录失败（{backend}，rc={rc}）：\n" + "\n".join(tail[-20:]))
+    data = json.loads(out.read_text(encoding="utf-8"))
+    n_notes = len(data.get("notes") or [])
+    ctx.log(f"转录完成（{backend}）：{n_notes} 音符，实耗 {elapsed:.1f}s")
+    return {"artifact": out.name, "notes": n_notes, "bpm": float(data.get("bpm") or 0.0),
+            "backend": backend, "params": params, "stem": stem, "empty": n_notes == 0}
+
+
 def _run_transcribe(ctx: ChainContext) -> dict:
     """③ 转录：wav → Voice（默认 RMVPE；stem 指定声部轨时走拆解链输入）。
 
     stem=auto → 链式输入（prev/loudnorm）→ 03-voice.json（哼唱链逐字不变）；
     stem=<声部> → 输入 stems/<声部>.wav（本 run 缺→历史 run 回退）→ voice-<声部>.json。
     近静音输入（峰值 < -40dBFS）后端无产出 = 合法空输出（E1-8 负例）；有声无产出才报错。
+    backend∈{adtof, mt3} 走子进程形态（U1：杀进程取消/崩溃隔离）→ _run_transcribe_spawn。
     """
     from ..dsp.transcribe import transcribe
 
@@ -633,6 +677,8 @@ def _run_transcribe(ctx: ChainContext) -> dict:
         src = found
         out_name = f"voice-{stem}.json"
     backend = str(ctx.params.get("backend", "rmvpe") or "rmvpe")
+    if backend in _SPAWN_BACKENDS:
+        return _run_transcribe_spawn(ctx, backend, stem, Path(src), out_name)
     kw: dict = {}
     if backend == "rmvpe":
         kw = {
@@ -783,10 +829,11 @@ TOOLS: dict[str, dict] = {
     "transcribe": {
         "id": "transcribe", "tier": "slow",
         "name": {"zh": "转录", "en": "Transcribe"},
-        "desc": {"zh": "音频 → 音符（默认 RMVPE；秒级步骤）",
-                 "en": "Audio to notes (RMVPE default)"},
+        "desc": {"zh": "音频 → 音符（哼唱默认 RMVPE；成品歌 GAME；鼓 ADTOF；多器乐 MT3）",
+                 "en": "Audio to notes (RMVPE / GAME / ADTOF drums / MT3 multi)"},
         "params": {
-            "backend": {"type": "select", "default": "rmvpe", "options": ["rmvpe", "game"],
+            "backend": {"type": "select", "default": "rmvpe",
+                        "options": ["rmvpe", "game", "adtof", "mt3"],
                         "label": {"zh": "后端", "en": "Backend"}},
             "stem": {"type": "select", "default": "auto",
                      "options": ["auto", "vocals", "drums", "bass", "other"],
