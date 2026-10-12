@@ -996,6 +996,14 @@ body.chat-resizing { cursor: col-resize; user-select: none; }
 .tl-folder { display: flex; align-items: center; gap: 4px; padding: 3px 10px 1px; color: var(--muted); font-size: var(--fs-xs, 11px); font-weight: 600; cursor: pointer; }
 .tl-folder.sel { color: var(--accent); }
 .tl-folder .fold-toggle { border: none; background: none; color: inherit; cursor: pointer; padding: 0 2px; font-size: var(--fs-xs, 11px); }
+/* 文件夹行 M/S 点亮样式（2026-10-12 修：CSS 缺口——批C2 起 folder M/S 无任何可视反馈） */
+.tl-folder .ms {
+  width: 18px; height: 18px; padding: 0; font-size: var(--fs-xs);
+  font-family: var(--font-mono); line-height: 1; color: var(--muted);
+  border-radius: 2px;
+}
+.tl-folder .ms.on { background: var(--warn); border-color: var(--warn); color: var(--on-accent); }
+.tl-folder .ms.solo.on { background: var(--accent); border-color: var(--accent); }
 .track-item.fold-hidden { display: none; }
 
 /* M-V8 E2 段 3：录音面板 */
