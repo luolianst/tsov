@@ -98,31 +98,37 @@ _SEP_MIDI_NAMES = {"vocals": "人声 MIDI", "drums": "鼓 MIDI", "bass": "贝斯
 
 
 def load_decompose_artifacts(run_dir: Path) -> dict:
-    """读拆解 run 的落位素材（E1-5）：四 stems 音频 + 人声音符（处理版优先）。
+    """读拆解 run 的落位素材：四 stems 音频 ＋ **全部在案声部**的音符（段2 起）。
 
     - stems：{声部: "stems/<声部>.wav" or None}（相对 run_dir；None=缺件）
-    - vocals_notes / notes_source：notes-vocals-snapped → -quantized → voice-vocals 取首个在案
-      （量化/吸附被 mute 时自动回退到未量化版——卡片可关语义）
+    - notes：{声部: [音符]}——每声部按 notes-<声部>-snapped → -quantized → voice-<声部>
+      取首个在案（量化/吸附被 mute 时自动回退到未量化版——卡片可关语义）；
+      无转录产物的声部不入表（链没跑到的声部不落空轨）
+    - sources：{声部: 文件名}（对照/审计用）
+    - vocals_notes / notes_source：兼容键（＝ vocals 项；E1 版消费方仍可读）
     """
     stems: dict = {}
     for s in _SEP_ORDER:
         p = Path(run_dir) / "stems" / f"{s}.wav"
         stems[s] = f"stems/{s}.wav" if p.is_file() else None
-    vocals_notes = None
-    notes_source = None
-    for name in ("notes-vocals-snapped.json", "notes-vocals-quantized.json", "voice-vocals.json"):
-        p = Path(run_dir) / name
-        if not p.is_file():
-            continue
-        try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        notes = data.get("notes") if isinstance(data, dict) else data
-        if isinstance(notes, list):
-            vocals_notes, notes_source = notes, name
-            break
-    return {"stems": stems, "vocals_notes": vocals_notes, "notes_source": notes_source}
+    notes_by_stem: dict = {}
+    sources: dict = {}
+    for s in _SEP_ORDER:
+        for name in (f"notes-{s}-snapped.json", f"notes-{s}-quantized.json", f"voice-{s}.json"):
+            p = Path(run_dir) / name
+            if not p.is_file():
+                continue
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            notes = data.get("notes") if isinstance(data, dict) else data
+            if isinstance(notes, list):
+                notes_by_stem[s] = notes
+                sources[s] = name
+                break
+    return {"stems": stems, "notes": notes_by_stem, "sources": sources,
+            "vocals_notes": notes_by_stem.get("vocals"), "notes_source": sources.get("vocals")}
 
 
 def build_decompose_commands(score_tracks: list, *, source_track: int, stems: dict,
@@ -130,7 +136,8 @@ def build_decompose_commands(score_tracks: list, *, source_track: int, stems: di
     """组装「拆解落位」命令序列（E1-5）：文件夹「拆解 · <源轨名>」＋音频轨×4＋MIDI 轨×N。
 
     - stems：{声部: 工程内相对音频路径（audio/ 内）}——调用方先经 Project.import_audio 入库
-    - midis：[{stem: 声部, notes: [...]}]；轨名派生「<声部> MIDI」
+    - midis：[{stem: 声部, notes: [...], instrument: GM 名（可选）}]；轨名派生「<声部> MIDI」；
+      instrument 给定时追加 set_instrument（鼓轨=drums 走 GM 鼓组、贝斯轨=bass）
     - 幂等：该文件夹为系统产物区——重跑先删「folder == 拆解文件夹名」的旧轨（源轨除外），
       再追加重建（重名冲突由命令层自动序号兜底）
     - 索引按「执行到该命令时」的轨表推算（全部追加到末尾；块内序：4 音频 → N MIDI → 挂夹）
@@ -166,6 +173,10 @@ def build_decompose_commands(score_tracks: list, *, source_track: int, stems: di
         midi_idx.append(idx)
         commands.append({"op": "add_track", "track": 0, "value": {
             "name": name, "at": idx, "unique": False}})
+        inst = m.get("instrument")
+        if inst:
+            commands.append({"op": "set_instrument", "track": idx,
+                             "value": {"program": str(inst)}})
         commands.append({"op": "set_notes", "track": idx,
                          "value": {"notes": m.get("notes") or []}})
     for idx in audio_idx + midi_idx:

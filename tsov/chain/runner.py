@@ -124,7 +124,12 @@ class ChainRunner:
 
         preset = load_preset(preset_id)
         saved = load_chain_json(proj.root)
-        saved_steps = {s.get("tool"): s for s in (saved.get("steps") or [])}
+        saved_list = list(saved.get("steps") or [])
+        # 段2：预设可含重复工具（transcribe×4 / quantize×4…）——「工具名」不再是步的身份。
+        # 仅当存档步序与预设**完全同序**时按位继承（位置=身份）；换预设（异序）视为全部过期：
+        # 状态不回填、参数不串味（防跨预设塌槽/串参）。
+        preset_tools = [str(e.get("tool") or "") for e in preset["steps"]]
+        same_seq = [str(s.get("tool") or "") for s in saved_list] == preset_tools
 
         # 源轨：显式参数 > chain.json > 第一条音频轨
         if source_track is None:
@@ -143,12 +148,12 @@ class ChainRunner:
         # 步骤：预设为准；参数 = 工具默认 < chain.json 存值 < overrides
         ov = overrides or {}
         steps: list[StepState] = []
-        for entry in preset["steps"]:
+        for i, entry in enumerate(preset["steps"]):
             tid = str(entry.get("tool") or "")
             tool = get_tool(tid)
             params = {k: v.get("default") for k, v in tool["params"].items()}
             params.update(entry.get("params") or {})
-            old = saved_steps.get(tid) or {}
+            old = saved_list[i] if (same_seq and i < len(saved_list)) else {}
             params.update(old.get("params") or {})
             params.update(ov.get(tid) or {})
             # M-V8 E3 段2：从 chain.json 恢复上轮结果（web 重启 / 重新挂链后 UI 仍有「上次跑到哪」）
@@ -232,14 +237,28 @@ class ChainRunner:
             except Exception:  # noqa: BLE001
                 pass
 
-    def start(self, *, steps: list[str] | None = None) -> dict:
-        """开跑（后台线程）：steps = 工具 id 子集（默认全部；子集用于「应用」「只跑这步」）。"""
+    def start(self, *, steps: list[str] | list[int] | None = None) -> dict:
+        """开跑（后台线程）：steps = 子集（默认全部）。
+
+        子集元素可为**步序 int**（精确指到某一步——段2 重复工具的唯一正解）或工具 id str
+        （兼容旧调用：命中该工具的全部出现）。子集用于「应用」「重试」「快档顺跑」。
+        """
         if self.running:
             raise RuntimeError("链正在运行中（先取消或等完成）")
         targets = self.steps
         if steps:
-            want = [str(x) for x in steps]
-            targets = [s for s in self.steps if s.tool_id in want]
+            idxs: set[int] = set()
+            tids: set[str] = set()
+            for x in steps:
+                if isinstance(x, bool):
+                    continue
+                if isinstance(x, int):
+                    if 0 <= x < len(self.steps):
+                        idxs.add(x)
+                else:
+                    tids.add(str(x))
+            targets = [s for i, s in enumerate(self.steps)
+                       if i in idxs or s.tool_id in tids]
             if not targets:
                 raise ValueError(f"steps 子集为空（可选：{', '.join(s.tool_id for s in self.steps)}）")
         self._cancel.clear()
@@ -248,6 +267,7 @@ class ChainRunner:
         _old = load_chain_json(self.proj.root)
         self._prev_run_ts = str(_old.get("run_ts") or "")
         self._prev_steps = {str(x.get("tool")): x for x in (_old.get("steps") or [])}
+        self._prev_steps_list = list(_old.get("steps") or [])   # 按位快照（重复工具回退用）
         # run_ts：秒级时间戳；同秒重跑防撞（防目录复用 + 保跨 run 继承判据成立）
         ts = time.strftime("%Y%m%d-%H%M%S")
         base = ts
@@ -301,6 +321,7 @@ class ChainRunner:
             old_ts = str(getattr(self, "_prev_run_ts", "") or "")   # start 预存盘前的旧 run_ts
             old_dir = (self.proj.root / CHAIN_DIRNAME / old_ts) if old_ts and old_ts != self.run_ts else None
             old_by_tool = dict(getattr(self, "_prev_steps", {}) or {})   # start 预存盘前的旧步快照
+            old_list = list(getattr(self, "_prev_steps_list", []) or [])  # 按位（重复工具准）
             self._emit("chain_started", {"run_ts": self.run_ts, "preset": self.preset_id,
                                          "source_track": self.source_track})
             for st in targets:
@@ -317,14 +338,18 @@ class ChainRunner:
                 # 缺则沿链序回退，在「历史 run 目录（新→旧）」中找最近一份上游步产物（跨 run 继承）
                 if prev is None and old_by_tool:
                     order = [x.tool_id for x in self.steps]
-                    upto = order.index(st.tool_id)
+                    upto = next(i for i, x in enumerate(self.steps) if x is st)   # 段2：按身份（重复工具准）
                     chain_root = self.proj.root / CHAIN_DIRNAME
                     dirs = []
                     if chain_root.is_dir():
                         dirs = sorted((p for p in chain_root.iterdir() if p.is_dir() and p.name != self.run_ts),
                                       key=lambda p: p.name, reverse=True)
                     for j in range(upto - 1, -1, -1):
-                        art = str((old_by_tool.get(order[j]) or {}).get("artifact") or "")
+                        # 段2：同序按位取旧步 artifact；异序退工具名（重复工具命中该名一条）
+                        old_step = (old_list[j] if (j < len(old_list)
+                                                    and str(old_list[j].get("tool")) == order[j])
+                                    else (old_by_tool.get(order[j]) or {}))
+                        art = str(old_step.get("artifact") or "")
                         if not art:
                             continue
                         for dd in dirs:
@@ -417,52 +442,95 @@ class ChainRunner:
 # ---------------------------------------------------------------------------
 
 
+def _step_index(key, n: int) -> int:
+    """步序键（int/数字字符串）→ 索引；越界/非法 → ValueError。"""
+    try:
+        i = int(key)
+    except (TypeError, ValueError):
+        raise ValueError(f"非法步序：{key!r}") from None
+    if not (0 <= i < n):
+        raise ValueError(f"步序越界：{i}（共 {n} 步）")
+    return i
+
+
 def apply_config(proj, *, mute: dict | None = None, overrides: dict | None = None,
+                 step_mute: dict | None = None, step_overrides: dict | None = None,
                  source_track: int | None = None, preset_id: str | None = None) -> dict:
-    """把 mute/参数/源 合并进 chain.json（不动 score）；返回更新后的配置。"""
+    """把 mute/参数/源 合并进 chain.json（不动 score）；返回更新后的配置。
+
+    - 工具名寻址（mute/overrides）：作用于该工具的**全部出现**（段2 重复工具语义）。
+    - 步序寻址（step_mute/step_overrides，段2）：键=步序（int/数字字符串），精确指到某一步。
+    - 步表骨架：与当前预设不同序（换预设/首用）→ 按预设重建（旧步不回填——防跨预设串参）。
+    """
     data = load_chain_json(proj.root)
-    steps = data.get("steps") or []
-    by_tool = {s.get("tool"): s for s in steps}
+    cur_preset = str(preset_id or data.get("preset") or "humming-quicklane")
+    preset = load_preset(cur_preset)            # E1-6：未知预设拒绝（ValueError → REST 400）
+    steps = list(data.get("steps") or [])
+    if [str(s.get("tool")) for s in steps] != [str(e.get("tool")) for e in preset["steps"]]:
+        steps = [{"tool": str(e.get("tool"))} for e in preset["steps"]]   # 重建骨架
     mute = mute or {}
     overrides = overrides or {}
     for tid, val in mute.items():
-        by_tool.setdefault(str(tid), {"tool": str(tid)})["mute"] = bool(val)
+        for s in steps:
+            if str(s.get("tool")) == str(tid):
+                s["mute"] = bool(val)
     for tid, params in overrides.items():
-        entry = by_tool.setdefault(str(tid), {"tool": str(tid)})
-        entry["params"] = {**(entry.get("params") or {}), **(params or {})}
-    data["steps"] = list(by_tool.values())
+        for s in steps:
+            if str(s.get("tool")) == str(tid):
+                s["params"] = {**(s.get("params") or {}), **(params or {})}
+    for key, val in (step_mute or {}).items():
+        steps[_step_index(key, len(steps))]["mute"] = bool(val)
+    for key, params in (step_overrides or {}).items():
+        s = steps[_step_index(key, len(steps))]
+        s["params"] = {**(s.get("params") or {}), **(params or {})}
+    data["steps"] = steps
     if source_track is not None:
         data["source_track"] = int(source_track)
     if preset_id:
-        load_preset(str(preset_id))          # E1-6：未知预设拒绝（ValueError → REST 400）
         data["preset"] = str(preset_id)
     data["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     save_chain_json(proj.root, data)
     return data
 
 
-def auto_run_plan(proj, changed_tool: str, preset_id: str = "humming-quicklane") -> dict:
-    """改参后的顺跑计划（Q2）：返回 {'auto': [工具…]} 或 {'needs_apply': 工具}。
+def auto_run_plan(proj, changed_tool: str | None = None,
+                  preset_id: str = "humming-quicklane", *,
+                  changed_index: int | None = None) -> dict:
+    """改参后的顺跑计划（Q2）：返回 {'auto': [步序…], 'stops_at': 步序} 或 {'needs_apply': 步序}。
 
-    规则：从最上游「脏步」（=changed_tool 所在步）起，顺连续 fast 段向下；
-    若首个脏步是 slow（或链中下一非 mute 步是 slow）→ 停下等「应用」。
+    定位脏步（段2）：changed_index 优先；changed_tool 取**首个出现**（兼容旧调用）。
+    规则：从脏步起，顺连续 fast 段向下；首个脏步是 slow（或链中下一非 mute 步是 slow）
+    → 停下等「应用」。返回**步序**（int）——段2 起 run 子集按步序定位（重复工具的唯一正解）。
     """
     preset = load_preset(preset_id)
-    saved = {s.get("tool"): s for s in (load_chain_json(proj.root).get("steps") or [])}
     order = [str(e.get("tool")) for e in preset["steps"]]
-    if changed_tool not in order:
-        raise ValueError(f"工具不在链内：{changed_tool!r}")
-    idx = order.index(changed_tool)
-    seq = []
+    if changed_index is not None:
+        idx = int(changed_index)
+        if not (0 <= idx < len(order)):
+            raise ValueError(f"步序越界：{idx}（共 {len(order)} 步）")
+    else:
+        if changed_tool not in order:
+            raise ValueError(f"工具不在链内：{changed_tool!r}")
+        idx = order.index(str(changed_tool))
+    saved = list(load_chain_json(proj.root).get("steps") or [])
+    same_seq = [str(s.get("tool")) for s in saved] == order
+    muted_tools = {str(s.get("tool")) for s in saved if s.get("mute")}
+
+    def _muted(i: int, tid: str) -> bool:
+        if same_seq and i < len(saved):
+            return bool(saved[i].get("mute"))
+        return tid in muted_tools
+
+    seq: list[int] = []
     for i in range(idx, len(order)):
         tid = order[i]
-        if (saved.get(tid) or {}).get("mute"):
+        if _muted(i, tid):
             continue
         tool = get_tool(tid)
         if tool["tier"] == "slow":
             # 遇慢档停下（Q2）：起点即慢档 → 等「应用」；否则快段跑完后停在该步前
             if i == idx:
-                return {"needs_apply": tid}
-            return {"auto": seq, "stops_at": tid}
-        seq.append(tid)
+                return {"needs_apply": i}
+            return {"auto": seq, "stops_at": i}
+        seq.append(i)
     return {"auto": seq}

@@ -2,13 +2,21 @@
   "id": "song-decompose",
   "name": {"zh": "成品歌拆解", "en": "Song decompose"},
   "description": {
-    "zh": "定速与对齐 → 分离四轨 → 人声转录（GAME）→ 量化 → 调内吸附；成品歌 → 分离轨 + 可编辑人声 MIDI",
-    "en": "Detect grid → separate stems → vocal transcription (GAME) → quantize → scale-snap"
+    "zh": "定速与对齐 → 分离四轨 → 四声部转录（人声 GAME / 鼓 ADTOF / 贝斯·其他 MT3）→ 量化（鼓不吸附）→ 落位「进工程」得 4 音频轨 + 4 MIDI 轨",
+    "en": "Grid → 4-stem split → per-stem transcription (GAME / ADTOF / MT3) → quantize → apply as 4 audio + 4 MIDI tracks"
   },
   "steps": [
     {"tool": "analyze_grid", "params": {}},
     {"tool": "separate", "params": {"quality": "quality"}},
     {"tool": "transcribe", "params": {"stem": "vocals", "backend": "game"}},
+    {"tool": "quantize", "params": {"grid": 16, "strength": 1.0}},
+    {"tool": "snap_scale", "params": {"key": "auto", "threshold_cents": 42.0}},
+    {"tool": "transcribe", "params": {"stem": "drums", "backend": "adtof"}},
+    {"tool": "quantize", "params": {"grid": 16, "strength": 1.0}},
+    {"tool": "transcribe", "params": {"stem": "bass", "backend": "mt3"}},
+    {"tool": "quantize", "params": {"grid": 16, "strength": 1.0}},
+    {"tool": "snap_scale", "params": {"key": "auto", "threshold_cents": 42.0}},
+    {"tool": "transcribe", "params": {"stem": "other", "backend": "mt3"}},
     {"tool": "quantize", "params": {"grid": 16, "strength": 1.0}},
     {"tool": "snap_scale", "params": {"key": "auto", "threshold_cents": 42.0}}
   ]

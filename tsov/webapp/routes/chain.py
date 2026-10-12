@@ -67,8 +67,10 @@ def apply_chain_run(ws: WebState, proj, *, run_ts=None, source_track=None) -> di
 
 def _apply_decompose_run(ws: WebState, proj, *, saved: dict, run_ts=None,
                          source_track=None) -> dict:
-    """拆解落位（E1-5）：四 stems 入库 → 文件夹「拆解 · <源轨名>」＋4 音频轨＋人声 MIDI 轨。
+    """拆解落位（E1-5；段2 起多声部）：四 stems 入库 → 文件夹「拆解 · <源轨名>」＋音频轨×4＋MIDI 轨×N。
 
+    段2：全部在案声部落 MIDI（人声/鼓/贝斯/其他——链没跑到的声部不落空轨）；
+    鼓轨乐器=drums（GM 鼓组播放）、贝斯轨=bass，其余默认（UI 可换）。
     grid.json 在且 bpm 有效 → 命令层 set_tempo（remap=false，音符秒值不动；读回对拍 applied）；
     失败不阻断落位（meta 注记）。幂等：文件夹级清旧重建（源轨除外）。
     """
@@ -81,8 +83,8 @@ def _apply_decompose_run(ws: WebState, proj, *, saved: dict, run_ts=None,
     if missing:
         raise HTTPException(409, f"运行 {run_ts} 缺分离产物："
                                  f"{'、'.join(f'stems/{s}.wav' for s in missing)}——先跑完「分离」步")
-    if art["vocals_notes"] is None:
-        raise HTTPException(409, f"运行 {run_ts} 缺人声转录产物（voice-vocals.json 系）"
+    if not art["notes"]:
+        raise HTTPException(409, f"运行 {run_ts} 缺转录产物（voice-<声部>.json 系）"
                                  "——先跑完转录/处理步")
     if source_track is None:
         source_track = saved.get("source_track")
@@ -98,8 +100,18 @@ def _apply_decompose_run(ws: WebState, proj, *, saved: dict, run_ts=None,
     except ValueError as e:
         raise HTTPException(400, f"分离轨入库失败：{e}") from e
 
-    # ② 组装命令（含幂等清旧）
-    midis = [{"stem": "vocals", "notes": art["vocals_notes"]}]
+    # ② 组装命令（含幂等清旧）；段2：全部在案声部落 MIDI（鼓轨乐器=鼓组、贝斯轨=bass）
+    midis: list[dict] = []
+    for s in ("vocals", "drums", "bass", "other"):
+        notes_list = art["notes"].get(s)
+        if not notes_list:
+            continue
+        entry: dict = {"stem": s, "notes": notes_list}
+        if s == "drums":
+            entry["instrument"] = "drums"
+        elif s == "bass":
+            entry["instrument"] = "bass"
+        midis.append(entry)
     try:
         plan = build_decompose_commands(list(proj.score.tracks), source_track=int(source_track),
                                         stems=stem_files, midis=midis)
@@ -154,14 +166,17 @@ def register(app: FastAPI) -> None:
         except ValueError:
             preset = load_preset(DEFAULT_PRESET)
             preset_id = DEFAULT_PRESET
-        saved_steps = {s.get("tool"): s for s in (saved.get("steps") or [])}
+        saved_list = list(saved.get("steps") or [])
+        preset_tools = [str(e.get("tool") or "") for e in preset["steps"]]
+        # 段2：重复工具——仅同序时按位回填（位置=身份）；异序全部按新预设（pending）
+        same_seq = [str(s.get("tool") or "") for s in saved_list] == preset_tools
         steps: list[dict] = []
-        for entry in preset["steps"]:
+        for i, entry in enumerate(preset["steps"]):
             tid = str(entry.get("tool") or "")
             tool = tools.get(tid)
             if tool is None:
                 continue
-            old = saved_steps.get(tid) or {}
+            old = saved_list[i] if (same_seq and i < len(saved_list)) else {}
             params = {k: v.get("default") for k, v in tool["params"].items()}
             params.update(entry.get("params") or {})
             params.update(old.get("params") or {})
@@ -241,24 +256,33 @@ def register(app: FastAPI) -> None:
     def chain_config(name: str, body: dict | None = None) -> dict:
         """改 mute/参数/源轨（存 chain.json，不跑）；改参返回顺跑计划（Q2）。
 
-        - 快档改参：{"auto": [工具…]}（前端据此自动触发 run steps 子集）
-        - 慢档改参：{"needs_apply": 工具}（前端亮「应用」按钮）
+        - 寻址：工具名（mute/overrides，作用于该工具全部出现）或**步序**（step_mute/
+          step_overrides，段2——重复工具的正解；键=步序 int）。
+        - 快档改参：{"auto": [步序…]}（前端据此自动触发 run steps 子集）
+        - 慢档改参：{"needs_apply": 步序}（前端亮该步「应用」按钮）
         """
         body = body or {}
         proj = st().get_project(name)
         try:
             data = apply_config(proj, mute=body.get("mute"), overrides=body.get("overrides"),
+                                step_mute=body.get("step_mute"),
+                                step_overrides=body.get("step_overrides"),
                                 source_track=body.get("source_track"), preset_id=body.get("preset"))
         except (ValueError, KeyError) as e:
             raise HTTPException(400, str(e)) from e
         resp = {"ok": True, "config": data}
+        preset_now = str(data.get("preset") or DEFAULT_PRESET)
+        step_ov = body.get("step_overrides") or {}
         overrides = body.get("overrides") or {}
-        if overrides:
-            tid = next(iter(overrides))
-            try:
-                resp["plan"] = auto_run_plan(proj, tid, preset_id=str(data.get("preset") or DEFAULT_PRESET))
-            except (ValueError, KeyError) as e:
-                raise HTTPException(400, str(e)) from e
+        try:
+            if step_ov:
+                ci = next(iter(step_ov))
+                resp["plan"] = auto_run_plan(proj, preset_id=preset_now, changed_index=int(ci))
+            elif overrides:
+                tid = next(iter(overrides))
+                resp["plan"] = auto_run_plan(proj, tid, preset_id=preset_now)
+        except (ValueError, KeyError, TypeError) as e:
+            raise HTTPException(400, str(e)) from e
         # 运行中的 runner：同步 mute/参数到当前 run 的后续步（不打断当前步）
         r = _get_runner(name)
         if r is not None and not r.running:

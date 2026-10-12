@@ -105,14 +105,15 @@ async function doCancel() {
   } catch (e) { setError('取消：' + e.message); }
 }
 
-async function changeParam(toolId, key, val) {
+async function changeParam(idx, key, val) {
   if (!store.project) return;
   try {
-    const r = await api.chainConfig(store.project, { overrides: { [toolId]: { [key]: val } } });
+    /* 段2：步序寻址（step_overrides）——重复工具（transcribe×4…）精确到步 */
+    const r = await api.chainConfig(store.project, { step_overrides: { [idx]: { [key]: val } } });
     const plan = r.plan || {};
     if (plan.auto && plan.auto.length) {
-      await doRun(plan.auto);                       // 快档：从脏步起自动顺跑（Q2）
-    } else if (plan.needs_apply) {
+      await doRun(plan.auto);                       // 快档：从脏步起自动顺跑（Q2；步序子集）
+    } else if (plan.needs_apply != null) {
       setChainState({ needsApply: plan.needs_apply });
       bus.dispatch('toast', '慢档参数已存：点该步「应用」重跑');
     } else {
@@ -121,10 +122,10 @@ async function changeParam(toolId, key, val) {
   } catch (e) { setError('参数保存：' + e.message); }
 }
 
-async function toggleMute(toolId, mute) {
+async function toggleMute(idx, mute) {
   if (!store.project) return;
   try {
-    await api.chainConfig(store.project, { mute: { [toolId]: mute } });
+    await api.chainConfig(store.project, { step_mute: { [idx]: mute } });
     await refreshChain();
   } catch (e) { setError('mute：' + e.message); }
 }
@@ -143,7 +144,8 @@ async function changePreset(presetId) {
 }
 
 function restIds(fromIdx) {
-  return store.chain.steps.slice(fromIdx).map((x) => x.tool_id);
+  /* 段2：返回**步序**子集（重复工具靠步序定位；服务端 run.steps 收 int） */
+  return store.chain.steps.slice(fromIdx).map((_, i) => fromIdx + i);
 }
 
 /* 段3：失败恢复——读取该步输入框当前参数 → 保存（chain.json）→ 从该步起重跑 */
@@ -152,7 +154,7 @@ async function rerunWithParams(s, idx) {
   const tool = store.chain.tools.find((t) => t.id === s.tool_id);
   const specs = (tool && tool.params) || {};
   const p = {};
-  const row = document.querySelector('.chain-step[data-tool="' + s.tool_id + '"]');
+  const row = document.querySelector('.chain-step[data-idx="' + idx + '"]');
   if (row) {
     row.querySelectorAll('[data-param]').forEach((ctl) => {
       const spec = specs[ctl.dataset.param] || {};
@@ -161,7 +163,7 @@ async function rerunWithParams(s, idx) {
   }
   if (!Object.keys(p).length) p = null;   // 无输入框：退回「重试」语义
   try {
-    if (p) await api.chainConfig(store.project, { overrides: { [s.tool_id]: p } });
+    if (p) await api.chainConfig(store.project, { step_overrides: { [idx]: p } });
   } catch (e) {
     setError('参数保存：' + e.message);
     return;
@@ -198,6 +200,7 @@ async function doApply() {
 function renderStep(s, idx) {
   const card = el('div', 'chain-step ' + (s.status || 'pending'));
   card.dataset.tool = s.tool_id;
+  card.dataset.idx = String(idx);
 
   /* 卡头：序号 / 名称 / 状态徽 */
   const hd = el('div', 'chain-hd');
@@ -245,7 +248,7 @@ function renderStep(s, idx) {
     ctl.dataset.param = key;
     ctl.addEventListener('change', () => {
       const val = (spec.type === 'number') ? Number(ctl.value) : ctl.value;
-      changeParam(s.tool_id, key, val);
+      changeParam(idx, key, val);
     });
     lab.appendChild(ctl);
     pbox.appendChild(lab);
@@ -269,7 +272,7 @@ function renderStep(s, idx) {
   const ft = el('div', 'chain-ft');
   const mb = el('button', 'chain-btn chain-mute' + (s.mute ? ' on' : ''), s.mute ? '已静音' : '静音');
   mb.title = 'mute：本步跳过（存 chain.json，可撤销式重跑）';
-  mb.onclick = () => toggleMute(s.tool_id, !s.mute);
+  mb.onclick = () => toggleMute(idx, !s.mute);
   ft.appendChild(mb);
 
   if (s.status === 'running') ft.appendChild(el('span', 'chain-sub', '运行中…'));
@@ -283,14 +286,15 @@ function renderStep(s, idx) {
     rerun.onclick = () => rerunWithParams(s, idx);
     const skip = el('button', 'chain-btn', '跳过');
     skip.title = '静音该步并从其后继续';
-    skip.onclick = () => toggleMute(s.tool_id, true).then(() => doRun(restIds(idx + 1)));
+    skip.onclick = () => toggleMute(idx, true).then(() => doRun(restIds(idx + 1)));
     ft.appendChild(retry);
     ft.appendChild(rerun);
     ft.appendChild(skip);
   }
 
-  /* 慢档「应用」（needs_apply → 从该步起跑） */
-  if (tool && tool.tier === 'slow' && store.chain.needsApply === s.tool_id) {
+  /* 慢档「应用」（needsApply → 从该步起跑）；段2：needsApply 为步序 */
+  if (tool && tool.tier === 'slow' && store.chain.needsApply != null
+      && String(store.chain.needsApply) === String(idx)) {
     const ap = el('button', 'chain-btn chain-apply', '应用');
     ap.title = '从该步起重跑（含下游）';
     ap.onclick = () => doRun(restIds(idx));

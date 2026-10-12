@@ -38,6 +38,7 @@ Idempotent: existing files are kept (use --force to re-fetch).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -56,7 +57,15 @@ UA = {"User-Agent": "tsov-fetch-engines/1.1"}
 # Tested pins (see docs/setup-engines.md)
 GAME_COMMIT = "4ad815c90dfe2442730f3fdc866fd23e737cbc97"
 RMVPE_COMMIT = "a6db1cd7d26014aa739383367afd9bab57fc624c"
-DEFAULT_STEPS = ["fluidsynth", "soundfont", "rmvpe", "game", "vst3", "demucs", "sep-model"]
+ADTOF_COMMIT = "85c192e78f716ea0b111cc8a5ee4a8f6a3a4f8a9"
+# MT3 / YourMT3 权重（批E 段2）→ vendor/mt3-checkpoints/yourmt3/<exp>/last.ckpt
+MT3_YOURMT3_CKPT_REL = (Path("yourmt3")
+                        / "mc13_256_g4_all_v7_mt3f_sqr_rms_moe_wf4_n8k2_silu_rope_rp_b36_nops"
+                        / "last.ckpt")
+MT3_YOURMT3_CKPT_BYTES = 561544628
+MT3_YOURMT3_CKPT_SHA256 = "ae38e415c79efd5592dcb9b658cdb99ddb11d4c4e1eaa364cab04a052473fc25"
+DEFAULT_STEPS = ["fluidsynth", "soundfont", "rmvpe", "game", "vst3", "demucs", "sep-model",
+                 "adtof", "mt3"]
 URLS = {
     "game_weights": "https://github.com/openvpi/GAME/releases/download/v1.0.0/GAME-1.0-medium.zip",
     "game_repo": "https://github.com/openvpi/GAME.git",
@@ -77,6 +86,13 @@ URLS = {
     "sep_yaml": "https://github.com/nomadkaraoke/python-audio-separator/releases/download/model-configs/vocals_mel_band_roformer.yaml",
     "sep_checks": "https://raw.githubusercontent.com/TRvlvr/application_data/main/filelists/download_checks.json",
     "demucs_hf_repos": ["adefossez/HTDemucs", "adefossez/HTDemucs-ft"],
+    "adtof_repo": "https://github.com/xavriley/ADTOF-pytorch.git",
+    "mt3_yourmt3_ckpt": [
+        "https://huggingface.co/spaces/mimbres/YourMT3/resolve/main/amt/logs/2024/"
+        "mc13_256_g4_all_v7_mt3f_sqr_rms_moe_wf4_n8k2_silu_rope_rp_b36_nops/checkpoints/last.ckpt",
+        "https://hf-mirror.com/spaces/mimbres/YourMT3/resolve/main/amt/logs/2024/"
+        "mc13_256_g4_all_v7_mt3f_sqr_rms_moe_wf4_n8k2_silu_rope_rp_b36_nops/checkpoints/last.ckpt",
+    ],
 }
 
 # Packages that must resolve from the TSOV venv — never duplicated inside GAME's venv.
@@ -580,9 +596,97 @@ def fetch_sep_model(dest: Path, args) -> bool:
     return ok
 
 
+def fetch_adtof(dest: Path, args) -> bool:
+    """ADTOF-pytorch（鼓转录，段2）：repo 克隆（权重随仓 ~3.5 MB）→ vendor/ADTOF-pytorch/。"""
+    log("adtof: xavriley/ADTOF-pytorch（repo + 随仓权重，~16 MB）")
+    rdir = dest / "ADTOF-pytorch"
+    if not (rdir / ".git").is_dir():
+        url = mirror(URLS["adtof_repo"], args.gh_mirror)
+        log(f"  cloning {url} -> {rdir}")
+        p = run(["git", "clone", url, str(rdir)])
+        if p.returncode != 0:
+            fail(f"  clone failed:\n{p.stderr[-1500:]}")
+            return False
+    else:
+        log(f"  repo already present: {rdir}")
+    p = run(["git", "-C", str(rdir), "checkout", ADTOF_COMMIT])
+    if p.returncode != 0:
+        log(f"  note: could not checkout pinned commit {ADTOF_COMMIT[:10]} ({p.stderr.strip()[:200]}) — keeping current revision")
+    w = rdir / "src" / "adtof_pytorch" / "data" / "adtof_frame_rnn_pytorch_weights.pth"
+    if not w.is_file():
+        fail(f"  weights missing after clone: {w}（检查 clone 完整性）")
+        return False
+    log(f"  weights ok: {w.name} ({w.stat().st_size:,} B)")
+    return True
+
+
+def _mt3_installed(tsv: Path) -> bool:
+    p = run([str(tsv), "-c", "import mt3_infer;print(mt3_infer.__version__)"], cwd=str(REPO))
+    return p.returncode == 0
+
+
+def fetch_mt3(dest: Path, args) -> bool:
+    """MT3 多器乐（YourMT3，段2）：venv 钉装（如缺）+ 权重预置 → vendor/mt3-checkpoints/。
+
+    钉装纪律（段2 实测定案）：全 `--no-deps` 手控清单——**torch/torchaudio/numpy/scipy 零变动**。
+    实测锁：transformers==4.45.2（4.46+ T5 层删 cache_position 缺省回退、5.x 删 model_parallel_utils
+    与 find_pruneable_heads_and_indices，均撞 yourmt3 代码；4.45.2 为最后软兼容版）；
+    hub 走 <1.0 系（4.x 硬性），tokenizers 0.20.x 配套（4.45.2 的 <0.21 上限）。
+    """
+    log("mt3: mt3-infer（钉装）+ YourMT3 权重 ~536 MB")
+    tsv = tsov_venv_python()
+    if tsv is None:
+        fail("  tsov venv missing — see the README quickstart")
+        return False
+
+    # 1) 包（如缺 → 钉装）
+    if _mt3_installed(tsv):
+        log("  mt3-infer 已安装——跳过")
+    else:
+        uv = shutil.which("uv")
+        if not uv:
+            fail("  `uv` not found — cannot install mt3-infer")
+            return False
+        pins = ["mt3-infer==0.2.0", "transformers==4.45.2", "tokenizers==0.20.3",
+                "huggingface-hub>=0.23.2,<1.0", "regex>=2024.5.15", "mir-eval"]
+        log(f"  uv pip install --no-deps {' '.join(pins)}")
+        p = run([uv, "pip", "install", "--python", str(tsv), "--no-deps", *pins])
+        if p.returncode != 0:
+            fail(f"  钉装失败：\n{(p.stderr or p.stdout or '')[-1200:]}")
+            return False
+        if not _mt3_installed(tsv):
+            fail("  安装后 import mt3_infer 仍失败——检查上方输出")
+            return False
+        log("  钉装完成（--no-deps：torch/numpy 零变动）")
+
+    # 2) 权重（断点续传；尺寸 + sha256 双验）
+    target = dest / "mt3-checkpoints" / MT3_YOURMT3_CKPT_REL
+    if target.is_file() and target.stat().st_size == MT3_YOURMT3_CKPT_BYTES and not args.force:
+        log(f"  yourmt3 权重已就位（{MT3_YOURMT3_CKPT_BYTES:,} B），跳过")
+    else:
+        urls = URLS["mt3_yourmt3_ckpt"]
+        if args.hf_mirror:  # user-forced mirror goes first（同 rmvpe 惯例）
+            urls = [urls[1].replace("https://hf-mirror.com", args.hf_mirror.rstrip("/")), urls[0]]
+        if not try_download(urls, target, "yourmt3/last.ckpt", None):
+            return False
+        got = target.stat().st_size
+        if got != MT3_YOURMT3_CKPT_BYTES:
+            fail(f"  尺寸不符（{got:,} != {MT3_YOURMT3_CKPT_BYTES:,}）——重跑可续传")
+            return False
+    h = hashlib.sha256()
+    with open(target, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 22), b""):
+            h.update(chunk)
+    if h.hexdigest() != MT3_YOURMT3_CKPT_SHA256:
+        fail(f"  sha256 不符：{h.hexdigest()}（删文件重下）")
+        return False
+    log(f"  yourmt3 权重 ok（size + sha256 双验）→ {target.relative_to(REPO)}")
+    return True
+
+
 STEPS = {"fluidsynth": fetch_fluidsynth, "soundfont": fetch_soundfont, "rmvpe": fetch_rmvpe,
          "game": fetch_game, "vst3": fetch_vst3, "demucs": fetch_demucs,
-         "sep-model": fetch_sep_model}
+         "sep-model": fetch_sep_model, "adtof": fetch_adtof, "mt3": fetch_mt3}
 
 
 # ---------------------------------------------------------------------------
@@ -602,6 +706,10 @@ def do_check(args) -> int:
     urls.append(("demucs (hf yaml)", "https://huggingface.co/adefossez/HTDemucs/resolve/main/htdemucs.yaml"))
     urls.append(("sep ckpt", URLS["sep_ckpt"]))
     urls.append(("sep checks", URLS["sep_checks"]))
+    urls.append(("adtof weights (raw)", "https://raw.githubusercontent.com/xavriley/ADTOF-pytorch/"
+                 "main/src/adtof_pytorch/data/adtof_frame_rnn_pytorch_weights.pth"))
+    urls.append(("mt3 ckpt (hf)", URLS["mt3_yourmt3_ckpt"][0]))
+    urls.append(("mt3 ckpt (hf-mirror)", URLS["mt3_yourmt3_ckpt"][1]))
     rc = 0
     for label, u in urls:
         if "huggingface.co" in u and args.hf_mirror:
@@ -690,6 +798,29 @@ def do_verify(dest: Path) -> int:
          f"s=Separator(model_file_dir=str(d), output_dir={str(Path(tempfile.gettempdir()) / 'sep-verify')!r}, log_level=30);"
          "s.load_model('vocals_mel_band_roformer.ckpt');print('roformer load ok')"],
         sep_dir / "vocals_mel_band_roformer.ckpt",
+    )
+    rc |= 0 if ok else 1
+    ok = _check(
+        "adtof (weights + model load)",
+        [str(tsv), "-c",
+         "import sys;from pathlib import Path;"
+         f"sys.path.insert(0, str(Path({str(dest / 'ADTOF-pytorch' / 'src')!r})));"
+         "from adtof_pytorch import (calculate_n_bins, create_frame_rnn_model,"
+         " load_pytorch_weights, get_default_weights_path);"
+         "m=create_frame_rnn_model(calculate_n_bins());"
+         "m=load_pytorch_weights(m, get_default_weights_path(), strict=False);"
+         "print('adtof model load ok')"],
+        dest / "ADTOF-pytorch" / "src" / "adtof_pytorch" / "data" / "adtof_frame_rnn_pytorch_weights.pth",
+    )
+    rc |= 0 if ok else 1
+    ok = _check(
+        "mt3 (pkg + checkpoint)",
+        [str(tsv), "-c",
+         "import transformers;"
+         "from tsov.dsp.backends.mt3 import asset_status;"
+         "ok, why = asset_status(); assert ok, why;"
+         "print('mt3 ok; transformers', transformers.__version__)"],
+        dest / "mt3-checkpoints" / MT3_YOURMT3_CKPT_REL,
     )
     rc |= 0 if ok else 1
     log("verify done" if rc == 0 else "verify FAILED — see messages above")

@@ -380,9 +380,9 @@ def test_runner_subset_inherits_prev_round_artifact(env, monkeypatch):
 def test_auto_run_plan_and_config(env):
     _project_with_audio(env)
     proj = _proj(env)
-    assert auto_run_plan(proj, "denoise") == {"auto": ["denoise", "loudnorm"], "stops_at": "transcribe"}
-    assert auto_run_plan(proj, "transcribe") == {"needs_apply": "transcribe"}
-    assert auto_run_plan(proj, "quantize") == {"auto": ["quantize", "snap_scale"]}
+    assert auto_run_plan(proj, "denoise") == {"auto": [0, 1], "stops_at": 2}
+    assert auto_run_plan(proj, "transcribe") == {"needs_apply": 2}
+    assert auto_run_plan(proj, "quantize") == {"auto": [3, 4]}
     apply_config(proj, mute={"quantize": True}, overrides={"denoise": {"strength": 0.2}},
                  source_track=0)
     saved = load_chain_json(env["dir"] / "p1")
@@ -398,12 +398,12 @@ def test_chain_config_endpoint(env):
     r = env["client"].post("/api/projects/p1/chain/config",
                            json={"overrides": {"denoise": {"strength": 0.3}}})
     assert r.status_code == 200
-    assert r.json()["plan"] == {"auto": ["denoise", "loudnorm"], "stops_at": "transcribe"}
+    assert r.json()["plan"] == {"auto": [0, 1], "stops_at": 2}
     d = {s["tool"]: s for s in r.json()["config"]["steps"]}
     assert d["denoise"]["params"]["strength"] == 0.3
     r2 = env["client"].post("/api/projects/p1/chain/config",
                             json={"overrides": {"transcribe": {"min_note_ms": 80}}})
-    assert r2.status_code == 200 and r2.json()["plan"] == {"needs_apply": "transcribe"}
+    assert r2.status_code == 200 and r2.json()["plan"] == {"needs_apply": 2}
 
 
 # ---------------- REST ----------------
@@ -433,7 +433,7 @@ def test_list_presets_scan():
     ids = [p["id"] for p in presets]
     assert "humming-quicklane" in ids and "song-decompose" in ids
     sd = next(p for p in presets if p["id"] == "song-decompose")
-    assert sd["name"]["zh"] == "成品歌拆解" and sd["steps_count"] == 5
+    assert sd["name"]["zh"] == "成品歌拆解" and sd["steps_count"] == 13
     assert all({"id", "name", "description", "steps_count"} <= set(p.keys())
                for p in presets)
 
@@ -447,8 +447,12 @@ def test_chain_preset_switch_endpoint(env):
     body = c.get("/api/projects/p1/chain/status").json()
     assert body["saved_only"] is True and body["preset"] == "song-decompose"
     assert [s["tool_id"] for s in body["steps"]] == [
-        "analyze_grid", "separate", "transcribe", "quantize", "snap_scale"]
-    assert body["progress"] == {"done": 0, "total": 5}
+        "analyze_grid", "separate",
+        "transcribe", "quantize", "snap_scale",
+        "transcribe", "quantize",
+        "transcribe", "quantize", "snap_scale",
+        "transcribe", "quantize", "snap_scale"]
+    assert body["progress"] == {"done": 0, "total": 13}
     r2 = c.post("/api/projects/p1/chain/config", json={"preset": "humming-quicklane"})
     assert r2.status_code == 200
     assert [s["tool_id"] for s in
@@ -1056,14 +1060,23 @@ def test_quantize_snap_stem_naming(tmp_path):
 
 
 def test_song_decompose_preset_shape():
-    """E1-4：song-decompose 预设在案、步序与关键参数正确。"""
+    """E1-4/E2-4：song-decompose 预设在案、13 步序与关键参数正确（鼓不吸附）。"""
     p = load_preset("song-decompose")
     assert p["id"] == "song-decompose"
     assert [s["tool"] for s in p["steps"]] == [
-        "analyze_grid", "separate", "transcribe", "quantize", "snap_scale"]
-    d = {s["tool"]: (s.get("params") or {}) for s in p["steps"]}
-    assert d["separate"]["quality"] == "quality"
-    assert d["transcribe"] == {"stem": "vocals", "backend": "game"}
+        "analyze_grid", "separate",
+        "transcribe", "quantize", "snap_scale",
+        "transcribe", "quantize",
+        "transcribe", "quantize", "snap_scale",
+        "transcribe", "quantize", "snap_scale"]
+    st = p["steps"]
+    assert st[1]["params"]["quality"] == "quality"
+    assert st[2]["params"] == {"stem": "vocals", "backend": "game"}
+    assert st[5]["params"] == {"stem": "drums", "backend": "adtof"}
+    assert st[7]["params"] == {"stem": "bass", "backend": "mt3"}
+    assert st[10]["params"] == {"stem": "other", "backend": "mt3"}
+    # 鼓不吸附：drums 转录后仅接量化（st[6]），无 snap
+    assert st[6]["tool"] == "quantize" and st[7]["tool"] == "transcribe"
 
 
 # ---------------- 批E 段1：多轨落位（E1-5）----------------
@@ -1242,3 +1255,152 @@ def test_exec_child_normal_and_cancel(tmp_path):
         time.sleep(0.5)
         alive = pid_alive()
     assert not alive, f"子进程 {pid} 未被杀干净"
+
+
+
+# ---------------- 批E 段2：鼓转录（E2-3）----------------
+
+
+def test_transcribe_adtof_spawn_mocked(tmp_path, monkeypatch):
+    """E2-3：transcribe（adtof）走子进程形态——_exec_child 拉起 spawn 模块；产物原子读回。"""
+    import tsov.chain.tools as ct
+
+    proj_root = tmp_path / "proj"
+    run_dir = proj_root / "chain" / "r1"
+    run_dir.mkdir(parents=True)
+    src = proj_root / "audio" / "in.wav"
+    _write_wav(src, seconds=1.0, sr=16000)
+    stems = run_dir / "stems"
+    stems.mkdir(parents=True)
+    (stems / "drums.wav").write_bytes(b"RIFF....WAVE")  # _find_stem_wav 命中（内容不解析）
+
+    seen: dict = {}
+
+    def fake_exec(ctx, cmd, *, label, eta_sec, env_extra=None, on_cancel=None,
+                  heartbeat_sec=10.0):
+        seen["cmd"] = list(cmd)
+        seen["env"] = dict(env_extra or {})
+        out = Path(cmd[5])
+        out.write_text(json.dumps({
+            "bpm": 120.0,
+            "notes": [{"start": 0.5, "end": 0.6, "pitch_midi": 35, "pitch_hz": 61.7,
+                       "velocity": 0.8, "confidence": 1.0, "deviation_cents": 0.0,
+                       "is_ornament": False}]}, ensure_ascii=False), encoding="utf-8")
+        return 0, ["[spawn] OK"], 0.9
+
+    monkeypatch.setattr(ct, "_exec_child", fake_exec)
+    ctx = _ctx(proj_root, run_dir, src, "transcribe", {"backend": "adtof", "stem": "drums"})
+    out = get_tool("transcribe")["run"](ctx)
+
+    assert out["artifact"] == "voice-drums.json"
+    assert out["backend"] == "adtof" and out["stem"] == "drums"
+    assert out["notes"] == 1 and out["bpm"] == 120.0 and out["empty"] is False
+    cmd = seen["cmd"]
+    assert cmd[1] == "-m" and cmd[2] == "tsov.dsp.backends.spawn"
+    assert cmd[3] == "adtof" and cmd[4].endswith("drums.wav")
+    assert cmd[5].endswith("voice-drums.json")
+    assert json.loads(cmd[6]) == {}  # 无额外参数透传
+    assert seen["env"].get("PYTHONUTF8") == "1" and seen["env"].get("PYTHONPATH")
+
+
+def test_transcribe_adtof_spawn_failure_cleans(tmp_path, monkeypatch):
+    """E2-3：子进程失败 → 指路报错 + 半成品零残留。"""
+    import tsov.chain.tools as ct
+
+    proj_root = tmp_path / "proj"
+    run_dir = proj_root / "chain" / "r1"
+    run_dir.mkdir(parents=True)
+    src = proj_root / "audio" / "in.wav"
+    _write_wav(src, seconds=1.0, sr=16000)
+    (run_dir / "stems").mkdir(parents=True)
+    (run_dir / "stems" / "drums.wav").write_bytes(b"RIFF")
+
+    def fail_exec(ctx, cmd, **kw):
+        (run_dir / "voice-drums.json").write_bytes(b"partial")  # 模拟半成品
+        return 1, ["Traceback", "CUDA out of memory"], 0.5
+
+    monkeypatch.setattr(ct, "_exec_child", fail_exec)
+    with pytest.raises(RuntimeError, match="转录失败（adtof"):
+        get_tool("transcribe")["run"](_ctx(proj_root, run_dir, src, "transcribe",
+                                           {"backend": "adtof", "stem": "drums"}))
+    assert not (run_dir / "voice-drums.json").exists()
+
+
+def test_transcribe_backend_options_include_adtof():
+    t = get_tool("transcribe")
+    opts = t["params"]["backend"]["options"]
+    assert "adtof" in opts and "mt3" in opts
+
+
+
+# ---------------- 批E 段2：重复工具寻址（E2-4/E2-5）----------------
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="需要 ffmpeg")
+def test_runner_dup_tool_positional_inheritance(env):
+    """E2：重复工具（transcribe×4）——同序 chain.json 按位继承（精确到步，不串味）。"""
+    _project_with_audio(env)
+    proj = _proj(env)
+    preset = load_preset("song-decompose")
+    steps = [{"tool": e["tool"], "status": "pending"} for e in preset["steps"]]
+    steps[2]["status"] = "done"
+    steps[7]["status"] = "done"
+    steps[7]["params"] = {"min_note_ms": 123.0}
+    (env["dir"] / "p1" / "chain.json").write_text(json.dumps(
+        {"source_track": 1, "preset": "song-decompose", "run_ts": None, "steps": steps}),
+        encoding="utf-8")
+    r = ChainRunner(proj, preset_id="song-decompose", source_track=1)
+    assert len(r.steps) == 13
+    assert r.steps[7].params["stem"] == "bass" and r.steps[7].params["min_note_ms"] == 123.0
+    assert r.steps[2].params["stem"] == "vocals" and r.steps[2].params["min_note_ms"] == 60.0
+    assert r.steps[5].params["stem"] == "drums" and r.steps[10].params["stem"] == "other"
+    assert r.steps[7].status == "done" and r.steps[2].status == "done"
+    assert r.steps[6].status == "pending"
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="需要 ffmpeg")
+def test_runner_cross_preset_no_bleed(env):
+    """E2：换预设（异序）——状态不回填、参数不继承（防串参）。"""
+    _project_with_audio(env)
+    proj = _proj(env)
+    old = [{"tool": t, "status": "done",
+            "params": ({"min_note_ms": 88.0} if t == "transcribe" else {})}
+           for t in ("denoise", "loudnorm", "transcribe", "quantize", "snap_scale")]
+    (env["dir"] / "p1" / "chain.json").write_text(json.dumps(
+        {"source_track": 1, "preset": "humming-quicklane", "run_ts": "20260101-000000",
+         "steps": old}), encoding="utf-8")
+    r = ChainRunner(proj, preset_id="song-decompose", source_track=1)
+    assert all(s.status == "pending" for s in r.steps)
+    assert r.steps[2].params["backend"] == "game" and r.steps[2].params["min_note_ms"] == 60.0
+
+
+def test_apply_config_step_addressing(env):
+    """E2：步序寻址——step_mute/step_overrides 精确到步；工具名寻址命中全部出现。"""
+    _make_project(env)
+    proj = _proj(env)
+    data = apply_config(proj, preset_id="song-decompose")
+    assert len(data["steps"]) == 13
+    data = apply_config(proj, step_mute={"7": True}, step_overrides={"3": {"strength": 0.5}})
+    steps = data["steps"]
+    assert steps[7]["mute"] is True and steps[2].get("mute") in (None, False)
+    assert steps[3]["params"]["strength"] == 0.5
+    data2 = apply_config(proj, mute={"quantize": True})
+    assert all(s["mute"] for s in data2["steps"] if s["tool"] == "quantize")
+    assert not data2["steps"][2].get("mute")
+    with pytest.raises(ValueError):
+        apply_config(proj, step_mute={99: True})
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="需要 ffmpeg")
+def test_runner_step_index_subset(env, monkeypatch):
+    """E2：run 子集按步序定位（重复工具的唯一正解）——[7,9] 只跑第 8/10 步。"""
+    _project_with_audio(env)
+    calls = _patch_tools(monkeypatch)
+    proj = _proj(env)
+    r = ChainRunner(proj, preset_id="song-decompose", source_track=1)
+    r.start(steps=[7, 9])
+    st = _wait_runner(r)
+    assert calls == ["transcribe", "snap_scale"]
+    assert st["steps"][7]["status"] == "done" and st["steps"][9]["status"] == "done"
+    assert st["steps"][6]["status"] == "pending" and st["steps"][10]["status"] == "pending"
+
