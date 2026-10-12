@@ -930,6 +930,13 @@ function boot() {
 
   /* SSE → store（本地直接消费事件负载，契约 §六 数据流） */
   bus.on('state_updated', (s) => setState(s, { preserveSelection: true }));
+  bus.on('sse_reconnected', async () => {
+    /* 断线期间事件已丢——重连回补：重拉一次全量 state（修「文件夹 M/S 点击看似无反应」根因链）。 */
+    try {
+      if (store.project) setState(await api.getState(store.project), { preserveSelection: true });
+      bus.dispatch('toast', '已重新连接（状态已同步）');
+    } catch (e) { /* 拉取失败：留给下一次事件或手动刷新 */ }
+  });
   bus.on('diff_applied', (d) => {
     /* 批B2：重接线——数据进 store.diff，由 'diff' 主题统一驱动徽章（diff.js）与卷帘三色叠层 */
     setDiff(d);

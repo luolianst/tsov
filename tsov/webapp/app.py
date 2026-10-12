@@ -35,6 +35,16 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
 
     # ---------------- 静态前端（最后挂载；/api 路由先注册，不受影响） ----------------
 
+    # 零构建开发件：js/css/html 加 no-cache（仍带 ETag → 命中 304）。
+    # 防浏览器启发式缓存把旧 JS 静默喂给长开页面（2026-10-12 实测坑：改码后页面拿不到新代码）。
+    @app.middleware("http")
+    async def _static_no_cache(request: Request, call_next):
+        resp = await call_next(request)
+        p = request.url.path
+        if p.startswith(("/js/", "/css/")) or p == "/" or p.endswith(".html"):
+            resp.headers.setdefault("Cache-Control", "no-cache")
+        return resp
+
     if config.STATIC_DIR.is_dir():
         app.mount("/", StaticFiles(directory=str(config.STATIC_DIR), html=True), name="static")
 

@@ -36,12 +36,24 @@ const SSE_TYPES = [
   'arrange_updated',
 ];
 
-let current = null;   // EventSource
+let current = null;      // 当前 EventSource
+let currentName = '';    // 当前订阅工程名
+let retryTimer = null;   // 自管重连定时器
+let retryDelay = 0;      // 重连退避（毫秒）
+let downSince = 0;       // 断线起点（0 = 连接正常）
 
 export function connectEvents(projectName) {
   disconnectEvents();
   if (!projectName) return;
-  const es = new EventSource('/api/projects/' + encodeURIComponent(projectName) + '/events');
+  currentName = projectName;
+  open();
+  return current;
+}
+
+function open() {
+  const name = currentName;
+  if (!name) return;
+  const es = new EventSource('/api/projects/' + encodeURIComponent(name) + '/events');
   for (const t of SSE_TYPES) {
     es.addEventListener(t, (ev) => {
       let data = {};
@@ -49,11 +61,33 @@ export function connectEvents(projectName) {
       bus.dispatch(t, data);
     });
   }
-  es.onerror = () => bus.dispatch('sse_error', {});
+  es.onopen = () => {
+    const wasDown = downSince > 0;
+    downSince = 0;
+    retryDelay = 0;
+    /* 断线回补：重连成功后由上层重拉一次全量 state（断线期间的 state_updated 已丢） */
+    if (wasDown) bus.dispatch('sse_reconnected', {});
+  };
+  es.onerror = () => {
+    /* EventSource 在服务重启 / 非 200 响应等场景可能永久停摆（规范：fail the connection），
+       一律关闭旧对象走自管重连：2s 起、×2 退避、封顶 15s，直到连上。 */
+    es.close();
+    if (current !== es) return;   // 已被替换（切工程 / 重连中）
+    current = null;
+    if (!downSince) downSince = Date.now();
+    bus.dispatch('sse_error', {});
+    clearTimeout(retryTimer);
+    retryTimer = setTimeout(() => { if (currentName) open(); }, retryDelay || 2000);
+    retryDelay = Math.min(retryDelay ? retryDelay * 2 : 2000, 15000);
+  };
   current = es;
-  return es;
 }
 
 export function disconnectEvents() {
+  clearTimeout(retryTimer);
+  retryTimer = null;
+  currentName = '';
+  downSince = 0;
+  retryDelay = 0;
   if (current) { current.close(); current = null; }
 }

@@ -87,6 +87,16 @@ def test_health_and_static(env):
     assert "可视化宿主" in r.text
 
 
+def test_static_no_cache_headers(env):
+    """静态前端件带 no-cache（2026-10-12 修：防启发式缓存把旧 JS 静默喂给长开页面）。"""
+    for path in ("/", "/js/main.js", "/js/events.js", "/css/app.css"):
+        r = env["client"].get(path)
+        assert r.status_code == 200, path
+        assert "no-cache" in r.headers.get("cache-control", ""), path
+    r = env["client"].get("/api/health")
+    assert "no-cache" not in r.headers.get("cache-control", "")   # API 不受影响
+
+
 def test_meta_endpoint(env):
     """UI 批A：面板元数据（GM 音色名 / 效果类型）。v0.2 批C 前段（R1）：+ params 注册表快照。"""
     r = env["client"].get("/api/meta")
