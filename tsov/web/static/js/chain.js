@@ -316,8 +316,20 @@ function renderStep(s, idx) {
   return card;
 }
 
+let lastSig = '';   /* 渲染签名（10-12 深夜）：轮询节流 + 防横滚重置 */
+
 export function renderChain() {
   if (!pane) return;
+  /* 600ms 轮询每拍都进这里；全量重建会把 .chain-row 的横滚位置清零——
+     签名不变 → 跳过重建；变化时重建也保留横滚/纵滚位置。 */
+  const sig = JSON.stringify([store.chain.steps, store.chain.running, store.chain.runTs,
+    store.chain.preset, store.chain.presets, store.chain.sourceTrack, store.chain.error,
+    store.chain.tools, store.chain.needsApply, busy]);
+  if (sig === lastSig) return;
+  lastSig = sig;
+  const oldRow = pane.querySelector('.chain-row');
+  const oldWrap = pane.querySelector('.chain-wrap');
+  const keep = { row: oldRow ? oldRow.scrollLeft : 0, wrap: oldWrap ? oldWrap.scrollTop : 0 };
   pane.innerHTML = '';
   if (!store.project) { pane.innerHTML = '<div class="fx-none">先打开一个工程</div>'; return; }
   const wrap = el('div', 'chain-wrap');
@@ -398,6 +410,9 @@ export function renderChain() {
   }
 
   pane.appendChild(wrap);
+  const newRow = pane.querySelector('.chain-row');
+  if (newRow) newRow.scrollLeft = keep.row;   /* 重建后恢复横滚位置（10-12 深夜：防轮询重置） */
+  wrap.scrollTop = keep.wrap;
 }
 
 export function enterChain() {
@@ -424,6 +439,7 @@ export function initChain(paneEl) {
     if (store.project === lastProject) return;
     lastProject = store.project;
     toolsLoaded = false;
+    lastSig = '';   /* 切工程：签名失效，强制下一次重建 */
     stopPoll();
     setChainState({ steps: [], running: false, runTs: '', savedOnly: true, needsApply: '', error: null, sourceTrack: null });
     if (pane && pane.classList.contains('active')) enterChain();

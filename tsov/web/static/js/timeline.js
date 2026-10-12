@@ -319,6 +319,11 @@ function renderTracks(el) {
     if (tr.folder && firstOf[tr.folder] === ti) {
       const hd = document.createElement('div');
       hd.className = 'tl-folder' + (store.selFolder === tr.folder ? ' sel' : '');
+      /* 10-12 深夜板式：两行——上行 ▾+📁+名；下行 M/S/乘子 */
+      const l1 = document.createElement('div');
+      l1.className = 'fold-l1';
+      const l2 = document.createElement('div');
+      l2.className = 'fold-l2';
       const tg = document.createElement('button');
       const collapsed = store.collapsedFolders.has(tr.folder);
       tg.className = 'fold-toggle';
@@ -328,8 +333,8 @@ function renderTracks(el) {
       const nm = document.createElement('span');
       nm.className = 'fold-name';
       nm.textContent = '📁 ' + tr.folder + '（' + folderTracks(tr.folder).length + ' 轨）';
-      hd.appendChild(tg);
-      hd.appendChild(nm);
+      l1.appendChild(tg);
+      l1.appendChild(nm);
       /* v0.2 C2（F6，闸门 G3）：文件夹行内联 M/S + 音量（最小形态；VCA 式不动路由） */
       const fd = ((store.score.folders || {})[tr.folder]) || {};
       const fm = document.createElement('button');
@@ -349,9 +354,11 @@ function renderTracks(el) {
       fv.title = '文件夹音量乘子（0~2）';
       fv.addEventListener('click', (e) => e.stopPropagation());
       fv.addEventListener('change', () => postFolderMix(tr.folder, { volume: Number(fv.value) }));
-      hd.appendChild(fm);
-      hd.appendChild(fs);
-      hd.appendChild(fv);
+      l2.appendChild(fm);
+      l2.appendChild(fs);
+      l2.appendChild(fv);
+      hd.appendChild(l1);
+      hd.appendChild(l2);
       hd.title = '单击：选中该文件夹（M 键给它建旗）｜ ▾ 折叠/展开 ｜ M/S/音量：文件夹层（VCA）｜ 拖动：整体排序';
       /* v0.2 批C 后段（P5）：文件夹整块拖排序（成员连续化不变量）+ 接受轨拖入 */
       hd.draggable = true;
