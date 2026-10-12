@@ -124,6 +124,7 @@ tsov is young, and honest about it. The full pipeline already runs end to end (h
 - **Prototype quality.** Expect rough edges; breaking changes are possible before v1.0.
 - **The agent needs an LLM key.** Everything else runs offline.
 - **v0.2 in progress.** Batch E landed: finished-song decomposition — segment 1 (grid detection → 4-stem separation → vocal transcription → quantize/scale-snap → one-click multi-track placement) and **segment 2** (drums via ADTOF, bass/others via MT3/YourMT3 — full 4-stem transcription, 13-step chain, per-step addressing) — alongside the humming quick-lane, all driven from the same chain panel.
+- **MCP interface (experimental).** `tsov mcp` runs a stdio MCP server: external agents (Claude Code, Hermes, Codex, …) can list, read, edit, render and export projects through the same action layer the built-in agent uses — edits stay reviewable and reversible.
 
 ## Contributing
 
