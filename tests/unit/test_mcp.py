@@ -415,3 +415,84 @@ def test_mcp_create_project_rollback_history(monkeypatch):
         assert _run(case())
     finally:
         rmtree_force(ws)
+def test_mcp_png_resource(monkeypatch):
+    """卷帘 PNG resource：模板可见、读回为合法 PNG blob。"""
+    import base64
+
+    ws = _ws()
+    try:
+        _mk_project(ws, "demo-a", tracks=2)
+        store = ProjectStore(ws)
+
+        async def case():
+            async with _client(store) as s:
+                rt = await s.list_resource_templates()
+                tmpl = {t.uri_template for t in rt.resource_templates}
+                assert "tsov://projects/{name}/render.png" in tmpl
+
+                rr = await s.read_resource("tsov://projects/demo-a/render.png")
+                c = rr.contents[0]
+                assert c.mime_type == "image/png"
+                png = base64.b64decode(c.blob)
+                assert png[:8] == b"\x89PNG\r\n\x1a\n" and len(png) > 1000
+                return True
+
+        assert _run(case())
+    finally:
+        rmtree_force(ws)
+
+
+def test_mcp_prompts(monkeypatch):
+    """prompts：内置技能目录可达；取正文；未知名报错。"""
+    ws = _ws()
+    try:
+        store = ProjectStore(ws)
+
+        async def case():
+            async with _client(store) as s:
+                lp = await s.list_prompts()
+                names = {p.name for p in lp.prompts}
+                assert {"melody-edit", "from-scratch-compose", "transcription-diagnosis"} <= names
+
+                g = await s.get_prompt("melody-edit")
+                text = g.messages[0].content.text
+                assert "改谱" in text and "多利亚" in text
+
+                err = None
+                try:
+                    await s.get_prompt("no-such-prompt")
+                except Exception as e:  # noqa: BLE001
+                    err = e
+                assert err is not None
+                return True
+
+        assert _run(case())
+    finally:
+        rmtree_force(ws)
+
+
+def test_mcp_heavy_path_guard(monkeypatch):
+    """重操作路径护栏：仓库外路径拒；仓库内路径过护栏（死在工具层而非护栏层）。"""
+    from tsov.mcp import sessions as S
+
+    monkeypatch.setattr(S, "_web_alive", lambda: False)
+    ws = _ws()
+    try:
+        _mk_project(ws, "demo-a", tracks=1)
+        store = ProjectStore(ws, allow_write=True)
+
+        async def case():
+            async with _client(store) as s:
+                r = await s.call_tool(
+                    "render_wav",
+                    {"score_path": "output/demo-a/score.json", "out_wav": "C:/Windows/Temp/evil.wav"},
+                )
+                assert r.is_error and "越出仓库" in r.content[0].text
+
+                r2 = await s.call_tool("render_wav", {"score_path": "output/demo-a/nope.json"})
+                assert r2.is_error and "越出" not in r2.content[0].text
+                return True
+
+        assert _run(case())
+    finally:
+        rmtree_force(ws)

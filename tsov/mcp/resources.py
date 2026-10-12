@@ -48,6 +48,12 @@ class ResourceHub:
                 mime_type="application/json",
                 description="score.json 全文（大谱注意体量）",
             ),
+            types.ResourceTemplate(
+                name="project-render-png",
+                uri_template=_PROJ_PREFIX + "{name}/render.png",
+                mime_type="image/png",
+                description="钢琴卷帘 PNG（服务端渲染；给外部 agent 看谱面）",
+            ),
         ]
 
     # ---- 读取 ----
@@ -65,6 +71,22 @@ class ResourceHub:
                 if kind == "score":
                     proj = self.store.get_project(name)
                     return self._text(uri, proj.score.to_dict())
+                if kind == "render.png":
+                    import base64
+
+                    from .png import render_roll_png
+
+                    proj = self.store.get_project(name)
+                    png = render_roll_png(proj)
+                    return types.ReadResourceResult(
+                        contents=[
+                            types.BlobResourceContents(
+                                uri=uri,
+                                mime_type="image/png",
+                                blob=base64.b64encode(png).decode("ascii"),
+                            )
+                        ]
+                    )
         raise McpError(f"未知资源 URI：{uri}")
 
     # ---- 工具 ----

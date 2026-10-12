@@ -252,7 +252,7 @@ def build_server(store: ProjectStore) -> Server:
 
     def _call_heavy(name: str, args: dict) -> str:
         repo = store.repo_root
-        for key in ("score_path", "output", "audio", "path", "out", "wav"):
+        for key in ("score_path", "output", "audio", "path", "out", "out_wav", "wav"):
             v = (args or {}).get(key)
             if not v:
                 continue
@@ -305,6 +305,18 @@ def build_server(store: ProjectStore) -> Server:
     async def on_read_resource(ctx, params):  # noqa: ARG001
         return resources.read(str(params.uri))
 
+    # ---- prompts ----
+
+    async def on_list_prompts(ctx, params):  # noqa: ARG001
+        from .prompts import list_prompts
+
+        return types.ListPromptsResult(prompts=list_prompts())
+
+    async def on_get_prompt(ctx, params):  # noqa: ARG001
+        from .prompts import get_prompt
+
+        return get_prompt(str(params.name))
+
     # ---- 组装 ----
 
     return Server(
@@ -321,4 +333,6 @@ def build_server(store: ProjectStore) -> Server:
         on_list_resources=on_list_resources,
         on_list_resource_templates=on_list_resource_templates,
         on_read_resource=on_read_resource,
+        on_list_prompts=on_list_prompts,
+        on_get_prompt=on_get_prompt,
     )
