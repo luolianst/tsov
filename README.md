@@ -123,7 +123,7 @@ tsov is young, and honest about it. The full pipeline already runs end to end (h
 - **Windows-first.** macOS/Linux are untested.
 - **Prototype quality.** Expect rough edges; breaking changes are possible before v1.0.
 - **The agent needs an LLM key.** Everything else runs offline.
-- **v0.2 in progress.** Batch E segment 1 landed: finished-song decomposition (grid detection → 4-stem separation → vocal transcription → quantize/scale-snap → one-click multi-track placement) alongside the humming quick-lane, both driven from the same chain panel.
+- **v0.2 in progress.** Batch E landed: finished-song decomposition — segment 1 (grid detection → 4-stem separation → vocal transcription → quantize/scale-snap → one-click multi-track placement) and **segment 2** (drums via ADTOF, bass/others via MT3/YourMT3 — full 4-stem transcription, 13-step chain, per-step addressing) — alongside the humming quick-lane, all driven from the same chain panel.
 
 ## Contributing
 
