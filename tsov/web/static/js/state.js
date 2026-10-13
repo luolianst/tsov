@@ -353,9 +353,22 @@ export function folderTracks(name) {
   return out;
 }
 
+/* P61（2026-10-14）：view 重绘合并到 rAF——store.view 仍同步更新（读取方不受影响）；
+   派发每帧最多一次。修复：滚轮/拖拽风暴下「每个事件一次同步全量重绘」积压成
+   帧洞→输入延迟雪崩（senbon 实测 5 波形 @600px/s 到达间隔 ~400ms+；证据
+   output/roll-jank-2026-10-14/）。 */
+let _viewRaf = 0;
+export function dispatchView() {
+  if (_viewRaf) return;
+  _viewRaf = requestAnimationFrame(() => {
+    _viewRaf = 0;
+    bus.dispatch('view');
+  });
+}
+
 export function setView(partial) {
   Object.assign(store.view, partial);
-  bus.dispatch('view');
+  dispatchView();
 }
 
 /* ---------------- 视图模式（修正轮2：总谱 lane ↔ 单轨写谱） ---------------- */
@@ -481,12 +494,12 @@ export function splitPartner() { return partnerOf(); }
 /** 副区音轴切换（同音轴 ↔ 自适配概览）。 */
 export function setSplitSameAxis(on) {
   store.splitSameAxis = !!on;
-  bus.dispatch('view');
+  dispatchView();
 }
 
 export function setSplitRatio(r) {
   store.splitRatio = Math.max(0.15, Math.min(0.85, Number(r) || 0.5));
-  bus.dispatch('view');
+  dispatchView();
 }
 
 /** 道快照（__tsovState.lanes 用；CDP 断言面）：单轨主轨的道列表。 */
@@ -602,7 +615,7 @@ export function clearRefs() {
   bus.dispatch('refs');
 }
 /* M-V3：写谱吸附（比例=拍；0 关 / 0.5 →1/8 / 0.25 →1/16） */
-export function setSnap(frac) { store.snapFrac = Number(frac) || 0; bus.dispatch('view'); }
+export function setSnap(frac) { store.snapFrac = Number(frac) || 0; dispatchView(); }
 
 /* 音符域（全轨）：[minMidi, maxMidi] 与总时长 */
 export function scoreBounds() {

@@ -67,12 +67,41 @@ def register(app: FastAPI) -> None:
 
     @app.get("/api/projects/{name}/audio/peaks")
     def audio_peaks(name: str, file: str, buckets: int = 800) -> dict:
-        """波形峰值（E2）：mono 降采样 min/max 桶数组 → 前端 canvas 绘制。"""
+        """波形峰值（E2）：mono 降采样 min/max 桶数组 → 前端 canvas 绘制。
+
+        P61 热修3（S1+S2，2026-10-14）：上限 4000 → 65536（配合前端「≈1 桶/像素」需求档）；
+        磁盘缓存 `<工程>/.peaks-cache/<stem>-<buckets>-<hash>.npz`（键含 mtime_ns/size，
+        文件一变自然失效）。首次解码 ~0.3-0.5s，之后毫秒级。
+        """
+        import hashlib
+
+        import numpy as np
         import soundfile as sf
 
         proj = st().get_project(name)
         path = _resolve_project_audio(proj, file)
-        buckets = max(8, min(4000, int(buckets)))
+        buckets = max(8, min(65536, int(buckets)))
+
+        stt = path.stat()
+        ckey = hashlib.sha256(
+            f"{path.name}|{stt.st_mtime_ns}|{stt.st_size}|{buckets}|v1".encode("utf-8")
+        ).hexdigest()[:12]
+        cdir = proj.root / ".peaks-cache"
+        cfile = cdir / f"{path.stem[:48]}-{buckets}-{ckey}.npz"
+        if cfile.is_file():
+            try:
+                z = np.load(str(cfile))
+                mn, mx = z["mn"], z["mx"]
+                return {
+                    "file": path.name,
+                    "seconds": round(float(z["seconds"]), 4),
+                    "buckets": int(mn.shape[0]),
+                    "min": [round(float(x), 5) for x in mn],
+                    "max": [round(float(x), 5) for x in mx],
+                }
+            except Exception:  # noqa: BLE001 —— 半截/损坏缓存 → 落回重算
+                pass
+
         data, sr = sf.read(str(path), dtype="float32", always_2d=True)
         mono = data.mean(axis=1) if data.shape[1] > 1 else data[:, 0]
         n = int(mono.shape[0])
@@ -87,9 +116,18 @@ def register(app: FastAPI) -> None:
                 maxs[-1] = max(float(maxs[-1]), float(mono[m:].max()))
         else:
             mins, maxs = mono[:1], mono[:1]
+        seconds = n / int(sr)
+        try:   # 写缓存（失败不影响响应；半截文件靠键/损坏回退自愈）
+            cdir.mkdir(parents=True, exist_ok=True)
+            tmp = cfile.with_name(cfile.name + ".tmp.npz")
+            np.savez(str(tmp), mn=np.asarray(mins, dtype=np.float32),
+                     mx=np.asarray(maxs, dtype=np.float32), seconds=np.float64(seconds))
+            tmp.replace(cfile)
+        except Exception:  # noqa: BLE001
+            pass
         return {
             "file": path.name,
-            "seconds": round(n / int(sr), 4),
+            "seconds": round(seconds, 4),
             "buckets": int(len(mins)),
             "min": [round(float(x), 5) for x in mins],
             "max": [round(float(x), 5) for x in maxs],

@@ -1,12 +1,13 @@
 /* peaks.js —— 波形峰谷公共管线（M-V8 E2 总谱 / E3 段1 单轨波形共用）
-   v0.2 批C 后段（C9）：桶数随缩放——clamp(时长×pxPerSec/2, 900, 4000) 量化为档 [900,1800,3000,4000]；
+   P61 热修3（S1，2026-10-14）：分辨率升档——上限 4000 → 65536（对齐服务端）；
+   需求改为「≈1 桶/像素」（时长×pxPerSec），量化为档 [900,1800,3000,4000,8000,16000,32000,65536]；
    缓存键含桶数；分辨率不足时升档重取（pending 节流）；拉回后广播 bus 'peaks'（订阅方自行重绘）。
    未就绪返回 null（已触发后台拉取；先拿旧档顶住显示）。 */
 import { api } from './api.js';
 import { bus } from './events.js';
 import { store } from './state.js';
 
-const LEVELS = [900, 1800, 3000, 4000];
+const LEVELS = [900, 1800, 3000, 4000, 8000, 16000, 32000, 65536];
 const cache = new Map();      // `${project}|${rel}|${buckets}` → data
 const pending = new Set();    // 同上 key（拉取中）
 
@@ -26,7 +27,7 @@ export function peaksGet(rel, pxPerSec) {
     if (d && d.max && d.max.length) { if (L > bestL) { best = d; bestL = L; } }
   }
   if (best) {
-    const need = (pps && best.seconds) ? Math.ceil((best.seconds * pps) / 2) : LEVELS[0];
+    const need = (pps && best.seconds) ? Math.ceil(best.seconds * pps) : LEVELS[0];   /* 1 桶/像素 */
     const want = pickLevel(Math.max(need, LEVELS[0]));
     if (bestL >= want) return best;               // 精度足够
     fetchLevel(rel, want);                        // 升档重取（先拿旧档顶住显示）

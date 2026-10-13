@@ -387,6 +387,7 @@ class Project:
             "*.wav", "*.mp3", "*.flac", "*.m4a",
             ".agent-actions/", ".tsov-state.json", "agent-edited-score.json",
             "chain/",   # M-V8 E3：处理链产物目录（音频/中间 json 不入库）
+            ".peaks-cache/",   # P61 热修3（S2）：波形峰值 npz 缓存（不入库）
         ]
         if not gitignore.exists():
             gitignore.write_text("\n".join(lines) + "\n", encoding="utf-8")

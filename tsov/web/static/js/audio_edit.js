@@ -200,17 +200,26 @@ export function drawClipBlocks(ctx, o) {
       const nB = pv.max.length;
       const s0 = c.src_offset, s1 = c.src_offset + g.srcSpan;
       const px = Math.max(1, Math.floor(w));
-      ctx.strokeStyle = o.col;
+      /* P61 热修（2026-10-14）：列循环裁剪到可见区 [xLo,xHi]（±1 列描边边缘余量）。
+         此前按「整段 clip 全长」逐列建 path——600px/s 下一首 3 分钟歌单轨 ≈10.8 万列、
+         5 轨 ≈百万级 ops/帧，光栅化数百 ms 拖垮帧与输入管线（变焦越大/波形越多越卡）。
+         可见区外的列画布本就丢弃；裁剪后可见区逐列公式不变（像素级一致）。
+         证据：output/roll-jank-2026-10-14/（修复前 5 波形 @600px/s 到达间隔 ~435ms）。 */
+      const i0 = Math.max(0, Math.floor(Math.max(x0, o.xLo) - x0) - 1);
+      const i1 = Math.min(px, Math.ceil(Math.min(x1, o.xHi) - x0) + 1);
+      /* P61 热修2（2026-10-14）：逐列 AA 描边竖线在本机渲染路径（ANGLE/D3D11 光栅）上
+         病态昂贵——1265 根相邻 1px AA 竖线 ≈ 50ms/轨（5 轨 ≈ 275ms/帧）；同几何换
+         fillRect 竖条 ≈ 6ms（连续帧基准见 output/roll-jank-2026-10-14/）。
+         可见区逐列取样公式不变、视觉等价；近静音微段保底 0.75px 以保持可见。 */
+      ctx.fillStyle = o.col;
       if (o.dim) ctx.globalAlpha = 0.45;
-      ctx.beginPath();
-      for (let i = 0; i < px; i++) {
+      for (let i = i0; i < i1; i++) {
         const st = s0 + (i + 0.5) / px * (s1 - s0);
         const b = Math.max(0, Math.min(nB - 1, Math.floor((st / g.dur) * nB)));
-        const xa = Math.round(x0 + i) + 0.5;
-        ctx.moveTo(xa, mid - pv.max[b] * amp);
-        ctx.lineTo(xa, mid - pv.min[b] * amp);
+        const xa = Math.round(x0 + i);
+        const yA = mid - pv.max[b] * amp, yB = mid - pv.min[b] * amp;
+        ctx.fillRect(xa, Math.min(yA, yB), 1, Math.max(0.75, Math.abs(yB - yA)));
       }
-      ctx.stroke();
       ctx.globalAlpha = 1;
     } else {
       ctx.strokeStyle = p.laneLabel;   /* 波形未就绪：虚线占位 */
