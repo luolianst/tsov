@@ -387,7 +387,7 @@ body.chat-folded #rail-chat { display: flex; }
 #chat-head, #import-row, #chat-log, #chat-chips, #ann-queue, #chat-input-row, #chat-actions { min-width: 0; }
 #chat-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 8px 10px 0; flex-wrap: wrap; row-gap: 4px; }
 #chat-head .panel-title { margin: 0; padding: 0; flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#chat-head-btns { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+#chat-head-btns { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
 #chat-head-btns button { font-size: var(--fs-sm); padding: 2px 7px; }
 #live-render-toggle { display: inline-flex; align-items: center; gap: 3px; font-size: var(--fs-sm); opacity: .78; cursor: pointer; user-select: none; white-space: nowrap; }
 #live-render-toggle input { margin: 0; }
@@ -516,7 +516,8 @@ body.chat-folded #rail-chat { display: flex; }
 .actcard.stale .ac-impact, .actcard.stale .ac-receipt { text-decoration: line-through; }
 
 /* ---- 对话产物流 C 件：右栏双 tab + 步骤视图（合流 feed） ---- */
-#sp-tabs { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; }
+/* 批H：basis 0% 会让槽位被压到内容宽以下→EN 长按钮下 Steps tab 被相邻按钮覆盖（隐形）；basis auto 让超宽时按 #chat-head 既定 wrap 换行 */
+#sp-tabs { display: flex; align-items: center; gap: 2px; flex: 1 1 auto; min-width: 0; }
 .sp-tab {
   cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
   font-size: var(--fs-sm); color: var(--muted); background: transparent;

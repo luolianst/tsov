@@ -164,7 +164,7 @@ export const EN = {
   '只读：事实包（结构/电平/逐段/频谱/目标），结果进对话、不出卡不进流': 'Read-only: fact pack (structure / levels / sections / spectrum / targets) — the result lands in chat, no card, no stream entry',
   '右栏视图：对话 / 步骤（选择记忆到 localStorage）': 'Right panel view: Chat / Steps (choice remembered in localStorage)',
   '后端宿主播放（sounddevice；从播放轴起播）': 'Host playback (sounddevice; starts from the playhead)',
-  '对乐谱说点什么…（如：改成 D 多利亚调式）｜Enter 发送 / Shift+Enter 换行': 'Say something about the score… (e.g. change to D Dorian) | Enter to send / Shift+Enter for newline',
+  '对乐谱说点什么…（Enter 发送）': 'Talk to the score… (Enter to send)',
   '对比基准（旧版本，只读参考）': 'Comparison base (an old version, read-only reference)',
   '导入历史会话：回看消息 + 接着聊': 'Import an old session: review the messages and keep chatting',
   '展开对话面板': 'Expand the chat panel',
