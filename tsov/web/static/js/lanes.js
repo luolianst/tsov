@@ -3,6 +3,7 @@
    交互：单击选中 ｜ Ctrl/Shift 单击 = 叠加集 ｜ 双击 = 进入单轨写谱
    音频轨（E2/E6）：拖块移动 ｜ 拖缘修剪 ｜ 顶角句柄淡化 ｜ Alt+拖右缘伸缩 ｜ 剪刀/Alt 单击切分
    音符编辑在单轨视图（roll.js）；音频 clip 手势经命令层落盘（ADR-0017） */
+import { t } from './i18n.js';
 
 import { bus } from './events.js';
 import { store, tempo, beatsPerBar, setSelection, toggleRef, setView, bookmarks, setSelBookmark, setError, audioClipsOf } from './state.js';
@@ -130,7 +131,7 @@ export function draw() {
   if (!sc || !sc.tracks.length) {
     ctx.fillStyle = p.laneLabel;
     ctx.font = FONT_UI;
-    ctx.fillText('（无音轨）', 12, 22);
+    ctx.fillText(t('（无音轨）'), 12, 22);
     return;
   }
 
@@ -161,7 +162,7 @@ export function draw() {
     ctx.globalAlpha = trackVisible(ti) ? 1 : 0.4;   // M-V8 E1：隐藏/折叠行减淡
     ctx.fillText((sc.tracks[ti].folder ? '📁' : '') + (nm.length > 8 ? nm.slice(0, 8) + '…' : nm), 9, y0 + Math.min(rh - 8, rh / 2 + 4));
     ctx.globalAlpha = 1;
-    if (ref) ctx.fillText('参照', 9, y0 + rh - 8);
+    if (ref) ctx.fillText(t('参照'), 9, y0 + rh - 8);
     if (touched) {   /* 批B B1-3：改动标记（标签槽右缘小方块，agent 语义色） */
       ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--agent').trim() || '#141414';
       ctx.fillRect(KEYS - 9, y0 + rh / 2 - 3, 5, 6);
@@ -218,7 +219,7 @@ export function draw() {
         hh: inner,
         selIdx: (sel && sel.ti === ti) ? sel.idx : null,
         inDrag: !!prev,
-        label: (trk.name || '素材'),
+        label: (trk.name || t('素材')),
         p, v,
         xLo: KEYS, xHi: W,
       });
@@ -357,12 +358,12 @@ export function init(el, opts) {
     }
     const fl = flagAt(e.offsetX, e.offsetY);
     if (fl) {
-      const t = ensureTip();
-      t.textContent = (fl.b.scope === 'folder' ? '📁 ' : '') + (fl.b.label || '（未命名）') +
-        ' @ ' + fl.b.start.toFixed(2) + 's ｜ 单击跳转';
-      t.style.display = 'block';
-      t.style.left = (e.clientX + 12) + 'px';
-      t.style.top = (e.clientY + 14) + 'px';
+      const tp = ensureTip();
+      tp.textContent = (fl.b.scope === 'folder' ? '📁 ' : '') + (fl.b.label || t('（未命名）')) +
+        ' @ ' + fl.b.start.toFixed(2) + t('s ｜ 单击跳转');
+      tp.style.display = 'block';
+      tp.style.left = (e.clientX + 12) + 'px';
+      tp.style.top = (e.clientY + 14) + 'px';
       canvas.style.cursor = 'pointer';
       return;
     }

@@ -2,6 +2,7 @@
    工具键仅单轨卷帘视图生效；全部动作走命令层 /batch（ADR-0017 同一动作路径）。
    快捷键：1-5 切换工具 · Esc 回智能指针 · 按住 Alt 临时剪刀 ·
           ←/→ 微推一格（Shift=一小节） · Ctrl+C/X/V/D 复制/剪切/粘贴/再制 */
+import { t } from './i18n.js';
 
 import { bus } from './events.js';
 import { api } from './api.js';
@@ -11,11 +12,11 @@ const $ = (id) => document.getElementById(id);
 
 /* 工具定义：[id, 标签, 键位] */
 export const TOOLS = [
-  ['smart', '🖱 智能', '1'],
-  ['range', '▭ 范围', '2'],
-  ['scissors', '✂ 剪刀', '3'],
-  ['glue', '🩹 胶水', '4'],
-  ['eraser', '🧽 橡皮', '5'],
+  ['smart', t('🖱 智能'), '1'],
+  ['range', t('▭ 范围'), '2'],
+  ['scissors', t('✂ 剪刀'), '3'],
+  ['glue', t('🩹 胶水'), '4'],
+  ['eraser', t('🧽 橡皮'), '5'],
 ];
 
 let bar = null, snapChk = null, gridSel = null, swingIn = null, quantBtn = null, chipsEl = null;
@@ -53,7 +54,7 @@ export function init(els) {
   for (const [id, , key] of TOOLS) {
     const btn = bar.querySelector('button[data-tool="' + id + '"]');
     if (btn) {
-      btn.title = btn.title + '（快捷键 ' + key + '）';
+      btn.title = btn.title + t('（快捷键 ') + key + '）';
       btn.addEventListener('click', () => setTool(id));
     }
   }
@@ -120,7 +121,7 @@ function fillAutoParamOptions() {
     if (!want.length) {
       const o = document.createElement('option');
       o.value = '';
-      o.textContent = '（无道）';
+      o.textContent = t('（无道）');
       autoSel.appendChild(o);
       autoSel.disabled = true;
     } else {
@@ -162,25 +163,25 @@ export function cancelTool() {
 function setSnapFromBar() {
   const on = !!(snapChk && snapChk.checked);
   setSnap(on ? gridFrac() : 0);
-  toast(on ? ('吸附开：网格 ' + gridLabel()) : '吸附关');
+  toast(on ? (t('吸附开：网格 ') + gridLabel()) : t('吸附关'));
 }
 
 /* ---- 量化（选区 / 整轨 + Swing）---- */
 async function doQuantize() {
-  if (!store.project || !store.score) { setError('先打开工程'); return; }
+  if (!store.project || !store.score) { setError(t('先打开工程')); return; }
   const sel = store.selection;
   if (!store.score.tracks[sel.track]) return;
   const value = { grid: gridNum() };
   const sw = Number(swingIn && swingIn.value || 0);
   if (sw > 0) value.swing = Math.min(1, Math.max(0, sw / 100));
   if (sel.indices.length) value.indices = sel.indices.slice();
-  const scope = sel.indices.length ? (sel.indices.length + ' 音选区') : '整轨';
+  const scope = sel.indices.length ? (sel.indices.length + t(' 音选区')) : t('整轨');
   try {
-    const r = await api.postBatch(store.project, '量化 ' + scope,
+    const r = await api.postBatch(store.project, t('量化 ') + scope,
       [{ op: 'quantize_time', track: sel.track, value }],
-      '量化：' + gridLabel() + (sw > 0 ? ' · swing ' + sw + '%' : ''));
-    if (r.applied) toast('已量化 ' + scope + ' ' + refTag(r));
-    else setError('被拒：' + (r.errors || []).join('；'));
+      t('量化：') + gridLabel() + (sw > 0 ? ' · swing ' + sw + '%' : ''));
+    if (r.applied) toast(t('已量化 ') + scope + ' ' + refTag(r));
+    else setError(t('被拒：') + (r.errors || []).join('；'));
   } catch (e) { setError(e.message); }
 }
 
@@ -192,10 +193,10 @@ async function nudge(dt) {
   const value = { dtime: Math.round(dt * 1e6) / 1e6 };
   if (sel.indices.length) value.indices = sel.indices.slice();
   try {
-    const r = await api.postBatch(store.project, '微推',
+    const r = await api.postBatch(store.project, t('微推'),
       [{ op: 'shift_notes', track: sel.track, value }],
-      '微推 ' + (dt >= 0 ? '+' : '') + dt.toFixed(3) + 's');
-    if (!r.applied) setError('被拒：' + (r.errors || []).join('；'));
+      t('微推 ') + (dt >= 0 ? '+' : '') + dt.toFixed(3) + 's');
+    if (!r.applied) setError(t('被拒：') + (r.errors || []).join('；'));
   } catch (e) { setError(e.message); }
 }
 
@@ -211,10 +212,10 @@ function selNotes() {
 
 function copySel() {
   const s = selNotes();
-  if (!s) { toast('先选中音符（框选 / Ctrl 多选）'); return null; }
+  if (!s) { toast(t('先选中音符（框选 / Ctrl 多选）')); return null; }
   const anchor = Math.min(...s.notes.map((n) => n.start));
   setClipboard(s.notes, anchor, s.track);
-  toast('已复制 ' + s.notes.length + ' 音');
+  toast(t('已复制 ') + s.notes.length + t(' 音'));
   return s;
 }
 
@@ -223,15 +224,15 @@ async function cutSel() {
   if (!s) return;
   const idxs = s.indices.slice().sort((a, b) => b - a);   // 降序：索引不漂移
   try {
-    const r = await api.postBatch(store.project, '剪切 ' + idxs.length + ' 音',
-      idxs.map((i) => ({ op: 'remove', track: s.track, index: i })), '剪切：' + idxs.length + ' 音');
-    if (!r.applied) setError('被拒：' + (r.errors || []).join('；'));
+    const r = await api.postBatch(store.project, t('剪切 ') + idxs.length + t(' 音'),
+      idxs.map((i) => ({ op: 'remove', track: s.track, index: i })), t('剪切：') + idxs.length + t(' 音'));
+    if (!r.applied) setError(t('被拒：') + (r.errors || []).join('；'));
   } catch (e) { setError(e.message); }
 }
 
 async function duplicateSel() {
   const s = selNotes();
-  if (!s) { toast('先选中音符'); return; }
+  if (!s) { toast(t('先选中音符')); return; }
   const anchor = Math.min(...s.notes.map((n) => n.start));
   const end = Math.max(...s.notes.map((n) => n.end));
   setClipboard(s.notes, anchor, s.track);
@@ -241,20 +242,20 @@ async function duplicateSel() {
 async function pasteTo(t0) {
   if (!store.project || !store.score) return;
   const clip = store.clipboard;
-  if (!clip.length) { toast('剪贴板为空（先 Ctrl+C）'); return; }
+  if (!clip.length) { toast(t('剪贴板为空（先 Ctrl+C）')); return; }
   const track = store.score.tracks[store.selection.track] ? store.selection.track : store.clipTrack;
-  if (!store.score.tracks[track]) { toast('目标轨不存在'); return; }
+  if (!store.score.tracks[track]) { toast(t('目标轨不存在')); return; }
   let dt = t0 - store.clipAnchor;
   const minStart = Math.min(...clip.map((n) => n.start));
   if (minStart + dt < 0) dt = -minStart;                // 越出 0 点 → 整体平移到 0
   const r6 = (x) => Math.round(x * 1e6) / 1e6;
   try {
-    const r = await api.postBatch(store.project, '粘贴 ' + clip.length + ' 音',
+    const r = await api.postBatch(store.project, t('粘贴 ') + clip.length + t(' 音'),
       clip.map((n) => ({ op: 'add', track, index: null, value: {
         pitch_midi: n.pitch_midi, start: r6(n.start + dt), end: r6(n.end + dt), velocity: n.velocity } })),
-      '粘贴：' + clip.length + ' 音');
-    if (r.applied) toast('已粘贴 ' + clip.length + ' 音 ' + refTag(r));
-    else setError('被拒：' + (r.errors || []).join('；'));
+      t('粘贴：') + clip.length + t(' 音'));
+    if (r.applied) toast(t('已粘贴 ') + clip.length + t(' 音 ') + refTag(r));
+    else setError(t('被拒：') + (r.errors || []).join('；'));
   } catch (e) { setError(e.message); }
 }
 

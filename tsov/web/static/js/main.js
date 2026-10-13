@@ -506,7 +506,7 @@ function boot() {
   /* M-V8 E1：M 键建旗（选中文件夹 > 单轨选中 > 项目层；Shift+M 强制项目层） */
   async function addFlag(forceProject) {
     if (!store.project || !store.score) { setError(t('先打开一个工程')); return; }
-    const t = Math.round(Math.max(0, store.playhead) * 1000) / 1000;
+    const tSec = Math.round(Math.max(0, store.playhead) * 1000) / 1000;
     let scope = 'project', ref = '';
     if (!forceProject) {
       if (store.selFolder) { scope = 'folder'; ref = store.selFolder; }
@@ -519,9 +519,9 @@ function boot() {
     const len = bookmarks().length;
     const label = scope === 'project' ? t('项目记号') : (scope === 'folder' ? (t('文件夹记号 ') + ref) : (t('轨道记号 ') + ref));
     try {
-      const r = await api.postBatch(store.project, t('书签'), [{ op: 'add_bookmark', track: 0, value: { scope, ref, kind: 'mark', start: t, label: '' } }], null);
+      const r = await api.postBatch(store.project, t('书签'), [{ op: 'add_bookmark', track: 0, value: { scope, ref, kind: 'mark', start: tSec, label: '' } }], null);
       if (!r.applied) { setError(t('被拒：') + (r.errors || []).join('；')); return; }
-      toast(t('已建旗：') + label + ' @ ' + t + t('s（回车命名）'));
+      toast(t('已建旗：') + label + ' @ ' + tSec + t('s（回车命名）'));
       const mr = $('markers').getBoundingClientRect();
       timeline.openRenameAt(len, mr.left + 120, Math.max(40, mr.top - 30));
     } catch (e) { setError(e.message); }
@@ -1303,17 +1303,17 @@ function boot() {
     sigIn.value = sc ? (sc.time_signature || '4/4') : '';
   }
   tempoIn.addEventListener('change', () => {
-    const t = Number(tempoIn.value);
-    if (!t || t < 20 || t > 400) { syncMetro(); return; }
+    const bpm = Number(tempoIn.value);
+    if (!bpm || bpm < 20 || bpm > 400) { syncMetro(); return; }
     const old = store.score ? Number(store.score.tempo) : null;
-    if (store.score && Math.abs(t - old) < 1e-6) return;
-    if (rescaleChk.checked && old && Math.abs(t - old) > 1e-9) {
+    if (store.score && Math.abs(bpm - old) < 1e-6) return;
+    if (rescaleChk.checked && old && Math.abs(bpm - old) > 1e-9) {
       /* 单命令原子：set_tempo_remap（BPM + 缩放同生共死） */
       const nNotes = (store.score.tracks || []).reduce((a, tr) => a + ((tr.notes || []).length), 0);
-      const label = t('速度 ♩=') + t + t(' · 跟速重排') + (nNotes ? '（' + nNotes + t(' 音）') : '');
-      postTempo([{ op: 'set_tempo_remap', track: 0, value: { tempo: t } }], label);
+      const label = t('速度 ♩=') + bpm + t(' · 跟速重排') + (nNotes ? '（' + nNotes + t(' 音）') : '');
+      postTempo([{ op: 'set_tempo_remap', track: 0, value: { tempo: bpm } }], label);
     } else {
-      postTempo([{ op: 'set_tempo', track: 0, value: { tempo: t } }], t('速度 ♩=') + t);
+      postTempo([{ op: 'set_tempo', track: 0, value: { tempo: bpm } }], t('速度 ♩=') + bpm);
     }
   });
   tempoIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { tempoIn.blur(); } });

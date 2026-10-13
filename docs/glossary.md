@@ -2,7 +2,7 @@
 
 **[简体中文](glossary.zh-CN.md) | English**
 
-tsov has its own small vocabulary. This page maps the terms you'll meet in the **UI (Chinese-only in v0.1)**, in the docs, and in the code — with the closest DAW equivalent where one exists.
+tsov has its own small vocabulary. This page maps the terms you'll meet in the **UI (Chinese / English)**, in the docs, and in the code — with the closest DAW equivalent where one exists.
 
 > New here? Read the [quickstart](../README.md#quickstart) first; come back when a button, a term, or a Chinese label needs decoding.
 

@@ -1,4 +1,5 @@
 /* api.js —— REST 封装（docs/05 §三 全部接口；模块间只经本文件访问后端） */
+import { t } from './i18n.js';
 
 import { noteUserAction } from './state.js';
 import { bus } from './events.js';
@@ -8,7 +9,7 @@ async function req(path, opts) {
   try {
     res = await fetch(path, opts);
   } catch (e) {
-    throw new Error('网络错误：' + (e && e.message ? e.message : e));
+    throw new Error(t('网络错误：') + (e && e.message ? e.message : e));
   }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
@@ -33,7 +34,7 @@ export const api = {
 
   getState: (name) => req('/api/projects/' + encodeURIComponent(name) + '/state'),
   postBatch: (name, label, commands, commitMessage) => {
-    const desc = label || ('命令层：' + (commands || []).map((c) => c.op).join(' + '));
+    const desc = label || (t('命令层：') + (commands || []).map((c) => c.op).join(' + '));
     bus.dispatch('save_begin', { name });   /* M-V8 E6 段2：保存徽章「保存中…」 */
     return post('/api/projects/' + encodeURIComponent(name) + '/batch',
       { label: label || '', commands, commit_message: commitMessage || null }).then((r) => {

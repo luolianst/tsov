@@ -125,7 +125,7 @@ python scripts/make_bundle.py          # 生成并压缩到桌面
 
 tsov 还很年轻，也没打算装老成。全流程已经端到端跑通（哼唱 → 转录 MIDI → agent 编配 → 混音 → 母带导出，见演示片），但是：
 
-- **UI 目前只有中文。** 英文 i18n 排在 v0.2——翻译是目前最有价值的贡献。界面词汇看不懂可查[术语表](docs/glossary.zh-CN.md)（含 DAW 对照）。
+- **界面语言支持中文 / English 切换。** 在 ⚙ 设置 → 语言 / Language 选择（或开局用 `?lang=en` 直达）；界面词汇看不懂可查[术语表](docs/glossary.zh-CN.md)（含 DAW 对照）。
 - **Windows 优先。** macOS/Linux 未实测。
 - **原型品质。** 会有毛刺；v1.0 前可能有破坏性变更。
 - **agent 功能需要 LLM key。** 其余部分离线可跑。

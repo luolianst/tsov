@@ -4,6 +4,7 @@
    本批落地 curve 道（自动化音量/声像）；bars（力度）等 kind 挂接时扩展。
    交互与既有 autoroll 一字不差：点空白=加点 ｜ 拖点=移动 ｜ 双击/右键点=删除（每笔一命令、可撤销）。
    显示折线 = 段外端点延伸（与引擎 host/mix.py::_curve 的 np.interp 语义一致）。 */
+import { t } from './i18n.js';
 
 import { KEYS_W, store } from './state.js';
 import { xOf, tOf } from './geom.js';
@@ -119,7 +120,7 @@ export function createLane(descriptor) {
       });
     } else {
       ctx.fillStyle = cText;
-      ctx.fillText('（无自动化点：单击此道加点）', KEYS_W + 8, H / 2);
+      ctx.fillText(t('（无自动化点：单击此道加点）'), KEYS_W + 8, H / 2);
     }
 
     /* 播放头 */
@@ -240,7 +241,7 @@ export function createLane(descriptor) {
           if (orig && Math.abs(v - orig[1]) > 1e-9) changes.push([i, v]);
         });
         if (changes.length) {
-          descriptor.commitBars(changes, changes.length > 1 ? ('批量设置 ' + changes.length + ' 音') : '设置力度');
+          descriptor.commitBars(changes, changes.length > 1 ? (t('批量设置 ') + changes.length + t(' 音')) : t('设置力度'));
         }
       }
       draw();
@@ -285,7 +286,7 @@ export function createLane(descriptor) {
       draw();
       return;
     }
-    descriptor.commit(sortedWith(pts, tOfC(e.offsetX), vOfY(e.offsetY)), '加点');
+    descriptor.commit(sortedWith(pts, tOfC(e.offsetX), vOfY(e.offsetY)), t('加点'));
   }
 
   function onMove(e) {
@@ -307,7 +308,7 @@ export function createLane(descriptor) {
       if (d.idx >= 0 && d.idx < pts.length) {
         const next = pts.map((q, i) => (i === d.idx ? [d.t, d.v] : [q[0], q[1]]));
         next.sort((a, b) => a[0] - b[0]);
-        descriptor.commit(next, '移动');
+        descriptor.commit(next, t('移动'));
       }
     }
     draw();
@@ -317,7 +318,7 @@ export function createLane(descriptor) {
     const idx = nearest(e.offsetX, e.offsetY);
     if (idx < 0) return false;
     const pts = descriptor.readPoints().filter((_, i) => i !== idx);
-    descriptor.commit(pts, '删除');
+    descriptor.commit(pts, t('删除'));
     return true;
   }
 

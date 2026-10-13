@@ -1,4 +1,5 @@
 /* timeline.js —— 时间标尺（小节/拍/秒）+ 轨道头面板（M1b：色条/名/参数控件/选中）+ 乐句 segments 底条 */
+import { t } from './i18n.js';
 
 import { bus } from './events.js';
 import { api } from './api.js';
@@ -121,7 +122,7 @@ export function draw() {
   ctx.fillRect(0, 0, KEYS_W, H);
   ctx.fillStyle = p.keyLabel;
   ctx.font = '10px sans-serif';
-  ctx.fillText('小节', 6, H - 6);
+  ctx.fillText(t('小节'), 6, H - 6);
 }
 
 /* ---- 轨道头面板（DOM；修正轮2：去推子 + 单击选中 / Ctrl 多选 / 双击进单轨） ---- */
@@ -131,9 +132,9 @@ let onEnter = null;   // 双击回调（main.js 注入）
 async function postMix(ti, value, label) {
   if (!store.project) return;
   try {
-    const r = await api.postBatch(store.project, label, [{ op: 'set_track_mix', track: ti, value }], '参数：' + label);
-    if (r.applied) bus.dispatch('toast', '已更新 ' + label + ' ' + refTag(r));
-    else setError('被拒：' + (r.errors || []).join('；'));
+    const r = await api.postBatch(store.project, label, [{ op: 'set_track_mix', track: ti, value }], t('参数：') + label);
+    if (r.applied) bus.dispatch('toast', t('已更新 ') + label + ' ' + refTag(r));
+    else setError(t('被拒：') + (r.errors || []).join('；'));
   } catch (e) { setError(e.message); }
 }
 
@@ -152,14 +153,14 @@ function markSelected(el) {
 function trackAddBtn() {
   const add = document.createElement('button');
   add.className = 'track-add';
-  add.textContent = '＋ 新建轨道';
-  add.title = '新建一条空白 MIDI 轨（双击进入单轨视图画音符；走命令层可撤销）';
+  add.textContent = t('＋ 新建轨道');
+  add.title = t('新建一条空白 MIDI 轨（双击进入单轨视图画音符；走命令层可撤销）');
   add.addEventListener('click', async () => {
-    if (!store.project) { setError('先打开一个工程'); return; }
+    if (!store.project) { setError(t('先打开一个工程')); return; }
     try {
-      const r = await api.postBatch(store.project, '新建轨道', [{ op: 'add_track', value: {} }], null);
-      if (!r.applied) setError('被拒：' + (r.errors || []).join('；'));
-      else bus.dispatch('toast', '已新建轨道（双击选中它进单轨画音符）');
+      const r = await api.postBatch(store.project, t('新建轨道'), [{ op: 'add_track', value: {} }], null);
+      if (!r.applied) setError(t('被拒：') + (r.errors || []).join('；'));
+      else bus.dispatch('toast', t('已新建轨道（双击选中它进单轨画音符）'));
     } catch (e) { setError(e.message); }
   });
   return add;
@@ -235,13 +236,13 @@ async function dropTrackAt(el, from, overTi, before) {
   const to = Math.max(0, Math.min(insert - (insert > from ? 1 : 0), store.score.tracks.length - 1));
   if (to === from) return;
   try {
-    const r = await api.postBatch(store.project, '拖动排序',
-      [{ op: 'move_track', track: from, value: { to } }], '拖动排序：轨 ' + from + ' → ' + to);
+    const r = await api.postBatch(store.project, t('拖动排序'),
+      [{ op: 'move_track', track: from, value: { to } }], t('拖动排序：轨 ') + from + ' → ' + to);
     if (r.applied) {
       remapTrackStates(from, to);
-      bus.dispatch('toast', '轨已移动（可撤销）');
+      bus.dispatch('toast', t('轨已移动（可撤销）'));
       bus.dispatch('state');
-    } else setError('被拒：' + (r.errors || []).join('；'));
+    } else setError(t('被拒：') + (r.errors || []).join('；'));
   } catch (e) { setError(e.message); }
 }
 
@@ -250,10 +251,10 @@ async function joinFolder(ti, folder) {
   const curF = (store.score.tracks[ti] || {}).folder || '';
   if (curF === folder) return;
   try {
-    const r = await api.postBatch(store.project, '拖入文件夹',
-      [{ op: 'set_track_folder', track: ti, value: { folder } }], '拖入文件夹：' + folder);
-    if (r.applied) bus.dispatch('toast', '已拖入文件夹「' + folder + '」（可再拖动排序）');
-    else setError('被拒：' + (r.errors || []).join('；'));
+    const r = await api.postBatch(store.project, t('拖入文件夹'),
+      [{ op: 'set_track_folder', track: ti, value: { folder } }], t('拖入文件夹：') + folder);
+    if (r.applied) bus.dispatch('toast', t('已拖入文件夹「') + folder + t('」（可再拖动排序）'));
+    else setError(t('被拒：') + (r.errors || []).join('；'));
   } catch (e) { setError(e.message); }
 }
 
@@ -269,10 +270,10 @@ async function reorderFolder(srcFolder, overFolder, before) {
   rest.forEach((t, i) => { if (isOver(t)) lastOver = i; });
   const to = before ? firstOver : lastOver + 1;
   try {
-    const r = await api.postBatch(store.project, '文件夹排序',
-      [{ op: 'move_folder', value: { folder: srcFolder, to } }], '文件夹排序：' + srcFolder + ' → ' + overFolder + (before ? ' 前' : ' 后'));
-    if (r.applied) bus.dispatch('toast', '文件夹「' + srcFolder + '」已整体移动');
-    else setError('被拒：' + (r.errors || []).join('；'));
+    const r = await api.postBatch(store.project, t('文件夹排序'),
+      [{ op: 'move_folder', value: { folder: srcFolder, to } }], t('文件夹排序：') + srcFolder + ' → ' + overFolder + (before ? t(' 前') : t(' 后')));
+    if (r.applied) bus.dispatch('toast', t('文件夹「') + srcFolder + t('」已整体移动'));
+    else setError(t('被拒：') + (r.errors || []).join('；'));
   } catch (e) { setError(e.message); }
 }
 
@@ -285,12 +286,12 @@ async function leaveToEnd(ti) {
   if (ti !== n - 1) cmds.push({ op: 'move_track', track: ti, value: { to: n - 1 } });
   if (!cmds.length) return;
   try {
-    const r = await api.postBatch(store.project, '拖出/置底', cmds, '拖出/置底');
+    const r = await api.postBatch(store.project, t('拖出/置底'), cmds, t('拖出/置底'));
     if (r.applied) {
       if (ti !== n - 1) remapTrackStates(ti, n - 1);
-      bus.dispatch('toast', '已移到列表末尾（并移出文件夹）');
+      bus.dispatch('toast', t('已移到列表末尾（并移出文件夹）'));
       bus.dispatch('state');
-    } else setError('被拒：' + (r.errors || []).join('；'));
+    } else setError(t('被拒：') + (r.errors || []).join('；'));
   } catch (e) { setError(e.message); }
 }
 
@@ -300,7 +301,7 @@ function renderTracks(el) {
     const d = document.createElement('div');
     d.className = 'muted small';
     d.style.padding = '0 10px';
-    d.textContent = '（无音轨）';
+    d.textContent = t('（无音轨）');
     el.appendChild(d);
     el.appendChild(trackAddBtn());
     return;
@@ -328,11 +329,11 @@ function renderTracks(el) {
       const collapsed = store.collapsedFolders.has(tr.folder);
       tg.className = 'fold-toggle';
       tg.textContent = collapsed ? '▸' : '▾';
-      tg.title = collapsed ? '展开文件夹' : '折叠文件夹';
+      tg.title = collapsed ? t('展开文件夹') : t('折叠文件夹');
       tg.addEventListener('click', (e) => { e.stopPropagation(); toggleFolderCollapse(tr.folder); });
       const nm = document.createElement('span');
       nm.className = 'fold-name';
-      nm.textContent = '📁 ' + tr.folder + '（' + folderTracks(tr.folder).length + ' 轨）';
+      nm.textContent = '📁 ' + tr.folder + t('（') + folderTracks(tr.folder).length + t(' 轨）');
       l1.appendChild(tg);
       l1.appendChild(nm);
       /* v0.2 C2（F6，闸门 G3）：文件夹行内联 M/S + 音量（最小形态；VCA 式不动路由） */
@@ -340,18 +341,18 @@ function renderTracks(el) {
       const fm = document.createElement('button');
       fm.className = 'ms' + (fd.mute ? ' on' : '');
       fm.textContent = 'M';
-      fm.title = '文件夹静音（成员轨；VCA 式）';
+      fm.title = t('文件夹静音（成员轨；VCA 式）');
       fm.addEventListener('click', (e) => { e.stopPropagation(); postFolderMix(tr.folder, { mute: !fd.mute }); });
       const fs = document.createElement('button');
       fs.className = 'ms solo' + (fd.solo ? ' on' : '');
       fs.textContent = 'S';
-      fs.title = '文件夹独奏（成员轨；VCA 式）';
+      fs.title = t('文件夹独奏（成员轨；VCA 式）');
       fs.addEventListener('click', (e) => { e.stopPropagation(); postFolderMix(tr.folder, { solo: !fd.solo }); });
       const fv = document.createElement('input');
       fv.type = 'number'; fv.min = '0'; fv.max = '2'; fv.step = '0.05';
       fv.className = 'fold-vol';
       fv.value = (fd.volume == null ? 1 : fd.volume);
-      fv.title = '文件夹音量乘子（0~2）';
+      fv.title = t('文件夹音量乘子（0~2）');
       fv.addEventListener('click', (e) => e.stopPropagation());
       fv.addEventListener('change', () => postFolderMix(tr.folder, { volume: Number(fv.value) }));
       l2.appendChild(fm);
@@ -359,7 +360,7 @@ function renderTracks(el) {
       l2.appendChild(fv);
       hd.appendChild(l1);
       hd.appendChild(l2);
-      hd.title = '单击：选中该文件夹（M 键给它建旗）｜ ▾ 折叠/展开 ｜ M/S/音量：文件夹层（VCA）｜ 拖动：整体排序';
+      hd.title = t('单击：选中该文件夹（M 键给它建旗）｜ ▾ 折叠/展开 ｜ M/S/音量：文件夹层（VCA）｜ 拖动：整体排序');
       /* v0.2 批C 后段（P5）：文件夹整块拖排序（成员连续化不变量）+ 接受轨拖入 */
       hd.draggable = true;
       hd.addEventListener('dragstart', (e) => {
@@ -451,7 +452,7 @@ function renderTracks(el) {
     const eye = document.createElement('button');
     eye.className = 'track-eye';
     eye.textContent = store.hiddenTracks.has(ti) ? '🚫' : '👁';
-    eye.title = '显示/隐藏该轨';
+    eye.title = t('显示/隐藏该轨');
     eye.onclick = (e) => {
       e.stopPropagation();
       if (store.hiddenTracks.has(ti)) store.hiddenTracks.delete(ti);
@@ -464,7 +465,7 @@ function renderTracks(el) {
       const lt = document.createElement('button');
       lt.className = 'lane-toggle';
       lt.textContent = store.collapsedLanes.has(ti) ? '▸' : '▾';
-      lt.title = '展开/折叠自动化道（' + lanesOfTr.length + '）';
+      lt.title = t('展开/折叠自动化道（') + lanesOfTr.length + t('）');
       lt.addEventListener('click', (e) => {
         e.stopPropagation();
         if (store.collapsedLanes.has(ti)) store.collapsedLanes.delete(ti); else store.collapsedLanes.add(ti);
@@ -476,17 +477,17 @@ function renderTracks(el) {
     const m = document.createElement('button');
     m.className = 'ms' + (tr.mute ? ' on' : '');
     m.textContent = 'M';
-    m.title = '静音';
-    m.onclick = (e) => { e.stopPropagation(); postMix(ti, { mute: !tr.mute }, tr.mute ? '取消静音' : '静音'); };
+    m.title = t('静音');
+    m.onclick = (e) => { e.stopPropagation(); postMix(ti, { mute: !tr.mute }, tr.mute ? t('取消静音') : t('静音')); };
     const s = document.createElement('button');
     s.className = 'ms solo' + (tr.solo ? ' on' : '');
     s.textContent = 'S';
-    s.title = '独奏';
-    s.onclick = (e) => { e.stopPropagation(); postMix(ti, { solo: !tr.solo }, tr.solo ? '取消独奏' : '独奏'); };
+    s.title = t('独奏');
+    s.onclick = (e) => { e.stopPropagation(); postMix(ti, { solo: !tr.solo }, tr.solo ? t('取消独奏') : t('独奏')); };
     if (isMain || isPartner) {
       const mk = document.createElement('span');
       mk.className = 'tr-mark';
-      mk.textContent = isMain ? '主轨' : '副区';
+      mk.textContent = isMain ? t('主轨') : t('副区');
       top.appendChild(mk);
     }
     top.appendChild(m);
@@ -496,13 +497,13 @@ function renderTracks(el) {
     const sub = document.createElement('div');
     sub.className = 'track-sub';
     const inst = tr.instrument || {};
-    sub.textContent = (inst.program || 'default') + ' · ' + tr.notes.length + ' 音' +
+    sub.textContent = (inst.program || 'default') + ' · ' + tr.notes.length + t(' 音') +
       (tr.bus && tr.bus !== 'master' ? ' · ' + tr.bus : '');
     /* 窄档小字行会隐藏（CSS）→ 信息并进 tooltip */
     item.title = (tr.name || ('track ' + ti)) + ' · ' + sub.textContent +
-      (isMain ? ' ｜ 主轨（单轨写谱中）' : '') + (isPartner ? ' ｜ 副区' : '') +
-      ' ｜ 单击：' + (single ? '上/下副区' : '选中') + ' ｜ Ctrl+单击：' + (single ? '切主（原主降副）' : '参照层') +
-      ' ｜ 双击：' + (single ? '独立打开' : '进入单轨写谱') + ' ｜ 右键：轨道菜单';
+      (isMain ? t(' ｜ 主轨（单轨写谱中）') : '') + (isPartner ? t(' ｜ 副区') : '') +
+      t(' ｜ 单击：') + (single ? t('上/下副区') : t('选中')) + t(' ｜ Ctrl+单击：') + (single ? t('切主（原主降副）') : t('参照层')) +
+      t(' ｜ 双击：') + (single ? t('独立打开') : t('进入单轨写谱')) + t(' ｜ 右键：轨道菜单');
 
     body.appendChild(top);
     body.appendChild(sub);
@@ -534,52 +535,52 @@ function renderTracks(el) {
       openBmMenu(e.clientX, e.clientY, [
         /* E3 段2：音频轨 → 转乐谱（挂「哼唱快车道」链并切到处理链面板） */
         ...(tr.kind === 'audio' ? [{
-          label: '转乐谱…（实验性）',
+          label: t('转乐谱…（实验性）'),
           fn: () => bus.dispatch('voice2score', { track: ti }),
         }] : []),
         {
-          label: '文件夹归属…',
+          label: t('文件夹归属…'),
           fn: () => {
-            const v0 = prompt('归入文件夹（留空 = 移出；单层，不嵌套）：', cur);
+            const v0 = prompt(t('归入文件夹（留空 = 移出；单层，不嵌套）：'), cur);
             if (v0 === null) return;
             const v = v0.trim();
             if (v === cur) return;
-            api.postBatch(store.project, '文件夹归属', [{ op: 'set_track_folder', track: ti, value: { folder: v } }], null)
+            api.postBatch(store.project, t('文件夹归属'), [{ op: 'set_track_folder', track: ti, value: { folder: v } }], null)
               .then((r) => {
-                if (r.applied) bus.dispatch('toast', '「' + tname + '」→ ' + (v || '（无文件夹）'));
-                else setError('被拒：' + (r.errors || []).join('；'));
+                if (r.applied) bus.dispatch('toast', '「' + tname + '」→ ' + (v || t('（无文件夹）')));
+                else setError(t('被拒：') + (r.errors || []).join('；'));
               })
               .catch((err) => setError(err.message));
           },
         },
         {
-          label: '添加自动化道…',
+          label: t('添加自动化道…'),
           fn: () => openBmMenu(e.clientX, e.clientY, lanePickerItems(ti, tr)),
         },
         {
-          label: '重命名…',
+          label: t('重命名…'),
           fn: () => {
-            const v0 = prompt('新轨道名：', tr.name || '');
+            const v0 = prompt(t('新轨道名：'), tr.name || '');
             if (v0 === null) return;
             const v = v0.trim();
             if (!v || v === tr.name) return;
-            api.postBatch(store.project, '重命名轨道', [{ op: 'rename_track', track: ti, value: { name: v } }], null)
+            api.postBatch(store.project, t('重命名轨道'), [{ op: 'rename_track', track: ti, value: { name: v } }], null)
               .then((r) => {
-                if (r.applied) bus.dispatch('toast', '轨道已改名：' + tname + ' → ' + v);
-                else setError('被拒：' + (r.errors || []).join('；'));
+                if (r.applied) bus.dispatch('toast', t('轨道已改名：') + tname + ' → ' + v);
+                else setError(t('被拒：') + (r.errors || []).join('；'));
               })
               .catch((err) => setError(err.message));
           },
         },
         {
-          label: '删除轨道',
+          label: t('删除轨道'),
           fn: () => {
-            if (!confirm('删除轨道「' + tname + '」？' + (nTracks <= 1 ? '（最后一条音轨，工程将变空！）' : '') +
-                         '（书签引用一并清理；可 Ctrl+Z 撤销）')) return;
-            api.postBatch(store.project, '删除轨道', [{ op: 'remove_track', track: ti }], null)
+            if (!confirm(t('删除轨道「') + tname + '」？' + (nTracks <= 1 ? t('（最后一条音轨，工程将变空！）') : '') +
+                         t('（书签引用一并清理；可 Ctrl+Z 撤销）'))) return;
+            api.postBatch(store.project, t('删除轨道'), [{ op: 'remove_track', track: ti }], null)
               .then((r) => {
-                if (!r.applied) { setError('被拒：' + (r.errors || []).join('；')); return; }
-                bus.dispatch('toast', '已删除「' + tname + '」（可 Ctrl+Z 撤销）');
+                if (!r.applied) { setError(t('被拒：') + (r.errors || []).join('；')); return; }
+                bus.dispatch('toast', t('已删除「') + tname + t('」（可 Ctrl+Z 撤销）'));
                 /* 索引校正：删除后原 ti+1 起前移；主轨/选中轨按删位更新（防脏索引渲染） */
                 const newCount = Math.max(0, nTracks - 1);
                 const fix = (i) => (i === ti ? Math.min(ti, Math.max(0, newCount - 1)) : (i > ti ? i - 1 : i));
@@ -605,13 +606,13 @@ function renderTracks(el) {
         lr.className = 'lane-row';
         lr.dataset.param = l.param;
         lr.textContent = '⤷ ' + l.label;
-        lr.title = '道「' + l.label + '」｜ 单击：定位道栈 ｜ 双击：入副区（全宽曲线）｜ 右键：删除道';
+        lr.title = t('道「') + l.label + t('」｜ 单击：定位道栈 ｜ 双击：入副区（全宽曲线）｜ 右键：删除道');
         lr.addEventListener('click', (e) => { e.stopPropagation(); locateLane(ti, l.param); });
         lr.addEventListener('dblclick', (e) => { e.stopPropagation(); enterLanePartner(ti, l.param); });
         lr.addEventListener('contextmenu', (e) => {
           e.preventDefault();
           e.stopPropagation();
-          openBmMenu(e.clientX, e.clientY, [{ label: '删除道「' + l.label + '」（曲线数据保留）', fn: () => removeLaneOp(ti, l) }]);
+          openBmMenu(e.clientX, e.clientY, [{ label: t('删除道「') + l.label + t('」（曲线数据保留）'), fn: () => removeLaneOp(ti, l) }]);
         });
         el.appendChild(lr);
       }
@@ -649,14 +650,14 @@ function renderTracks(el) {
 async function addLaneOp(ti, param, label) {
   if (!store.project) return;
   try {
-    const r = await api.postBatch(store.project, '添加自动化道',
+    const r = await api.postBatch(store.project, t('添加自动化道'),
       [{ op: 'add_lane', track: ti, value: { param } }],
-      '添加自动化道：' + (label || param));
+      t('添加自动化道：') + (label || param));
     if (r.applied) {
-      bus.dispatch('toast', '已建道：' + (label || param) + '（下方道栈可编辑）');
+      bus.dispatch('toast', t('已建道：') + (label || param) + t('（下方道栈可编辑）'));
       if (store.collapsedLanes.has(ti)) store.collapsedLanes.delete(ti);
       setAutoLane({ open: true, param });
-    } else setError('被拒：' + (r.errors || []).join('；'));
+    } else setError(t('被拒：') + (r.errors || []).join('；'));
   } catch (e) { setError(e.message); }
 }
 
@@ -665,18 +666,18 @@ function velocityToggle(ti) {
   const on = toggleVelocityLane(ti);
   if (on) {
     setAutoLane({ open: true, param: 'velocity' });
-    bus.dispatch('toast', '已开力度道（柱状）——单轨视图道栈中编辑；再点菜单项关闭');
-  } else bus.dispatch('toast', '已关力度道');
+    bus.dispatch('toast', t('已开力度道（柱状）——单轨视图道栈中编辑；再点菜单项关闭'));
+  } else bus.dispatch('toast', t('已关力度道'));
 }
 
 async function removeLaneOp(ti, lane) {
   if (!store.project) return;
   try {
-    const r = await api.postBatch(store.project, '移除自动化道',
+    const r = await api.postBatch(store.project, t('移除自动化道'),
       [{ op: 'remove_lane', track: ti, value: { id: lane.id || lane.param } }],
-      '移除自动化道：' + lane.label);
-    if (r.applied) bus.dispatch('toast', '已移除道「' + lane.label + '」（曲线数据保留，可 Ctrl+Z 撤销）');
-    else setError('被拒：' + (r.errors || []).join('；'));
+      t('移除自动化道：') + lane.label);
+    if (r.applied) bus.dispatch('toast', t('已移除道「') + lane.label + t('」（曲线数据保留，可 Ctrl+Z 撤销）'));
+    else setError(t('被拒：') + (r.errors || []).join('；'));
   } catch (e) { setError(e.message); }
 }
 
@@ -690,12 +691,12 @@ function lanePickerItems(ti, tr) {
   const items = [];
   for (const k of auto) {
     const lab = (specs && specs[k] && specs[k].label) || paramLabel(k);
-    if (bound.has(k)) items.push({ label: '✓ ' + lab + '（已建道）', disabled: true });
+    if (bound.has(k)) items.push({ label: '✓ ' + lab + t('（已建道）'), disabled: true });
     else items.push({ label: '＋ ' + lab, fn: () => addLaneOp(ti, k, lab) });
   }
   /* v0.2 批C 后段：力度道（bars 伪道开关；零存储——数据 = Note.velocity） */
-  if (hasVelocityLane(ti)) items.push({ label: '✓ 力度（柱状·已开·点击关闭）', fn: () => velocityToggle(ti) });
-  else items.push({ label: '＋ 力度（柱状编辑）', fn: () => velocityToggle(ti) });
+  if (hasVelocityLane(ti)) items.push({ label: t('✓ 力度（柱状·已开·点击关闭）'), fn: () => velocityToggle(ti) });
+  else items.push({ label: t('＋ 力度（柱状编辑）'), fn: () => velocityToggle(ti) });
   const fxSpecs = (store.metaParams && store.metaParams.effects) || {};
   const chain = ((tr.instrument || {}).effects) || [];
   let nFx = 0;
@@ -704,10 +705,10 @@ function lanePickerItems(ti, tr) {
     const table = fxSpecs[kind] || {};
     for (const pk of Object.keys(table)) {
       nFx += 1;
-      items.push({ label: '⛔ ' + pk + ' · ' + kind + '（随效果域深化）', disabled: true });
+      items.push({ label: '⛔ ' + pk + ' · ' + kind + t('（随效果域深化）'), disabled: true });
     }
   }
-  if (!nFx) items.push({ label: '⛔ 效果参数（随效果域深化）', disabled: true });
+  if (!nFx) items.push({ label: t('⛔ 效果参数（随效果域深化）'), disabled: true });
   return items;
 }
 
@@ -731,11 +732,11 @@ function locateLane(ti, param) {
 async function postFolderMix(name, patchV) {
   if (!store.project) return;
   try {
-    const r = await api.postBatch(store.project, '文件夹混音',
+    const r = await api.postBatch(store.project, t('文件夹混音'),
       [{ op: 'set_folder_mix', value: Object.assign({ folder: name }, patchV) }],
-      '文件夹混音：' + name + ' ' + JSON.stringify(patchV));
-    if (r.applied) bus.dispatch('toast', '文件夹「' + name + '」已更新 ' + refTag(r));
-    else setError('被拒：' + (r.errors || []).join('；'));
+      t('文件夹混音：') + name + ' ' + JSON.stringify(patchV));
+    if (r.applied) bus.dispatch('toast', t('文件夹「') + name + t('」已更新 ') + refTag(r));
+    else setError(t('被拒：') + (r.errors || []).join('；'));
   } catch (e) { setError(e.message); }
 }
 
@@ -745,7 +746,7 @@ function enterLanePartner(ti, param) {
     setPartnerLane(ti, param);
     const raw = store.partner;
     const on = !!(raw && raw.kind === 'lane' && raw.ti === ti && raw.param === param);
-    bus.dispatch('toast', on ? '道「' + param + '」入副区' : '已撤下道副区');
+    bus.dispatch('toast', on ? t('道「') + param + t('」入副区') : t('已撤下道副区'));
   };
   if (store.viewMode !== 'single' || store.singleTrack !== ti) {
     if (onEnter) onEnter(ti);
@@ -805,7 +806,7 @@ export function drawMarkers() {
   mctx.fillRect(0, 0, KEYS_W, MH);
   mctx.fillStyle = p.keyLabel;
   mctx.font = '10px sans-serif';
-  mctx.fillText('段', 6, MH - 7);
+  mctx.fillText(t('段'), 6, MH - 7);
 
   let si = 0;
   projectMarks().forEach(({ b, i }) => {
@@ -824,7 +825,7 @@ export function drawMarkers() {
       mctx.save();
       mctx.beginPath(); mctx.rect(a + 2, 1, Math.max(1, c - a - 4), MH - 2); mctx.clip();
       mctx.fillStyle = p.rulerText;
-      mctx.fillText(b.label || ('段 ' + si), a + 5, MH - 7);
+      mctx.fillText(b.label || (t('段 ') + si), a + 5, MH - 7);
       mctx.restore();
     } else {
       if (x0 < KEYS_W || x0 > MW) return;
@@ -834,7 +835,7 @@ export function drawMarkers() {
       mctx.closePath(); mctx.fill();
       mctx.save();
       mctx.beginPath(); mctx.rect(x0, 0, Math.max(1, MW - x0), MH); mctx.clip();
-      mctx.fillText(b.label || '记号', x0 + 10, 13);
+      mctx.fillText(b.label || t('记号'), x0 + 10, 13);
       mctx.restore();
     }
   });
@@ -901,7 +902,7 @@ export function openRenameAt(i, anchorClientX, anchorClientY) {
   const inp = document.createElement('input');
   inp.className = 'mk-rename';
   inp.value = bms[i].label || '';
-  inp.placeholder = '名称（回车确认 / Esc 取消）';
+  inp.placeholder = t('名称（回车确认 / Esc 取消）');
   inp.style.left = Math.max(8, Math.min(anchorClientX, window.innerWidth - 240)) + 'px';
   inp.style.top = Math.max(8, anchorClientY) + 'px';
   document.body.appendChild(inp);
@@ -915,7 +916,7 @@ export function openRenameAt(i, anchorClientX, anchorClientY) {
     inp.remove();
     if (commit) {
       const r = await patchBookmark(i, { label: v });
-      if (r && r.applied) bus.dispatch('toast', '已命名：' + (v || '（空）'));
+      if (r && r.applied) bus.dispatch('toast', t('已命名：') + (v || t('（空）')));
     }
   };
   inp.addEventListener('keydown', (e) => {
@@ -929,8 +930,8 @@ export function openRenameAt(i, anchorClientX, anchorClientY) {
 async function patchBookmark(i, value) {
   if (!store.project) return null;
   try {
-    const r = await api.postBatch(store.project, '书签调整', [{ op: 'set_bookmark', track: 0, index: i, value }], null);
-    if (!r.applied) setError('被拒：' + (r.errors || []).join('；'));
+    const r = await api.postBatch(store.project, t('书签调整'), [{ op: 'set_bookmark', track: 0, index: i, value }], null);
+    if (!r.applied) setError(t('被拒：') + (r.errors || []).join('；'));
     return r;
   } catch (e) { setError(e.message); return null; }
 }
@@ -938,11 +939,11 @@ async function patchBookmark(i, value) {
 async function removeBookmarkAt(i) {
   const bms = bookmarks();
   if (!(i >= 0 && i < bms.length)) return;
-  if (!confirm('删除书签「' + (bms[i].label || '（未命名）') + '」？')) return;
+  if (!confirm(t('删除书签「') + (bms[i].label || t('（未命名）')) + '」？')) return;
   try {
-    const r = await api.postBatch(store.project, '删除书签', [{ op: 'remove_bookmark', track: 0, index: i }], null);
-    if (!r.applied) setError('被拒：' + (r.errors || []).join('；'));
-    else { setSelBookmark(-1); bus.dispatch('toast', '已删除书签'); }
+    const r = await api.postBatch(store.project, t('删除书签'), [{ op: 'remove_bookmark', track: 0, index: i }], null);
+    if (!r.applied) setError(t('被拒：') + (r.errors || []).join('；'));
+    else { setSelBookmark(-1); bus.dispatch('toast', t('已删除书签')); }
   } catch (e) { setError(e.message); }
 }
 
@@ -953,23 +954,23 @@ export function loopFromBookmark(i) {
   if (b.kind === 'section' && b.end != null) {
     setLoop({ start: b.start, end: b.end });
     setLoopOn(true);
-    bus.dispatch('toast', '循环区间：' + b.start.toFixed(1) + '–' + b.end.toFixed(1) + 's');
+    bus.dispatch('toast', t('循环区间：') + b.start.toFixed(1) + '–' + b.end.toFixed(1) + 's');
   } else {
     setLoop(null);
     setLoopOn(false);
-    bus.dispatch('toast', '记号不是区间，已清除循环');
+    bus.dispatch('toast', t('记号不是区间，已清除循环'));
   }
 }
 
 async function addProjectMark() {
   if (!store.project || !store.score) return;
   const len = bookmarks().length;
-  const t = round3(Math.max(0, store.playhead));
+  const ts = round3(Math.max(0, store.playhead));
   try {
-    const r = await api.postBatch(store.project, '项目记号', [{ op: 'add_bookmark', track: 0, value: { scope: 'project', kind: 'mark', start: t, label: '' } }], null);
-    if (!r.applied) { setError('被拒：' + (r.errors || []).join('；')); return; }
+    const r = await api.postBatch(store.project, t('项目记号'), [{ op: 'add_bookmark', track: 0, value: { scope: 'project', kind: 'mark', start: ts, label: '' } }], null);
+    if (!r.applied) { setError(t('被拒：') + (r.errors || []).join('；')); return; }
     const rr = mcanvas.getBoundingClientRect();
-    openRenameAt(len, rr.left + xOf(t) + 4, rr.top - 30);
+    openRenameAt(len, rr.left + xOf(ts) + 4, rr.top - 30);
   } catch (e) { setError(e.message); }
 }
 
@@ -1039,8 +1040,8 @@ export function initMarkers(markersCanvas) {
       if (c.end - c.start < 0.15) return;
       const len = bookmarks().length;  // 追加在尾部 → 新下标
       try {
-        const r = await api.postBatch(store.project, '新建乐段', [{ op: 'add_bookmark', track: 0, value: { scope: 'project', kind: 'section', start: round3(c.start), end: round3(c.end), label: '' } }], null);
-        if (!r.applied) { setError('被拒：' + (r.errors || []).join('；')); return; }
+        const r = await api.postBatch(store.project, t('新建乐段'), [{ op: 'add_bookmark', track: 0, value: { scope: 'project', kind: 'section', start: round3(c.start), end: round3(c.end), label: '' } }], null);
+        if (!r.applied) { setError(t('被拒：') + (r.errors || []).join('；')); return; }
         openRenameAt(len, e.clientX + 6, e.clientY - 30);
       } catch (err) { setError(err.message); }
       return;
@@ -1061,16 +1062,16 @@ export function initMarkers(markersCanvas) {
     const i = sectionAt(e.offsetX);
     const mi = (i >= 0) ? i : markAt(e.offsetX);
     if (mi < 0) {
-      openBmMenu(e.clientX, e.clientY, [{ label: '在播放轴建记号', fn: addProjectMark }]);
+      openBmMenu(e.clientX, e.clientY, [{ label: t('在播放轴建记号'), fn: addProjectMark }]);
       return;
     }
     setSelBookmark(mi);
     const b = bookmarks()[mi];
     const r = mcanvas.getBoundingClientRect();
-    const items = [{ label: '跳转', fn: () => seekTo(b.start) }];
-    if (b.kind === 'section') items.push({ label: '循环此段', fn: () => loopFromBookmark(mi) });
-    items.push({ label: '改名…', fn: () => openRenameAt(mi, r.left + xOf(b.start) + 4, r.top - 30) });
-    items.push({ label: '删除', fn: () => removeBookmarkAt(mi) });
+    const items = [{ label: t('跳转'), fn: () => seekTo(b.start) }];
+    if (b.kind === 'section') items.push({ label: t('循环此段'), fn: () => loopFromBookmark(mi) });
+    items.push({ label: t('改名…'), fn: () => openRenameAt(mi, r.left + xOf(b.start) + 4, r.top - 30) });
+    items.push({ label: t('删除'), fn: () => removeBookmarkAt(mi) });
     openBmMenu(e.clientX, e.clientY, items);
   });
 }
@@ -1092,10 +1093,10 @@ export function init(rulerCanvas, trackListEl, segmentsInfoEl, metaInfoEl, opts)
   canvas.addEventListener('contextmenu', (e) => { if (e.clientX - canvas.getBoundingClientRect().left >= KEYS_W) e.preventDefault(); });
   canvas.addEventListener('mousedown', (e) => {
     if (e.offsetX < KEYS_W) return;
-    const t = Math.max(0, tOf(e.offsetX));
+    const tp = Math.max(0, tOf(e.offsetX));
     if (e.button === 0) {                     /* 左键：按下即定位；拖动持续跟手（同一 seekTo 逻辑） */
-      rdrag = { mode: 'seek', t0: t, last: 0 };
-      seekTo(t);
+      rdrag = { mode: 'seek', t0: tp, last: 0 };
+      seekTo(tp);
       return;
     }
     if (e.button !== 2) return;
@@ -1106,7 +1107,7 @@ export function init(rulerCanvas, trackListEl, segmentsInfoEl, metaInfoEl, opts)
       if (L0 && e.offsetX >= xOf(L0.start) && e.offsetX <= xOf(L0.end)) {
         setLoop(null);
         setLoopOn(false);
-        bus.dispatch('toast', '已清除循环区间');
+        bus.dispatch('toast', t('已清除循环区间'));
       }
       return;
     }
@@ -1114,11 +1115,11 @@ export function init(rulerCanvas, trackListEl, segmentsInfoEl, metaInfoEl, opts)
     const L = store.loop;                     /* 右键：把手 / 整段 / 新建 */
     if (L) {
       const xa = xOf(L.start), xb = xOf(L.end);
-      if (Math.abs(e.offsetX - xa) <= 5) { rdrag = { mode: 'a', t0: t, loop0: { start: L.start, end: L.end }, moved: false }; return; }
-      if (Math.abs(e.offsetX - xb) <= 5) { rdrag = { mode: 'b', t0: t, loop0: { start: L.start, end: L.end }, moved: false }; return; }
-      if (e.offsetX > xa + 5 && e.offsetX < xb - 5) { rdrag = { mode: 'move', t0: t, loop0: { start: L.start, end: L.end }, moved: false }; return; }
+      if (Math.abs(e.offsetX - xa) <= 5) { rdrag = { mode: 'a', t0: tp, loop0: { start: L.start, end: L.end }, moved: false }; return; }
+      if (Math.abs(e.offsetX - xb) <= 5) { rdrag = { mode: 'b', t0: tp, loop0: { start: L.start, end: L.end }, moved: false }; return; }
+      if (e.offsetX > xa + 5 && e.offsetX < xb - 5) { rdrag = { mode: 'move', t0: tp, loop0: { start: L.start, end: L.end }, moved: false }; return; }
     }
-    rdrag = { mode: 'new', t0: snapT(t, e), moved: false };
+    rdrag = { mode: 'new', t0: snapT(tp, e), moved: false };
   });
   window.addEventListener('mousemove', (e) => {
     if (!rdrag) return;
@@ -1168,13 +1169,13 @@ export function init(rulerCanvas, trackListEl, segmentsInfoEl, metaInfoEl, opts)
     const segs = segments();
     segmentsInfoEl.textContent = segs.length
       ? segs.map((s) => (s.start.toFixed(1) + '-' + s.end.toFixed(1) + 's ' + (s.type || ''))).join('；')
-      : '（无）';
+      : t('（无）');
     const sc = store.score;
     metaInfoEl.textContent = sc
       ? 'tempo ' + Math.round(sc.tempo) + ' · ' + (sc.time_signature || '4/4') + ' · ' +
-        (sc.key_candidates.length ? sc.key_candidates.map((k) => k.key).join('/') : '调性未知') +
-        ' · ' + sc.tracks.reduce((a, t) => a + t.notes.length, 0) + ' 音'
-      : '（未打开）';
+        (sc.key_candidates.length ? sc.key_candidates.map((k) => k.key).join('/') : t('调性未知')) +
+        ' · ' + sc.tracks.reduce((a, t) => a + t.notes.length, 0) + t(' 音')
+      : t('（未打开）');
   });
 
   /* 选中变化：只切 class（不重建 DOM，避免打断滑块交互） */

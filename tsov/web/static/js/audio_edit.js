@@ -4,6 +4,7 @@
    手势：拖块=移动 ｜ 拖左右缘=修剪 ｜ 拖顶角=淡入/淡出 ｜ Alt+拖右缘=伸缩（0.5–2.0 保音高）
         剪刀工具单击 / Alt+单击 = 切分（网格吸附；Alt=自由）
    全部落盘经命令层 set_audio_clips / split_audio_clip（ADR-0017 同一动作路径）。 */
+import { t } from './i18n.js';
 
 import { bus } from './events.js';
 import { store, tempo, setError, audioClipsOf } from './state.js';
@@ -93,13 +94,13 @@ export async function splitClipAt(ti, idx, t0, free) {
   const c = audioClipsOf(trk)[idx];
   if (!c) return;
   const at = r6(snapTime(t0, free));
-  if (at <= c.start + 0.002) { setError('切点须在片段内（>= 起点）'); return; }
+  if (at <= c.start + 0.002) { setError(t('切点须在片段内（>= 起点）')); return; }
   try {
-    const r = await api.postBatch(store.project, '切分音频片段',
+    const r = await api.postBatch(store.project, t('切分音频片段'),
       [{ op: 'split_audio_clip', track: ti, value: { clip_id: c.clip_id || '', at } }],
-      '剪刀：切分音频 @ ' + at.toFixed(3) + 's');
-    if (r.applied) bus.dispatch('toast', '已切分音频片段 @ ' + at.toFixed(2) + 's');
-    else setError('被拒：' + (r.errors || []).join('；'));
+      t('剪刀：切分音频 @ ') + at.toFixed(3) + 's');
+    if (r.applied) bus.dispatch('toast', t('已切分音频片段 @ ') + at.toFixed(2) + 's');
+    else setError(t('被拒：') + (r.errors || []).join('；'));
   } catch (e) { setError(e.message); }
 }
 
@@ -165,13 +166,13 @@ export async function finishAudioDrag() {
     fade_in: r6(c.fade_in || 0), fade_out: r6(c.fade_out || 0),
   }));
   const LABEL = {
-    move: '移动音频片段', 'trim-in': '修剪音频片段', 'trim-out': '修剪音频片段',
-    'fade-in': '调整淡入淡出', 'fade-out': '调整淡入淡出', stretch: '伸缩音频片段',
+    move: t('移动音频片段'), 'trim-in': t('修剪音频片段'), 'trim-out': t('修剪音频片段'),
+    'fade-in': t('调整淡入淡出'), 'fade-out': t('调整淡入淡出'), stretch: t('伸缩音频片段'),
   };
   try {
-    const r = await api.postBatch(store.project, LABEL[d.mode] || '编辑音频片段',
+    const r = await api.postBatch(store.project, LABEL[d.mode] || t('编辑音频片段'),
       [{ op: 'set_audio_clips', track: d.ti, value: { clips } }], null);
-    if (!r.applied) setError('被拒：' + (r.errors || []).join('；'));
+    if (!r.applied) setError(t('被拒：') + (r.errors || []).join('；'));
   } catch (e) { setError(e.message); }
   fn();
 }

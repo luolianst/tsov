@@ -1,6 +1,7 @@
 /* playback.js —— 播放：浏览器 wav 试听（驱动播放头）+ 后端宿主播放（sounddevice）
    M-V8 E1：播放轴定位（seekTo/rewind）、循环区间（wav 过界回跳 / 宿主 loop 参数）、
    节拍器（WebAudio 合成，随播放走拍、强拍高音）、停止停在原地（Home 回零点）。 */
+import { t } from './i18n.js';
 
 import { api } from './api.js';
 import { bus } from './events.js';
@@ -209,7 +210,7 @@ export function rewind() {
 /* ---------------- 播放控制 ---------------- */
 
 export async function playWav() {
-  if (!store.project) { setError('先打开一个工程'); return; }
+  if (!store.project) { setError(t('先打开一个工程')); return; }
   ensureMeter();                    // E5：在用户手势内建 AudioContext（autoplay 政策友好）
   const a = ensureAudio();
   const gen = ++playGen;            // E1：本次起播代际（stop/新起播会作废）
@@ -222,7 +223,7 @@ export async function playWav() {
     a.src = api.wavUrl(store.project) + '?v=' + Date.now();
     await new Promise((res, rej) => {
       const ok = () => { a.removeEventListener('loadedmetadata', ok); a.removeEventListener('error', bad); res(); };
-      const bad = () => { a.removeEventListener('loadedmetadata', ok); a.removeEventListener('error', bad); rej(new Error('wav 加载失败（先「渲染」生成试听 wav）')); };
+      const bad = () => { a.removeEventListener('loadedmetadata', ok); a.removeEventListener('error', bad); rej(new Error(t('wav 加载失败（先「渲染」生成试听 wav）'))); };
       a.addEventListener('loadedmetadata', ok);
       a.addEventListener('error', bad);
     });
@@ -236,7 +237,7 @@ export async function playWav() {
     setPlaying('wav');
     ensureRaf();
   } catch (e) {
-    setError('试听失败：' + e.message);
+    setError(t('试听失败：') + e.message);
   }
 }
 
@@ -256,7 +257,7 @@ export async function stopAll() {
 }
 
 export async function playHost() {
-  if (!store.project) { setError('先打开一个工程'); return; }
+  if (!store.project) { setError(t('先打开一个工程')); return; }
   const L = store.loop;
   const body = { start: Math.max(0, store.playhead || 0) };
   if (store.loopOn && L) {
@@ -264,9 +265,9 @@ export async function playHost() {
     body.start = L.start;
   }
   try {
-    toast(body.loop ? ('宿主播放中（循环 ' + L.start.toFixed(1) + '–' + L.end.toFixed(1) + 's，⏹ 停止）…') : '宿主播放中（阻塞到播完）…');
+    toast(body.loop ? (t('宿主播放中（循环 ') + L.start.toFixed(1) + '–' + L.end.toFixed(1) + t('s，⏹ 停止）…')) : t('宿主播放中（阻塞到播完）…'));
     const r = await api.play(store.project, body);
-    toast('宿主播放完毕（' + r.duration + 's）');
+    toast(t('宿主播放完毕（') + r.duration + 's）');
   } catch (e) {
     setError(e.message);
   }
@@ -276,7 +277,7 @@ export async function rerender() {
   if (!store.project) return;
   try {
     const r = await api.render(store.project);
-    toast('已渲染：' + r.wav + '（' + r.duration + 's / ' + r.sr + 'Hz）');
+    toast(t('已渲染：') + r.wav + t('（') + r.duration + 's / ' + r.sr + t('Hz）'));
     if (audio) audio.src = api.wavUrl(store.project) + '?v=' + Date.now();
   } catch (e) { setError(e.message); }
 }
@@ -298,7 +299,7 @@ export async function ensureFresh() {
   try {
     const r = await api.render(store.project);
     const n = (r.rendered || []).length;
-    if (n > 0) toast('已重渲 ' + r.rendered.join('、') + '（' + Math.round(performance.now() - t0) + 'ms）');
+    if (n > 0) toast(t('已重渲 ') + r.rendered.join(t('、')) + t('（') + Math.round(performance.now() - t0) + t('ms）'));
     a.src = api.wavUrl(store.project) + '?v=' + Date.now();
     if (wasPlaying) {
       a.addEventListener('loadedmetadata', () => {
@@ -317,13 +318,13 @@ export function init(opts) {
   /* E1：循环 / 节拍器开关按钮（状态类随 markers 事件同步） */
   const { loopBtn, metroBtn } = opts;
   if (loopBtn) loopBtn.addEventListener('click', () => {
-    if (!store.loop) { setError('先划循环区间：在标尺上右键拖动'); return; }
+    if (!store.loop) { setError(t('先划循环区间：在标尺上右键拖动')); return; }
     setLoopOn(!store.loopOn);
-    toast(store.loopOn ? '循环开（区间 ' + store.loop.start.toFixed(1) + '–' + store.loop.end.toFixed(1) + 's）' : '循环关');
+    toast(store.loopOn ? t('循环开（区间 ') + store.loop.start.toFixed(1) + '–' + store.loop.end.toFixed(1) + 's）' : t('循环关'));
   });
   if (metroBtn) metroBtn.addEventListener('click', () => {
     setMetronome(!store.metronome);
-    toast(store.metronome ? '节拍器开' : '节拍器关');
+    toast(store.metronome ? t('节拍器开') : t('节拍器关'));
   });
   bus.on('markers', () => {
     if (loopBtn) loopBtn.classList.toggle('on', store.loopOn);
@@ -339,7 +340,7 @@ export function init(opts) {
       try { if (localStorage.getItem('tsov.autorender') === '1') scheduleFresh(); } catch (e) { /* 忽略 */ }
     }
   });
-  bus.on('render_progress', (ev) => { if (ev && ev.state === 'render') toast('重渲 ' + ev.name + '…'); });
+  bus.on('render_progress', (ev) => { if (ev && ev.state === 'render') toast(t('重渲 ') + ev.name + '…'); });
 
   /* SSE：后端播放事件驱动播放头动画 */
   bus.on('playback_start', (d) => {

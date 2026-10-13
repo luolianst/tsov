@@ -123,7 +123,7 @@ For the deeper story — why a command layer, why AGPL, how the agent loop works
 
 tsov is young, and honest about it. The full pipeline already runs end to end (hum → transcribed MIDI → agent arrangement → mix → mastered export — see the demo), but:
 
-- **UI is currently Chinese-only.** English i18n is planned for v0.2 — translation help is the single most valuable contribution right now. In the meantime, the [glossary](docs/glossary.md) maps every UI term to English (and to its DAW equivalent).
+- **UI language: Chinese / English (switchable).** Pick 中文 or English under ⚙ Settings → 语言 / Language (or open the app with `?lang=en`). The [glossary](docs/glossary.md) maps every UI term to English (and to its DAW equivalent).
 - **Windows-first.** macOS/Linux are untested.
 - **Prototype quality.** Expect rough edges; breaking changes are possible before v1.0.
 - **The agent needs an LLM key.** Everything else runs offline.

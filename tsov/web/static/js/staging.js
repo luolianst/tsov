@@ -10,6 +10,7 @@
      前端镜像 store.staging / store.tune / store.arrange
    - REST：staging / agents + tune + arrange（各自全套）+ undo
    - __tsovState().staging / .tune / .arrange 暴露给 CDP 断言 */
+import { t } from './i18n.js';
 
 import { bus } from './events.js';
 import { api } from './api.js';
@@ -26,18 +27,18 @@ let tunePlaying = null;    // {url}
 let lastProject = null;
 let chainWasRunning = false;
 
-const STATE_TEXT = { pending: '待处置', adopted: '已采纳', discarded: '已丢弃' };
-const TUNE_STATE_TEXT = { pending: '待处置', adopted: '已应用', discarded: '已丢弃' };
-const KIND_TEXT = { level: '电平', pan: '声像', effect: '效果链' };
+const STATE_TEXT = { pending: t('待处置'), adopted: t('已采纳'), discarded: t('已丢弃') };
+const TUNE_STATE_TEXT = { pending: t('待处置'), adopted: t('已应用'), discarded: t('已丢弃') };
+const KIND_TEXT = { level: t('电平'), pan: t('声像'), effect: t('效果链') };
 const REP_ICON = { ok: '✅', warn: '⚠', bad: '❗', info: 'ℹ' };
 const PACKS = [
-  ['', '通用（平衡口径）'],
-  ['pop-band-standard', '流行乐队'],
-  ['wotaiko-fast-6-8', '和风快步'],
-  ['edm-electro-4-4', '电音'],
-  ['orchestral-basic', '管弦'],
-  ['piano-ballad-duet', '钢琴二重'],
-  ['rock-band', '摇滚'],
+  ['', t('通用（平衡口径）')],
+  ['pop-band-standard', t('流行乐队')],
+  ['wotaiko-fast-6-8', t('和风快步')],
+  ['edm-electro-4-4', t('电音')],
+  ['orchestral-basic', t('管弦')],
+  ['piano-ballad-duet', t('钢琴二重')],
+  ['rock-band', t('摇滚')],
 ];
 
 function el(tag, cls, text) {
@@ -96,9 +97,9 @@ function togglePlay(itemId, file) {
 
 function artifactBtn(item, file) {
   const isPlaying = !!(playing && playing.itemId === item.id && playing.file === file);
-  const label = file.startsWith('01') ? '降噪' : file.startsWith('02') ? '响度' : file;
+  const label = file.startsWith('01') ? t('降噪') : file.startsWith('02') ? t('响度') : file;
   const b = el('button', 'stg-btn stg-play' + (isPlaying ? ' on' : ''),
-               (isPlaying ? '⏸ ' : '▶ ') + '试听·' + label);
+               (isPlaying ? '⏸ ' : '▶ ') + t('试听·') + label);
   b.title = file;
   b.dataset.file = file;
   b.addEventListener('click', () => togglePlay(item.id, file));
@@ -145,12 +146,12 @@ function tuneFileBtn(ts, file, label) {
 
 async function doAdopt(item, btn) {
   if (busy || !store.project) return;
-  busy = true; btn.disabled = true; btn.textContent = '采纳中…';
+  busy = true; btn.disabled = true; btn.textContent = t('采纳中…');
   try {
     const r = await api.stagingAdopt(store.project, item.id);
     bus.dispatch('toast', r.ok
-      ? `已采纳「${item.title}」` + (r.names ? `：${r.names.join(' / ')} 落轨` : '')
-      : '采纳未生效（无改动）');
+      ? t(`已采纳「{p0}」`, { p0: (item.title) }) + (r.names ? t(`：{p0} 落轨`, { p0: (r.names.join(' / ')) }) : '')
+      : t('采纳未生效（无改动）'));
     stopAudio();
     await refreshStaging();
   } catch (e) {
@@ -163,10 +164,10 @@ async function doAdopt(item, btn) {
 
 async function doDiscard(item, btn) {
   if (busy || !store.project) return;
-  busy = true; btn.disabled = true; btn.textContent = '丢弃中…';
+  busy = true; btn.disabled = true; btn.textContent = t('丢弃中…');
   try {
     await api.stagingDiscard(store.project, item.id);
-    bus.dispatch('toast', `已丢弃「${item.title}」（产物保留为历史，工程未动）`);
+    bus.dispatch('toast', t(`已丢弃「{p0}」（产物保留为历史，工程未动）`, { p0: (item.title) }));
     stopAudio();
     await refreshStaging();
   } catch (e) {
@@ -181,11 +182,11 @@ async function doSyncAgents(btn) {
   if (!store.project) return;
   btn.disabled = true;
   const old = btn.textContent;
-  btn.textContent = '同步中…';
+  btn.textContent = t('同步中…');
   try {
     const r = await api.agentsSync(store.project);
     setStagingState({ agents: await api.agentsGet(store.project) });
-    bus.dispatch('toast', '工程上下文已刷新（agents.md ' + (r.project && r.project.created ? '新建' : '更新') + '）');
+    bus.dispatch('toast', t('工程上下文已刷新（agents.md ') + (r.project && r.project.created ? t('新建') : t('更新')) + '）');
     bus.dispatch('agents_synced');   // D 件：对话顶部折叠条重渲染
   } catch (e) {
     setError(String((e && e.message) || e));
@@ -211,12 +212,12 @@ function defaultSelected(batch) {
 
 async function doAnalyze(btn) {
   if (busy || !store.project) return;
-  busy = true; const old = btn.textContent; btn.disabled = true; btn.textContent = '分析中…';
+  busy = true; const old = btn.textContent; btn.disabled = true; btn.textContent = t('分析中…');
   setTuneState({ busy: 'analyze' });
   try {
     const r = await api.tuneAnalyze(store.project, store.tune.pack || '');
     setTuneState({ facts: r.facts });
-    bus.dispatch('toast', '事实包已就绪（结构 / 电平 / 逐段 / 频谱 / 目标）');
+    bus.dispatch('toast', t('事实包已就绪（结构 / 电平 / 逐段 / 频谱 / 目标）'));
   } catch (e) { setError(String((e && e.message) || e)); }
   finally {
     busy = false; setTuneState({ busy: null });
@@ -227,7 +228,7 @@ async function doAnalyze(btn) {
 
 async function doSuggest(btn, context) {
   if (busy || !store.project) return;
-  busy = true; const old = btn.textContent; btn.disabled = true; btn.textContent = '生成中…（< 1 分钟）';
+  busy = true; const old = btn.textContent; btn.disabled = true; btn.textContent = t('生成中…（< 1 分钟）');
   setTuneState({ busy: 'suggest' });
   try {
     const r = await api.tuneSuggest(store.project,
@@ -235,8 +236,8 @@ async function doSuggest(btn, context) {
     const b = r.batch;
     setTuneState({ batch: b, report: null, facts: b.facts || store.tune.facts,
                    selected: defaultSelected(b), loaded: true });
-    bus.dispatch('toast', `建议批次 ${fmtTs(b.batch_ts)}：${(b.suggestions || []).length} 条`
-      + `（已进暂存区，人批才落地）`);
+    bus.dispatch('toast', t(`建议批次 {p0}：{p1} 条`, { p0: (fmtTs(b.batch_ts)), p1: ((b.suggestions || []).length) })
+      + t(`（已进暂存区，人批才落地）`));
     await refreshStaging();
   } catch (e) { setError(String((e && e.message) || e)); }
   finally {
@@ -261,15 +262,15 @@ async function applyBatchCore(ts, ids) {
 }
 
 async function doApply(btn) {
-  const t = store.tune;
-  if (busy || !store.project || !t.batch) return;
-  const ids = (t.batch.suggestions || []).filter((s) => t.selected[s.id]).map((s) => s.id);
+  const tn = store.tune;
+  if (busy || !store.project || !tn.batch) return;
+  const ids = (tn.batch.suggestions || []).filter((s) => tn.selected[s.id]).map((s) => s.id);
   if (!ids.length) return;
-  busy = true; const old = btn.textContent; btn.disabled = true; btn.textContent = '应用中…';
+  busy = true; const old = btn.textContent; btn.disabled = true; btn.textContent = t('应用中…');
   setTuneState({ busy: 'apply' });
   try {
-    const r = await applyBatchCore(t.batch.batch_ts, ids);
-    bus.dispatch('toast', `已应用 ${r.n} 条建议（${r.commands} 条命令 · 对拍见小结卡 · 可整批撤销）`);
+    const r = await applyBatchCore(tn.batch.batch_ts, ids);
+    bus.dispatch('toast', t(`已应用 {p0} 条建议（{p1} 条命令 · 对拍见小结卡 · 可整批撤销）`, { p0: (r.n), p1: (r.commands) }));
     await refreshStaging();
     await refreshAgents();
   } catch (e) { setError(String((e && e.message) || e)); }
@@ -284,10 +285,10 @@ async function doApply(btn) {
 async function doTuneItemApply(item, btn) {
   if (busy || !store.project) return;
   const ts = (item.refs && item.refs.batch_ts) || '';
-  busy = true; btn.disabled = true; const old = btn.textContent; btn.textContent = '应用中…';
+  busy = true; btn.disabled = true; const old = btn.textContent; btn.textContent = t('应用中…');
   try {
     const r = await applyBatchCore(ts, null);
-    bus.dispatch('toast', `已应用批次 ${fmtTs(ts)}：${r.n} 条建议（${r.commands} 条命令）`);
+    bus.dispatch('toast', t(`已应用批次 {p0}：{p1} 条建议（{p2} 条命令）`, { p0: (fmtTs(ts)), p1: (r.n), p2: (r.commands) }));
     await refreshStaging();
     await refreshAgents();
   } catch (e) { setError(String((e && e.message) || e)); }
@@ -299,14 +300,14 @@ async function doTuneItemApply(item, btn) {
 
 async function doTuneDiscard(ts, btn) {
   if (busy || !store.project) return;
-  busy = true; btn.disabled = true; const old = btn.textContent; btn.textContent = '丢弃中…';
+  busy = true; btn.disabled = true; const old = btn.textContent; btn.textContent = t('丢弃中…');
   try {
     await api.tuneDiscard(store.project, { batch_ts: ts });
-    const t = store.tune;
-    if (t.batch && t.batch.batch_ts === ts) {
-      setTuneState({ batch: Object.assign({}, t.batch, { state: 'discarded' }), report: null });
+    const tn = store.tune;
+    if (tn.batch && tn.batch.batch_ts === ts) {
+      setTuneState({ batch: Object.assign({}, tn.batch, { state: 'discarded' }), report: null });
     }
-    bus.dispatch('toast', `已丢弃批次 ${fmtTs(ts)}（工程未动、文件保留）`);
+    bus.dispatch('toast', t(`已丢弃批次 {p0}（工程未动、文件保留）`, { p0: (fmtTs(ts)) }));
     await refreshStaging();
   } catch (e) { setError(String((e && e.message) || e)); }
   finally {
@@ -317,11 +318,11 @@ async function doTuneDiscard(ts, btn) {
 
 async function doUndoApply(btn) {
   if (busy || !store.project) return;
-  busy = true; btn.disabled = true; const old = btn.textContent; btn.textContent = '撤销中…';
+  busy = true; btn.disabled = true; const old = btn.textContent; btn.textContent = t('撤销中…');
   try {
     await api.undo(store.project);
     setTuneState({ report: null });
-    bus.dispatch('toast', '已整批撤销该次调参应用（工程回到应用前）');
+    bus.dispatch('toast', t('已整批撤销该次调参应用（工程回到应用前）'));
     await refreshStaging();
   } catch (e) { setError(String((e && e.message) || e)); }
   finally {
@@ -335,17 +336,17 @@ async function doPreview(batch, s, btn) {
   const pvUrl = api.tuneFileUrl(store.project, batch.batch_ts, 'preview-' + s.id + '.wav');
   if (tunePlaying && tunePlaying.url === pvUrl) {   // 再点 = 停（同暂存区卡片交互）
     stopTuneAudio();
-    bus.dispatch('toast', '已停止试听');
+    bus.dispatch('toast', t('已停止试听'));
     renderStaging();
     return;
   }
-  busy = true; btn.disabled = true; const old = btn.textContent; btn.textContent = '渲染中…';
+  busy = true; btn.disabled = true; const old = btn.textContent; btn.textContent = t('渲染中…');
   setTuneState({ busy: 'preview' });
   try {
     const r = await api.tunePreview(store.project, batch.batch_ts, s.id);
     stopTuneAudio();
     playTune(r.url);
-    bus.dispatch('toast', `试听预览：${s.title || s.id}（工程未动）`);
+    bus.dispatch('toast', t(`试听预览：{p0}（工程未动）`, { p0: (s.title || s.id) }));
   } catch (e) { setError(String((e && e.message) || e)); }
   finally {
     busy = false; setTuneState({ busy: null });
@@ -359,12 +360,12 @@ async function doPreview(batch, s, btn) {
 export function renderAgentsBlock() {
   const wrap = el('div', 'stg-ctx');
   const a = store.staging.agents;
-  wrap.appendChild(el('span', 'stg-title-main', '工程上下文'));
+  wrap.appendChild(el('span', 'stg-title-main', t('工程上下文')));
   wrap.appendChild(el('span', 'stg-ctx-item',
-    'agents.md：' + (a && a.project_md ? '✓ 已生成' : '— 未生成')));
+    'agents.md：' + (a && a.project_md ? t('✓ 已生成') : t('— 未生成'))));
   wrap.appendChild(el('span', 'stg-ctx-item',
-    'agents-user.md（全局）：' + (a && a.user_md ? '✓ 已建档' : '— 未建档')));
-  const btn = el('button', 'stg-btn stg-sync', a && a.project_md ? '↻ 刷新状态摘要' : '＋ 生成 agents.md');
+    t('agents-user.md（全局）：') + (a && a.user_md ? t('✓ 已建档') : t('— 未建档'))));
+  const btn = el('button', 'stg-btn stg-sync', a && a.project_md ? t('↻ 刷新状态摘要') : t('＋ 生成 agents.md'));
   btn.addEventListener('click', () => doSyncAgents(btn));
   wrap.appendChild(btn);
   return wrap;
@@ -380,19 +381,19 @@ function renderTuneFacts() {
   const tracks = st.tracks || [];
   const anchor = (lv.anchor != null && tracks[lv.anchor]) ? tracks[lv.anchor].name : '—';
   const bits = [
-    `${tracks.length} 轨`,
-    st.duration_sec != null ? `时长 ${Number(st.duration_sec).toFixed(1)}s` : null,
-    `锚点「${anchor}」`,
-    `混音峰值 ${fmtDb(lv.mix_peak_dbfs)}`,
-    lv.clipping ? '⚠ 削波' : null,
-    `目标：${(f.targets && f.targets.source) || '通用'}`,
+    t(`{p0} 轨`, { p0: (tracks.length) }),
+    st.duration_sec != null ? t(`时长 {p0}s`, { p0: (Number(st.duration_sec).toFixed(1)) }) : null,
+    t(`锚点「{p0}」`, { p0: (anchor) }),
+    t(`混音峰值 {p0}`, { p0: (fmtDb(lv.mix_peak_dbfs)) }),
+    lv.clipping ? t('⚠ 削波') : null,
+    t(`目标：{p0}`, { p0: ((f.targets && f.targets.source) || t('通用')) }),
   ];
   const line = el('div', 'stg-ctx');
   line.dataset.role = 'tune-facts';
-  line.appendChild(el('span', 'stg-ctx-item', '事实：' + bits.filter(Boolean).join(' · ')));
+  line.appendChild(el('span', 'stg-ctx-item', t('事实：') + bits.filter(Boolean).join(' · ')));
   const unmatched = (f.targets && f.targets.unmatched) || [];
   if (unmatched.length) {
-    line.appendChild(el('span', 'stg-ctx-item', `未匹配目标轨：${unmatched.join('、')}`));
+    line.appendChild(el('span', 'stg-ctx-item', t(`未匹配目标轨：{p0}`, { p0: (unmatched.join(t('、'))) })));
   }
   return line;
 }
@@ -400,20 +401,20 @@ function renderTuneFacts() {
 function beforeAfterText(s) {
   const v = s.values || {};
   if (s.kind === 'level') {
-    return `音量 ${fmtNum(v.before_volume)} → ${fmtNum(v.after_volume)}`
-      + `（${fmtSigned(v.delta_db)} dB${v.capped ? ' · 本步封顶' : ''}）`;
+    return t(`音量 {p0} → {p1}`, { p0: (fmtNum(v.before_volume)), p1: (fmtNum(v.after_volume)) })
+      + t(`（{p0} dB{p1}）`, { p0: (fmtSigned(v.delta_db)), p1: (v.capped ? t(' · 本步封顶') : '') });
   }
-  if (s.kind === 'pan') return `声像 ${fmtNum(v.before_pan)} → ${fmtNum(v.pan)}`;
+  if (s.kind === 'pan') return t(`声像 {p0} → {p1}`, { p0: (fmtNum(v.before_pan)), p1: (fmtNum(v.pan)) });
   const e = s.effect || {};
-  if (e.preset) return `效果链「${e.preset}」`;
-  if (e.effect) return `加效果：${e.effect.type}`;
-  if (e.set_params) return `改参数：参数 #${e.set_params.index}`;
+  if (e.preset) return t(`效果链「{p0}」`, { p0: (e.preset) });
+  if (e.effect) return t(`加效果：{p0}`, { p0: (e.effect.type) });
+  if (e.set_params) return t(`改参数：参数 #{p0}`, { p0: (e.set_params.index) });
   return '';
 }
 
 function suggestionCard(batch, s) {
-  const t = store.tune;
-  const on = !!(t.batch && t.batch.batch_ts === batch.batch_ts && t.selected[s.id]);
+  const tn = store.tune;
+  const on = !!(tn.batch && tn.batch.batch_ts === batch.batch_ts && tn.selected[s.id]);
   const card = el('div', 'tune-card' + (on ? ' sel' : '') + ' tune-k-' + s.kind);
   card.dataset.suggId = s.id;
   const cb = document.createElement('input');
@@ -437,14 +438,14 @@ function suggestionCard(batch, s) {
   if (ba) body.appendChild(el('div', 'tune-ba', ba));
   if (s.reason) body.appendChild(el('div', 'tune-reason', s.reason));
   const refs = (s.evidence && s.evidence.refs) || [];
-  if (refs.length) body.appendChild(el('div', 'tune-ev', '证据：' + refs.join(' · ')));
+  if (refs.length) body.appendChild(el('div', 'tune-ev', t('证据：') + refs.join(' · ')));
   const acts = el('div', 'stg-acts');
   const pvUrl = api.tuneFileUrl(store.project, batch.batch_ts, 'preview-' + s.id + '.wav');
   const pvOn = !!(tunePlaying && tunePlaying.url === pvUrl);
-  const pv = el('button', 'stg-btn stg-play' + (pvOn ? ' on' : ''), (pvOn ? '⏸ ' : '▶ ') + '试听');
+  const pv = el('button', 'stg-btn stg-play' + (pvOn ? ' on' : ''), (pvOn ? '⏸ ' : '▶ ') + t('试听'));
   pv.dataset.role = 'tune-preview';
   pv.disabled = !!store.tune.busy;
-  pv.title = '在副本上试跑渲染（工程零改动）';
+  pv.title = t('在副本上试跑渲染（工程零改动）');
   pv.addEventListener('click', () => doPreview(batch, s, pv));
   acts.appendChild(pv);
   body.appendChild(acts);
@@ -458,11 +459,11 @@ function renderReportCard() {
   const card = el('div', 'tune-report tune-rep-' + (rep.status || 'info'));
   card.dataset.role = 'tune-report';
   const hd = el('div', 'stg-hd');
-  const head = rep.status === 'ok' ? '✅ 应用小结' : rep.status === 'warn' ? '⚠ 应用小结'
-    : rep.status === 'bad' ? '❗ 应用小结' : 'ℹ 应用小结';
+  const head = rep.status === 'ok' ? t('✅ 应用小结') : rep.status === 'warn' ? t('⚠ 应用小结')
+    : rep.status === 'bad' ? t('❗ 应用小结') : t('ℹ 应用小结');
   hd.appendChild(el('span', 'tune-kind', head));
   hd.appendChild(el('span', 'stg-sub',
-    `批次 ${fmtTs(rep.batch_ts || '')} · ${(rep.applied || []).length} 条建议`));
+    t(`批次 {p0} · {p1} 条建议`, { p0: (fmtTs(rep.batch_ts || '')), p1: ((rep.applied || []).length) })));
   card.appendChild(hd);
   const items = el('div', 'tune-rep-items');
   for (const it of rep.items || []) {
@@ -473,9 +474,9 @@ function renderReportCard() {
   const f = rep.files || {};
   if (f.before) acts.appendChild(tuneFileBtn(rep.batch_ts, f.before, 'before'));
   if (f.after) acts.appendChild(tuneFileBtn(rep.batch_ts, f.after, 'after'));
-  const un = el('button', 'stg-btn stg-discard', '↩ 整批撤销');
+  const un = el('button', 'stg-btn stg-discard', t('↩ 整批撤销'));
   un.dataset.role = 'tune-undo';
-  un.title = '一次撤销整批调参应用（工程回到应用前）';
+  un.title = t('一次撤销整批调参应用（工程回到应用前）');
   un.addEventListener('click', () => doUndoApply(un));
   acts.appendChild(un);
   card.appendChild(acts);
@@ -486,7 +487,7 @@ function renderTuneBlock() {
   const wrap = el('div', 'tune-wrap');
 
   const head = el('div', 'stg-head');
-  head.appendChild(el('span', 'stg-title-main', 'AI 调参'));
+  head.appendChild(el('span', 'stg-title-main', t('AI 调参')));
   const sel = document.createElement('select');
   sel.className = 'tune-pack';
   sel.dataset.role = 'tune-pack';
@@ -498,21 +499,21 @@ function renderTuneBlock() {
   sel.value = store.tune.pack || '';
   sel.addEventListener('change', () => setTuneState({ pack: sel.value }));
   head.appendChild(sel);
-  const ba = el('button', 'stg-btn', '🔍 分析事实');
+  const ba = el('button', 'stg-btn', t('🔍 分析事实'));
   ba.dataset.role = 'tune-analyze';
   ba.disabled = !!store.tune.busy || !store.project;
   ba.addEventListener('click', () => doAnalyze(ba));
   head.appendChild(ba);
-  const bs = el('button', 'stg-btn', '✨ 生成建议');
+  const bs = el('button', 'stg-btn', t('✨ 生成建议'));
   bs.dataset.role = 'tune-suggest';
   bs.disabled = !!store.tune.busy || !store.project;
   bs.addEventListener('click', () => doSuggest(bs));
   head.appendChild(bs);
   if (store.tune.busy) {
     head.appendChild(el('span', 'tune-busy',
-      store.tune.busy === 'analyze' ? '分析中…（渲染测量）'
-        : store.tune.busy === 'suggest' ? '生成建议中…'
-          : store.tune.busy === 'apply' ? '应用中…（命令层 + 对拍）' : '试听渲染中…'));
+      store.tune.busy === 'analyze' ? t('分析中…（渲染测量）')
+        : store.tune.busy === 'suggest' ? t('生成建议中…')
+          : store.tune.busy === 'apply' ? t('应用中…（命令层 + 对拍）') : t('试听渲染中…')));
   }
   wrap.appendChild(head);
 
@@ -525,16 +526,16 @@ function renderTuneBlock() {
   const b = store.tune.batch;
   if (b) {
     const sHead = el('div', 'stg-head');
-    sHead.appendChild(el('span', 'stg-title-main', '建议'));
+    sHead.appendChild(el('span', 'stg-title-main', t('建议')));
     sHead.appendChild(el('span', 'stg-sub',
-      `批次 ${fmtTs(b.batch_ts)} · ${TUNE_STATE_TEXT[b.state] || b.state}`
-      + ` · ${(b.suggestions || []).length} 条`
-      + (b.stats && b.stats.dropped ? ` · 校验拒绝 ${b.stats.dropped}` : '')));
+      t(`批次 {p0} · {p1}`, { p0: (fmtTs(b.batch_ts)), p1: (TUNE_STATE_TEXT[b.state] || b.state) })
+      + t(` · {p0} 条`, { p0: ((b.suggestions || []).length) })
+      + (b.stats && b.stats.dropped ? t(` · 校验拒绝 {p0}`, { p0: (b.stats.dropped) }) : '')));
     if (b.state === 'pending' && (b.suggestions || []).length) {
-      const all = el('button', 'stg-btn', '全选');
+      const all = el('button', 'stg-btn', t('全选'));
       all.dataset.role = 'tune-select-all';
       all.addEventListener('click', () => setTuneState({ selected: defaultSelected(b) }));
-      const none = el('button', 'stg-btn', '全不选');
+      const none = el('button', 'stg-btn', t('全不选'));
       none.dataset.role = 'tune-select-none';
       none.addEventListener('click', () => setTuneState({ selected: {} }));
       sHead.appendChild(all);
@@ -544,8 +545,8 @@ function renderTuneBlock() {
 
     const list = el('div', 'tune-list');
     if (!(b.suggestions || []).length) {
-      const why = (b.stats && b.stats.llm_errors && b.stats.llm_errors[0]) || '暂无建议';
-      list.appendChild(el('div', 'stg-empty', '该批次没有建议——' + why));
+      const why = (b.stats && b.stats.llm_errors && b.stats.llm_errors[0]) || t('暂无建议');
+      list.appendChild(el('div', 'stg-empty', t('该批次没有建议——') + why));
     } else {
       for (const s of b.suggestions) list.appendChild(suggestionCard(b, s));
     }
@@ -558,21 +559,21 @@ function renderTuneBlock() {
     ta.className = 'tune-ctx';
     ta.dataset.role = 'tune-context';
     ta.placeholder = b.state === 'pending'
-      ? '带意见重生成（例：人声再亮一点、鼓别太猛、整体更贴流行）…'
-      : '对这套结果不满意？写下意见，再生成一版…';
+      ? t('带意见重生成（例：人声再亮一点、鼓别太猛、整体更贴流行）…')
+      : t('对这套结果不满意？写下意见，再生成一版…');
     foot.appendChild(ta);
-    const rg = el('button', 'stg-btn', '🔁 带意见重生成');
+    const rg = el('button', 'stg-btn', t('🔁 带意见重生成'));
     rg.dataset.role = 'tune-regen';
     rg.addEventListener('click', () => doSuggest(rg, ta.value));
     foot.appendChild(rg);
     if (b.state === 'pending' && (b.suggestions || []).length) {
       const nSel = selectedCount();
-      const ap = el('button', 'stg-btn stg-adopt', `⇥ 应用所选（${nSel} 条）`);
+      const ap = el('button', 'stg-btn stg-adopt', t(`⇥ 应用所选（{p0} 条）`, { p0: (nSel) }));
       ap.dataset.role = 'tune-apply';
       ap.disabled = !!store.tune.busy || nSel === 0;
       ap.addEventListener('click', () => doApply(ap));
       foot.appendChild(ap);
-      const dp = el('button', 'stg-btn stg-discard', '✕ 丢弃批次');
+      const dp = el('button', 'stg-btn stg-discard', t('✕ 丢弃批次'));
       dp.dataset.role = 'tune-discard';
       dp.addEventListener('click', () => doTuneDiscard(b.batch_ts, dp));
       foot.appendChild(dp);
@@ -595,26 +596,26 @@ export function itemCard(it) {
   const bits = [];
   if (it.producer === 'tune') {
     const m = it.meta || {};
-    bits.push(`调参批次 ${fmtTs(m.batch_ts)}`);
-    bits.push(`${m.suggestions || 0} 条建议`);
-    if (m.applied) bits.push(`已应用 ${m.applied}`);
-    if (m.pack) bits.push('包 ' + m.pack);
-    if (m.has_report) bits.push('有对拍小结');
+    bits.push(t(`调参批次 {p0}`, { p0: (fmtTs(m.batch_ts)) }));
+    bits.push(t(`{p0} 条建议`, { p0: (m.suggestions || 0) }));
+    if (m.applied) bits.push(t(`已应用 {p0}`, { p0: (m.applied) }));
+    if (m.pack) bits.push(t('包 ') + m.pack);
+    if (m.has_report) bits.push(t('有对拍小结'));
   } else if (it.producer === 'arrange') {
     const m = it.meta || {};
-    bits.push(`配器批次 ${fmtTs(m.batch_ts)}`);
-    bits.push(`${m.tracks || 0} 轨 / ${m.notes || 0} 音`);
-    if (m.pack) bits.push('包 ' + m.pack);
-    if (m.source) bits.push('来源 ' + ({ default: '默认策略', mixed: 'LLM+默认', llm: 'LLM 决策' }[m.source] || m.source));
-    if (!it.ready) bits.push('空稿（该包在该谱无落点）');
+    bits.push(t(`配器批次 {p0}`, { p0: (fmtTs(m.batch_ts)) }));
+    bits.push(t(`{p0} 轨 / {p1} 音`, { p0: (m.tracks || 0), p1: (m.notes || 0) }));
+    if (m.pack) bits.push(t('包 ') + m.pack);
+    if (m.source) bits.push(t('来源 ') + ({ default: t('默认策略'), mixed: t('LLM+默认'), llm: t('LLM 决策') }[m.source] || m.source));
+    if (!it.ready) bits.push(t('空稿（该包在该谱无落点）'));
   } else {
-    bits.push('链运行 ' + fmtTs(it.meta && it.meta.run_ts));
+    bits.push(t('链运行 ') + fmtTs(it.meta && it.meta.run_ts));
     const raw = it.meta && it.meta.notes_raw, proc = it.meta && it.meta.notes_processed;
-    if (raw != null && proc == null) bits.push('转录 ' + raw + ' 音（未处理）');
-    if (proc != null) bits.push('处理版 ' + proc + ' 音');
-    if (!it.ready) bits.push('未跑完（缺 ' + ((it.meta && it.meta.missing) || []).join('、') + '）');
+    if (raw != null && proc == null) bits.push(t('转录 ') + raw + t(' 音（未处理）'));
+    if (proc != null) bits.push(t('处理版 ') + proc + t(' 音'));
+    if (!it.ready) bits.push(t('未跑完（缺 ') + ((it.meta && it.meta.missing) || []).join(t('、')) + '）');
   }
-  if (it.handled_at) bits.push((it.state === 'adopted' ? '采纳于 ' : '丢弃于 ') + fmtUnix(it.handled_at));
+  if (it.handled_at) bits.push((it.state === 'adopted' ? t('采纳于 ') : t('丢弃于 ')) + fmtUnix(it.handled_at));
   card.appendChild(el('div', 'stg-sub', bits.join(' · ')));
 
   const acts = el('div', 'stg-acts');
@@ -625,32 +626,32 @@ export function itemCard(it) {
       acts.appendChild(tuneFileBtn(m.batch_ts, 'after.wav', 'after'));
     }
     if (it.state === 'pending') {
-      const ok = el('button', 'stg-btn stg-adopt', `⇥ 应用批次（${m.suggestions || 0} 条）`);
+      const ok = el('button', 'stg-btn stg-adopt', t(`⇥ 应用批次（{p0} 条）`, { p0: (m.suggestions || 0) }));
       ok.disabled = !it.ready;
       ok.dataset.role = 'stg-tune-apply';
-      ok.title = '整批应用（命令层事务 + 自动对拍；可一次撤销）';
+      ok.title = t('整批应用（命令层事务 + 自动对拍；可一次撤销）');
       ok.addEventListener('click', () => doTuneItemApply(it, ok));
-      const no = el('button', 'stg-btn stg-discard', '✕ 丢弃');
-      no.title = '仅记处置：工程不动、产物保留';
+      const no = el('button', 'stg-btn stg-discard', t('✕ 丢弃'));
+      no.title = t('仅记处置：工程不动、产物保留');
       no.addEventListener('click', () => doTuneDiscard(m.batch_ts, no));
       acts.appendChild(ok);
       acts.appendChild(no);
     }
   } else if (it.producer === 'arrange') {
     const m = it.meta || {};
-    const pv = el('button', 'stg-btn stg-play', '▶ 试听预览');
+    const pv = el('button', 'stg-btn stg-play', t('▶ 试听预览'));
     pv.dataset.role = 'stg-arrange-preview';
-    pv.title = '渲染候选混音（现有工程 + 配器轨副本；工程零改动）';
+    pv.title = t('渲染候选混音（现有工程 + 配器轨副本；工程零改动）');
     pv.disabled = !it.ready;
     pv.addEventListener('click', () => doArrangePreview(m.batch_ts, pv));
     acts.appendChild(pv);
     if (it.state === 'pending' && it.ready) {
-      const ok = el('button', 'stg-btn stg-adopt', `⇥ 进工程（${m.tracks || 0} 轨）`);
+      const ok = el('button', 'stg-btn stg-adopt', t(`⇥ 进工程（{p0} 轨）`, { p0: (m.tracks || 0) }));
       ok.dataset.role = 'stg-arrange-apply';
-      ok.title = '命令层事务落轨（幂等：重跑先删同名旧产物轨）';
+      ok.title = t('命令层事务落轨（幂等：重跑先删同名旧产物轨）');
       ok.addEventListener('click', () => doArrangeApply(m.batch_ts, ok));
-      const no = el('button', 'stg-btn stg-discard', '✕ 丢弃');
-      no.title = '仅记处置：工程不动、产物保留';
+      const no = el('button', 'stg-btn stg-discard', t('✕ 丢弃'));
+      no.title = t('仅记处置：工程不动、产物保留');
       no.addEventListener('click', () => doArrangeDiscard(m.batch_ts, no));
       acts.appendChild(ok);
       acts.appendChild(no);
@@ -658,12 +659,12 @@ export function itemCard(it) {
   } else {
     for (const f of ((it.meta && it.meta.audio) || [])) acts.appendChild(artifactBtn(it, f));
     if (it.state === 'pending') {
-      const ok = el('button', 'stg-btn stg-adopt', '⇥ 采纳进工程');
+      const ok = el('button', 'stg-btn stg-adopt', t('⇥ 采纳进工程'));
       ok.disabled = !it.ready;
-      if (!it.ready) ok.title = '链尚未跑完（缺 ' + ((it.meta && it.meta.missing) || []).join('、') + '）';
+      if (!it.ready) ok.title = t('链尚未跑完（缺 ') + ((it.meta && it.meta.missing) || []).join(t('、')) + t('）');
       ok.addEventListener('click', () => doAdopt(it, ok));
-      const no = el('button', 'stg-btn stg-discard', '✕ 丢弃');
-      no.title = '仅记处置：工程不动、产物保留';
+      const no = el('button', 'stg-btn stg-discard', t('✕ 丢弃'));
+      no.title = t('仅记处置：工程不动、产物保留');
       no.addEventListener('click', () => doDiscard(it, no));
       acts.appendChild(ok);
       acts.appendChild(no);
@@ -679,9 +680,9 @@ export function renderStaging() {
   const wrap = el('div', 'stg-wrap');
 
   const head = el('div', 'stg-head');
-  head.appendChild(el('span', 'stg-title-main', 'AI 工作台'));
-  head.appendChild(el('span', 'stg-sub', 'AI/链产物默认先进暂存，人批才落地'));
-  const rf = el('button', 'stg-btn stg-refresh', '↻ 刷新');
+  head.appendChild(el('span', 'stg-title-main', t('AI 工作台')));
+  head.appendChild(el('span', 'stg-sub', t('AI/链产物默认先进暂存，人批才落地')));
+  const rf = el('button', 'stg-btn stg-refresh', t('↻ 刷新'));
   rf.addEventListener('click', () => { refreshStaging(); refreshAgents(); refreshTune(); refreshArrange(); });
   head.appendChild(rf);
   wrap.appendChild(head);
@@ -691,17 +692,17 @@ export function renderStaging() {
 
   const lh = el('div', 'stg-head');
   const c = store.staging.counts || {};
-  lh.appendChild(el('span', 'stg-title-main', '暂存区'));
+  lh.appendChild(el('span', 'stg-title-main', t('暂存区')));
   lh.appendChild(el('span', 'stg-sub',
-    `待处置 ${c.pending || 0} · 已采纳 ${c.adopted || 0} · 已丢弃 ${c.discarded || 0}`));
+    t(`待处置 {p0} · 已采纳 {p1} · 已丢弃 {p2}`, { p0: (c.pending || 0), p1: (c.adopted || 0), p2: (c.discarded || 0) })));
   wrap.appendChild(lh);
 
   const list = el('div', 'stg-list');
-  if (!store.project) list.appendChild(el('div', 'stg-empty', '未打开工程'));
-  else if (!store.staging.loaded) list.appendChild(el('div', 'stg-empty', '加载中…'));
+  if (!store.project) list.appendChild(el('div', 'stg-empty', t('未打开工程')));
+  else if (!store.staging.loaded) list.appendChild(el('div', 'stg-empty', t('加载中…')));
   else if (!store.staging.items.length) {
     list.appendChild(el('div', 'stg-empty',
-      '暂无暂存条目——在「链」页签跑一次哼唱快车道，或用上方「AI 调参」生成一版建议，产物会先进这里等你处置'));
+      t('暂无暂存条目——在「链」页签跑一次哼唱快车道，或用上方「AI 调参」生成一版建议，产物会先进这里等你处置')));
   } else for (const it of store.staging.items) list.appendChild(itemCard(it));
   wrap.appendChild(list);
 

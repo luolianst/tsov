@@ -4,6 +4,7 @@
    - 状态真值在后端（tsov/arrange/store.py）；前端镜像 store.arrange（state.js）
    - REST：arrange（packs/generate/list/get/preview/apply/discard/file）
    - 试听钩子：window.__tsovArrangeAudio（CDP 断言用）；跨模块音频互斥走 bus 'audio_started' */
+import { t } from './i18n.js';
 
 import { bus } from './events.js';
 import { api } from './api.js';
@@ -13,15 +14,15 @@ let arrAudio = null;      // 配器试听（独立于暂存区/调参试听）
 let arrPlaying = null;    // {url}
 let lastProjectA = null;
 
-const ARR_STATE_TEXT = { pending: '待处置', adopted: '已进工程', discarded: '已丢弃' };
+const ARR_STATE_TEXT = { pending: t('待处置'), adopted: t('已进工程'), discarded: t('已丢弃') };
 /* 强度档（G9：收/标准/满）= 模式库 vel 缩放（soft 0.9 / standard 1.0 / full 1.1） */
-const STRENGTH_TEXT = { soft: '收', standard: '标准', full: '满' };
+const STRENGTH_TEXT = { soft: t('收'), standard: t('标准'), full: t('满') };
 const STRENGTHS = [
-  ['soft', '强度·收'],
-  ['standard', '强度·标准'],
-  ['full', '强度·满'],
+  ['soft', t('强度·收')],
+  ['standard', t('强度·标准')],
+  ['full', t('强度·满')],
 ];
-const SR_TEXT = { default: '默认策略', mixed: 'LLM+默认', llm: 'LLM 决策' };
+const SR_TEXT = { default: t('默认策略'), mixed: t('LLM+默认'), llm: t('LLM 决策') };
 
 function el(tag, cls, text) {
   const d = document.createElement(tag);
@@ -76,9 +77,9 @@ function fileBtn(ts, file, label) {
 export async function doArrangeGenerate(btn, context) {
   if (!store.project) return;
   const a = store.arrange;
-  if (!a.pack) { setError('先选一个风格包（有模式库的包才可配器）'); return; }
+  if (!a.pack) { setError(t('先选一个风格包（有模式库的包才可配器）')); return; }
   const pack = a.pack, strength = a.strength || 'standard';   // 起手快照：防异步状态中途被改
-  btn.disabled = true; const old = btn.textContent; btn.textContent = '生成中…（< 1 分钟）';
+  btn.disabled = true; const old = btn.textContent; btn.textContent = t('生成中…（< 1 分钟）');
   setArrangeState({ busy: 'generate' });
   try {
     const r = await api.arrangeGenerate(store.project, {
@@ -87,8 +88,8 @@ export async function doArrangeGenerate(btn, context) {
     const b = r.batch;
     setArrangeState({ batch: b, loaded: true });
     bus.dispatch('toast',
-      `配器批次 ${fmtTs(b.batch_ts)}：${b.stats.tracks} 轨 / ${b.stats.notes} 音`
-      + `（${SR_TEXT[b.stats.source] || b.stats.source}，已进暂存区，人批才落地）`);
+      t(`配器批次 {p0}：{p1} 轨 / {p2} 音`, { p0: (fmtTs(b.batch_ts)), p1: (b.stats.tracks), p2: (b.stats.notes) })
+      + t(`（{p0}，已进暂存区，人批才落地）`, { p0: (SR_TEXT[b.stats.source] || b.stats.source) }));
     bus.dispatch('refresh_staging', {});
   } catch (e) { setError(String((e && e.message) || e)); }
   finally {
@@ -102,17 +103,17 @@ export async function doArrangePreview(ts, btn) {
   const url = api.arrangeFileUrl(store.project, ts, 'preview-mix.wav');
   if (arrPlaying && arrPlaying.url === url) {   // 已渲染过：再点 = 停
     stopArrAudio();
-    bus.dispatch('toast', '已停止试听');
+    bus.dispatch('toast', t('已停止试听'));
     renderStagingHost();
     return;
   }
-  if (btn) { btn.disabled = true; const old = btn.textContent; btn.textContent = '渲染中…'; }
+  if (btn) { btn.disabled = true; const old = btn.textContent; btn.textContent = t('渲染中…'); }
   setArrangeState({ busy: 'preview' });
   try {
     const r = await api.arrangePreview(store.project, ts);
     stopArrAudio();
     playArr(r.url);
-    bus.dispatch('toast', '试听预览：配器 + 现有工程（工程未动）');
+    bus.dispatch('toast', t('试听预览：配器 + 现有工程（工程未动）'));
   } catch (e) { setError(String((e && e.message) || e)); }
   finally {
     setArrangeState({ busy: null });
@@ -122,12 +123,12 @@ export async function doArrangePreview(ts, btn) {
 
 export async function doArrangeApply(ts, btn) {
   if (!store.project) return;
-  btn.disabled = true; const old = btn.textContent; btn.textContent = '进工程中…';
+  btn.disabled = true; const old = btn.textContent; btn.textContent = t('进工程中…');
   setArrangeState({ busy: 'apply' });
   try {
     const r = await api.arrangeApply(store.project, { batch_ts: ts });
-    bus.dispatch('toast', `已进工程：${r.n_tracks} 轨 / ${r.n_notes} 音（命令层事务）
-      — 不满意可整批撤销或再生成`.replace(/\s+/g, ''));
+    bus.dispatch('toast', t(`已进工程：{p0} 轨 / {p1} 音（命令层事务）
+      — 不满意可整批撤销或再生成`, { p0: (r.n_tracks), p1: (r.n_notes) }).replace(/\s+/g, ''));
     stopArrAudio();
     // 批次状态回填（走 get，与后端一致）
     try {
@@ -145,12 +146,12 @@ export async function doArrangeApply(ts, btn) {
 
 export async function doArrangeDiscard(ts, btn) {
   if (!store.project) return;
-  btn.disabled = true; const old = btn.textContent; btn.textContent = '丢弃中…';
+  btn.disabled = true; const old = btn.textContent; btn.textContent = t('丢弃中…');
   try {
     await api.arrangeDiscard(store.project, ts);
     const a = store.arrange;
     if (a.batch && a.batch.batch_ts === ts) setArrangeState({ batch: Object.assign({}, a.batch, { state: 'discarded' }) });
-    bus.dispatch('toast', `已丢弃批次 ${fmtTs(ts)}（工程未动、文件保留）`);
+    bus.dispatch('toast', t(`已丢弃批次 {p0}（工程未动、文件保留）`, { p0: (fmtTs(ts)) }));
     bus.dispatch('refresh_staging', {});
   } catch (e) { setError(String((e && e.message) || e)); }
   finally {
@@ -165,7 +166,7 @@ function rolesLine(batch) {
   const secs = (batch.facts && batch.facts.sections) || [];
   const kindOf = (si) => {
     const s = secs[Number(si)];
-    return s ? (s.kind || '?') : ('段' + si);
+    return s ? (s.kind || '?') : (t('段') + si);
   };
   const list = el('div', 'arr-list');
   for (const t of tracks) {
@@ -177,7 +178,7 @@ function rolesLine(batch) {
       return `${kindOf(si)}·${info.variant}${info.fill ? '+fill' : ''}${info.crash ? '+crash' : ''}`;
     }).join(' · ');
     row.appendChild(el('span', 'arr-seg', seg));
-    row.appendChild(el('span', 'arr-n', `${t.n_notes || 0} 音`));
+    row.appendChild(el('span', 'arr-n', t(`{p0} 音`, { p0: (t.n_notes || 0) })));
     const reason = firstReason(batch, t.role);
     if (reason) row.title = reason;
     if (t.program) row.appendChild(el('span', 'arr-prog', t.program));
@@ -190,7 +191,7 @@ function firstReason(batch, role) {
   const rs = (batch.plan && batch.plan.roles && batch.plan.roles[role]) || {};
   for (const k of Object.keys(rs)) {
     const r = rs[k] && rs[k].reason;
-    if (r && r !== 'LLM 选择') return r;
+    if (r && r !== 'LLM 选择') return r;   /* 批H：对比后端下发值（decide.py 占位串），不翻 */
   }
   return '';
 }
@@ -200,14 +201,14 @@ export function renderArrangeBlock() {
   const wrap = el('div', 'tune-wrap arr-wrap');
 
   const head = el('div', 'stg-head');
-  head.appendChild(el('span', 'stg-title-main', 'AI 配器'));
-  head.appendChild(el('span', 'stg-sub', 'AI 出初稿 → 试听 → 进工程；不满意可带意见重生成'));
+  head.appendChild(el('span', 'stg-title-main', t('AI 配器')));
+  head.appendChild(el('span', 'stg-sub', t('AI 出初稿 → 试听 → 进工程；不满意可带意见重生成')));
 
   const sel = document.createElement('select');
   sel.className = 'tune-pack';
   sel.dataset.role = 'arrange-pack';
   const ph = document.createElement('option');
-  ph.value = ''; ph.textContent = a.packs.length ? '选择风格包…' : '（无可用风格包）';
+  ph.value = ''; ph.textContent = a.packs.length ? t('选择风格包…') : t('（无可用风格包）');
   sel.appendChild(ph);
   for (const p of (a.packs || [])) {
     const o = document.createElement('option');
@@ -222,10 +223,10 @@ export function renderArrangeBlock() {
   const ss = document.createElement('select');
   ss.className = 'tune-pack';
   ss.dataset.role = 'arrange-strength';
-  ss.title = '强度档：整段力度缩放（收 -10% / 标准 ±0 / 满 +10%）';
+  ss.title = t('强度档：整段力度缩放（收 -10% / 标准 ±0 / 满 +10%）');
   const curPack = (a.packs || []).find((p) => p.pack === a.pack);
   const opts = (curPack && curPack.strengths && curPack.strengths.length)
-    ? curPack.strengths.map((s) => [s, '强度·' + (STRENGTH_TEXT[s] || s)]) : STRENGTHS;
+    ? curPack.strengths.map((s) => [s, t('强度·') + (STRENGTH_TEXT[s] || s)]) : STRENGTHS;
   for (const [v, label] of opts) {
     const o = document.createElement('option');
     o.value = v; o.textContent = label;
@@ -235,15 +236,15 @@ export function renderArrangeBlock() {
   ss.addEventListener('change', () => setArrangeState({ strength: ss.value }));
   head.appendChild(ss);
 
-  const bg = el('button', 'stg-btn', '🎛 生成配器');
+  const bg = el('button', 'stg-btn', t('🎛 生成配器'));
   bg.dataset.role = 'arrange-generate';
   bg.disabled = !!a.busy || !store.project;
   bg.addEventListener('click', () => doArrangeGenerate(bg));
   head.appendChild(bg);
   if (a.busy) {
     head.appendChild(el('span', 'tune-busy',
-      a.busy === 'generate' ? '生成中…（LLM 决策 + 机械展开）'
-        : a.busy === 'preview' ? '试听渲染中…' : '进工程中…（命令层事务）'));
+      a.busy === 'generate' ? t('生成中…（LLM 决策 + 机械展开）')
+        : a.busy === 'preview' ? t('试听渲染中…') : t('进工程中…（命令层事务）')));
   }
   wrap.appendChild(head);
 
@@ -254,17 +255,17 @@ export function renderArrangeBlock() {
   const line = el('div', 'stg-ctx');
   line.dataset.role = 'arrange-facts';
   line.appendChild(el('span', 'stg-ctx-item',
-    `批次 ${fmtTs(b.batch_ts)} · ${ARR_STATE_TEXT[b.state] || b.state} · ${(b.tracks || []).length} 轨 / ${st.notes || 0} 音`
-    + ` · 包 ${b.pack}${b.strength ? '·' + b.strength : ''} · 来源 ${SR_TEXT[st.source] || st.source || '—'}`));
+    t(`批次 {p0} · {p1} · {p2} 轨 / {p3} 音`, { p0: (fmtTs(b.batch_ts)), p1: (ARR_STATE_TEXT[b.state] || b.state), p2: ((b.tracks || []).length), p3: (st.notes || 0) })
+    + t(` · 包 {p0}{p1} · 来源 {p2}`, { p0: (b.pack), p1: (b.strength ? '·' + b.strength : ''), p2: (SR_TEXT[st.source] || st.source || '—') })));
   if (st.dropped && st.dropped.length) {
-    line.appendChild(el('span', 'stg-ctx-item', `校验拒绝 ${st.dropped.length}`));
+    line.appendChild(el('span', 'stg-ctx-item', t(`校验拒绝 {p0}`, { p0: (st.dropped.length) })));
   }
   wrap.appendChild(line);
 
   if (b.overall) {
     const ov = el('div', 'tune-reason');
     ov.dataset.role = 'arrange-overall';
-    ov.textContent = '整体思路：' + b.overall;
+    ov.textContent = t('整体思路：') + b.overall;
     wrap.appendChild(ov);
   }
 
@@ -272,19 +273,19 @@ export function renderArrangeBlock() {
 
   const foot = el('div', 'tune-foot');
   const pv = el('button', 'stg-btn stg-play' + ((arrPlaying && arrPlaying.url === api.arrangeFileUrl(store.project, b.batch_ts, 'preview-mix.wav')) ? ' on' : ''),
-                '▶ 试听预览');
+                t('▶ 试听预览'));
   pv.dataset.role = 'arrange-preview';
   pv.disabled = !!a.busy || !(b.tracks || []).length;
-  pv.title = '渲染候选混音（现有工程 + 配器轨副本；工程零改动）';
+  pv.title = t('渲染候选混音（现有工程 + 配器轨副本；工程零改动）');
   pv.addEventListener('click', () => doArrangePreview(b.batch_ts, pv));
   foot.appendChild(pv);
   if (b.state === 'pending' && (b.tracks || []).length) {
-    const ap = el('button', 'stg-btn stg-adopt', `⇥ 进工程（${(b.tracks || []).length} 轨）`);
+    const ap = el('button', 'stg-btn stg-adopt', t(`⇥ 进工程（{p0} 轨）`, { p0: ((b.tracks || []).length) }));
     ap.dataset.role = 'arrange-apply';
     ap.disabled = !!a.busy;
     ap.addEventListener('click', () => doArrangeApply(b.batch_ts, ap));
     foot.appendChild(ap);
-    const dp = el('button', 'stg-btn stg-discard', '✕ 丢弃批次');
+    const dp = el('button', 'stg-btn stg-discard', t('✕ 丢弃批次'));
     dp.dataset.role = 'arrange-discard';
     dp.addEventListener('click', () => doArrangeDiscard(b.batch_ts, dp));
     foot.appendChild(dp);
@@ -293,10 +294,10 @@ export function renderArrangeBlock() {
   ta.className = 'tune-ctx';
   ta.dataset.role = 'arrange-context';
   ta.placeholder = b.state === 'pending'
-    ? '带意见重生成（例：鼓太密了、铺底别那么满、加点拨弦）…'
-    : '对这套不满意？写下意见，再生成一版…';
+    ? t('带意见重生成（例：鼓太密了、铺底别那么满、加点拨弦）…')
+    : t('对这套不满意？写下意见，再生成一版…');
   foot.appendChild(ta);
-  const rg = el('button', 'stg-btn', '🔁 带意见重生成');
+  const rg = el('button', 'stg-btn', t('🔁 带意见重生成'));
   rg.dataset.role = 'arrange-regen';
   rg.addEventListener('click', () => doArrangeGenerate(rg, ta.value));
   foot.appendChild(rg);

@@ -139,9 +139,9 @@ export function refTag(r) {
 
 /* M-V7 D3：收藏 tag → 来源标注（手动 / 自动·迭代 / 自动·定时） */
 export function favSource(tag) {
-  const t = String(tag || '');
-  if (t.endsWith('-auto')) return t('自动·迭代');
-  if (t.endsWith('-time')) return t('自动·定时');
+  const src = String(tag || '');
+  if (src.endsWith('-auto')) return t('自动·迭代');
+  if (src.endsWith('-time')) return t('自动·定时');
   return t('手动');
 }
 

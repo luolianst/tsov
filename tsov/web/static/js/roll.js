@@ -1,4 +1,5 @@
 /* roll.js —— 钢琴卷帘 canvas：绘制/缩放/滚动/点击选择/播放头/三色 diff 叠层 */
+import { t } from './i18n.js';
 
 import { bus } from './events.js';
 import { api } from './api.js';
@@ -319,7 +320,7 @@ function drawRegion(y0, h, ti, trk, role) {
   ctx.font = '11px "Microsoft YaHei UI","PingFang SC",system-ui,sans-serif';
   const nm = (trk.name || ('track ' + ti));
   ctx.fillText('🎵 ' + (nm.length > 7 ? nm.slice(0, 7) + '…' : nm), 8, y0 + 15);
-  if (role === 'partner') ctx.fillText('副区', 8, Math.min(y0 + 30, y0 + h - 6));
+  if (role === 'partner') ctx.fillText(t('副区'), 8, Math.min(y0 + 30, y0 + h - 6));
 
   if (trk.kind === 'audio') {
     /* E6 段1 补（2026-09-27）：多 clip 波形块（与总谱共用引擎/命令层）；主/副区均可编辑 */
@@ -334,7 +335,7 @@ function drawRegion(y0, h, ti, trk, role) {
       selIdx: (sel && sel.ti === ti) ? sel.idx : null,
       inDrag: !!prev,
       dim: false,
-      label: (trk.name || '素材'),
+      label: (trk.name || t('素材')),
       p, v,
       xLo: KEYS_W, xHi: W,
     });
@@ -361,7 +362,7 @@ function drawRegion(y0, h, ti, trk, role) {
     }
     ctx.globalAlpha = 1;
     ctx.fillStyle = p.laneLabel;
-    ctx.fillText('概览（只读）', 8, y0 + h - 8);
+    ctx.fillText(t('概览（只读）'), 8, y0 + h - 8);
     return;
   }
 
@@ -439,11 +440,11 @@ async function laneCommit(c, pts, label) {
   const r6 = (x) => Math.round(x * 1e6) / 1e6;
   const r4 = (x) => Math.round(x * 1e4) / 1e4;
   try {
-    const r = await api.postBatch(store.project, '自动化 ' + label,
+    const r = await api.postBatch(store.project, t('自动化 ') + label,
       [{ op: 'set_automation', track: c.ti, value: { param: c.param, points: pts.map((q) => [r6(q[0]), r4(q[1])]) } }],
-      '自动化（' + paramLabel(c.param) + '）：' + label);
-    if (r.applied) bus.dispatch('toast', '已' + label + ' ' + refTag(r));
-    else showStatus('被拒：' + (r.errors || []).join('；'), true);
+      t('自动化（') + paramLabel(c.param) + '）：' + label);
+    if (r.applied) bus.dispatch('toast', t('已') + label + ' ' + refTag(r));
+    else showStatus(t('被拒：') + (r.errors || []).join('；'), true);
   } catch (e) { showStatus(e.message, true); }
 }
 function laneMouseDown(e) {
@@ -455,12 +456,12 @@ function laneMouseDown(e) {
     draw();
     return;
   }
-  const t = Math.max(0, tOf(e.offsetX));
+  const ts = Math.max(0, tOf(e.offsetX));
   const v = laneVOf(e.offsetY, c);
   const next = c.pts.map((q) => [q[0], q[1]]);
-  next.push([Math.round(t * 1e6) / 1e6, Math.round(v * 1e4) / 1e4]);
+  next.push([Math.round(ts * 1e6) / 1e6, Math.round(v * 1e4) / 1e4]);
   next.sort((a, b) => a[0] - b[0]);
-  laneCommit(c, next, '加点');
+  laneCommit(c, next, t('加点'));
 }
 function commitLaneDrag() {
   const d = laneDrag;
@@ -471,14 +472,14 @@ function commitLaneDrag() {
   if (moved && d.idx >= 0 && d.idx < c.pts.length) {
     const next = c.pts.map((q, i) => (i === d.idx ? [d.t, d.v] : [q[0], q[1]]));
     next.sort((a, b) => a[0] - b[0]);
-    laneCommit(c, next, '移动');
+    laneCommit(c, next, t('移动'));
   } else draw();
 }
 function laneRemoveAt(e) {
   const c = laneCtx();
   if (!c) return;
   const idx = laneNearest(e.offsetX, e.offsetY, c);
-  if (idx >= 0) laneCommit(c, c.pts.filter((_, i) => i !== idx), '删除');
+  if (idx >= 0) laneCommit(c, c.pts.filter((_, i) => i !== idx), t('删除'));
 }
 
 function drawLaneRegion(y0, h, sp) {
@@ -492,9 +493,9 @@ function drawLaneRegion(y0, h, sp) {
   ctx.fillRect(0, y0, KEYS_W, h);
   ctx.fillStyle = p.laneLabel;
   ctx.font = '11px "Microsoft YaHei UI","PingFang SC",system-ui,sans-serif';
-  const nm = paramLabel(c.param) + '（曲线）';
+  const nm = paramLabel(c.param) + t('（曲线）');
   ctx.fillText(nm.length > 8 ? nm.slice(0, 8) + '…' : nm, 8, y0 + 15);
-  ctx.fillText('副区', 8, Math.min(y0 + 30, y0 + h - 6));
+  ctx.fillText(t('副区'), 8, Math.min(y0 + 30, y0 + h - 6));
   /* 值域参考行（5 等分；与 lane_render / mix _curve 语义一致） */
   ctx.strokeStyle = p.beatLine;
   for (let i = 0; i <= 4; i++) {
@@ -531,7 +532,7 @@ function drawLaneRegion(y0, h, sp) {
     });
   } else {
     ctx.fillStyle = p.laneLabel;
-    ctx.fillText('（无点：单击加点）', KEYS_W + 8, y0 + Math.round(h / 2));
+    ctx.fillText(t('（无点：单击加点）'), KEYS_W + 8, y0 + Math.round(h / 2));
   }
   /* 拖拽幽灵 */
   if (laneDrag) {
@@ -585,7 +586,7 @@ function swapSplit() {
   if (!sp || sp.kind === 'lane') return;
   swapMainPartner(sp.ti);
   refitSplit();
-  bus.dispatch('toast', '已切主轨（原主轨入副区）');
+  bus.dispatch('toast', t('已切主轨（原主轨入副区）'));
 }
 
 /* E3 段1：波形区双击 —— 试听素材原文件（E6 段1 补：多 clip → 取首 clip 文件） */
@@ -596,8 +597,8 @@ function previewTrackAudio(trk) {
   if (previewAudioEl) { previewAudioEl.pause(); previewAudioEl = null; }
   previewAudioEl = new Audio(api.audioUrl(store.project, rel));
   previewAudioEl.play()
-    .then(() => showStatus('试听素材：' + (trk.name || rel)))
-    .catch((err) => showStatus('试听失败：' + ((err && err.message) || err), true));
+    .then(() => showStatus(t('试听素材：') + (trk.name || rel)))
+    .catch((err) => showStatus(t('试听失败：') + ((err && err.message) || err), true));
 }
 
 /* ---- 命中测试（逆序=后画的优先；edge=左右端热区）
@@ -687,9 +688,9 @@ async function submitDrag() {
     if (d.mode === 'create') {
       const { start, end, pitch } = d.ghost;
       cmd.push({ op: 'add', track: d.track, index: null, value: { pitch_midi: pitch, start: round3(start), end: round3(end) } });
-      const r = await api.postBatch(store.project, '添加音符', cmd, '手绘：添加音符');
-      if (r.applied) showStatus('已添加 ' + midiName(pitch) + ' ' + refTag(r));
-      else showStatus('被拒：' + (r.errors || []).join('；'), true);
+      const r = await api.postBatch(store.project, t('添加音符'), cmd, t('手绘：添加音符'));
+      if (r.applied) showStatus(t('已添加 ') + midiName(pitch) + ' ' + refTag(r));
+      else showStatus(t('被拒：') + (r.errors || []).join('；'), true);
       return;
     }
     if (d.mode === 'move-multi') {
@@ -703,10 +704,10 @@ async function submitDrag() {
                      value: Math.max(0, Math.min(127, o.n.pitch_midi + dp)) });
         }
       }
-      const r = await api.postBatch(store.project, '移动 ' + d.origs.length + ' 音', cmd,
-                                    '手绘：移动 ' + d.origs.length + ' 音');
-      if (r.applied) showStatus('已移动 ' + d.origs.length + ' 音 ' + refTag(r));
-      else showStatus('被拒：' + (r.errors || []).join('；'), true);
+      const r = await api.postBatch(store.project, t('移动 ') + d.origs.length + t(' 音'), cmd,
+                                    t('手绘：移动 ') + d.origs.length + t(' 音'));
+      if (r.applied) showStatus(t('已移动 ') + d.origs.length + t(' 音 ') + refTag(r));
+      else showStatus(t('被拒：') + (r.errors || []).join('；'), true);
       return;
     }
     const orig = d.orig;
@@ -720,9 +721,9 @@ async function submitDrag() {
       if (Math.abs(ns - orig.start) < 1e-6 && Math.abs(ne - orig.end) < 1e-6) return;
       cmd.push({ op: 'set_time', track: d.track, index: d.index, value: { start: ns, end: ne } });
     }
-    const r = await api.postBatch(store.project, d.mode === 'move' ? '移动音符' : '缩放音符', cmd, '手绘：' + (d.mode === 'move' ? '移动' : '缩放'));
-    if (r.applied) showStatus((d.mode === 'move' ? '已移动' : '已缩放') + ' ' + refTag(r));
-    else showStatus('被拒：' + (r.errors || []).join('；'), true);
+    const r = await api.postBatch(store.project, d.mode === 'move' ? t('移动音符') : t('缩放音符'), cmd, t('手绘：') + (d.mode === 'move' ? t('移动') : t('缩放')));
+    if (r.applied) showStatus((d.mode === 'move' ? t('已移动') : t('已缩放')) + ' ' + refTag(r));
+    else showStatus(t('被拒：') + (r.errors || []).join('；'), true);
   } catch (err) {
     showStatus(err.message, true);
   }
@@ -741,8 +742,8 @@ function closeNoteMenu() { if (noteMenu) { noteMenu.remove(); noteMenu = null; }
 async function postNoteOp(hit, commands, label) {
   try {
     const r = await api.postBatch(store.project, label, commands, label);
-    if (r.applied) showStatus('已执行 ' + label + ' ' + refTag(r));
-    else showStatus('被拒：' + (r.errors || []).join('；'), true);
+    if (r.applied) showStatus(t('已执行 ') + label + ' ' + refTag(r));
+    else showStatus(t('被拒：') + (r.errors || []).join('；'), true);
   } catch (err) { showStatus(err.message, true); }
 }
 function openNoteMenu(hit, cx, cy) {
@@ -758,11 +759,11 @@ function openNoteMenu(hit, cx, cy) {
   };
   const setP = (delta, tag) => () => postNoteOp(hit,
     [{ op: 'set_pitch', track: hit.track, index: hit.index, value: Math.max(0, Math.min(127, n.pitch_midi + delta)) }], tag);
-  mk('🗑 删除 ' + midiName(n.pitch_midi), () => postNoteOp(hit, [{ op: 'remove', track: hit.track, index: hit.index }], '右键删除'));
-  mk('♯ +1 半音', setP(1, '右键 +1'));
-  mk('♭ −1 半音', setP(-1, '右键 −1'));
-  mk('+8 八度', setP(8, '右键 +8'));
-  mk('−8 八度', setP(-8, '右键 −8'));
+  mk(t('🗑 删除 ') + midiName(n.pitch_midi), () => postNoteOp(hit, [{ op: 'remove', track: hit.track, index: hit.index }], t('右键删除')));
+  mk(t('♯ +1 半音'), setP(1, t('右键 +1')));
+  mk(t('♭ −1 半音'), setP(-1, t('右键 −1')));
+  mk(t('+8 八度'), setP(8, t('右键 +8')));
+  mk(t('−8 八度'), setP(-8, t('右键 −8')));
   noteMenu.style.left = Math.min(cx, window.innerWidth - 150) + 'px';
   noteMenu.style.top = Math.min(cy, window.innerHeight - 200) + 'px';
   document.body.appendChild(noteMenu);
@@ -801,20 +802,20 @@ async function splitAt(hit, px) {
   let at = Math.round(snapT(tOf(px)) * 1000) / 1000;
   if (at <= n.start + 1e-3 || at >= n.end - 1e-3) at = Math.round(tOf(px) * 1000) / 1000;
   try {
-    const r = await api.postBatch(store.project, '剪刀切分',
-      [{ op: 'split_note', track: hit.track, index: hit.index, value: { at } }], '剪刀：切分 @ ' + at + 's');
-    if (r.applied) showStatus('已切分 ' + midiName(n.pitch_midi) + ' @ ' + at.toFixed(3) + 's ' + refTag(r));
-    else showStatus('被拒：' + (r.errors || []).join('；'), true);
+    const r = await api.postBatch(store.project, t('剪刀切分'),
+      [{ op: 'split_note', track: hit.track, index: hit.index, value: { at } }], t('剪刀：切分 @ ') + at + 's');
+    if (r.applied) showStatus(t('已切分 ') + midiName(n.pitch_midi) + ' @ ' + at.toFixed(3) + 's ' + refTag(r));
+    else showStatus(t('被拒：') + (r.errors || []).join('；'), true);
   } catch (err) { showStatus(err.message, true); }
 }
 
 /* 胶水：点音符 → 与后邻同音高合并（gap ≤ 0.5s；服务端校验） */
 async function glueAt(hit) {
   try {
-    const r = await api.postBatch(store.project, '胶水合并',
-      [{ op: 'merge_notes', track: hit.track, index: hit.index }], '胶水：合并相邻音');
-    if (r.applied) showStatus('已合并 ' + refTag(r));
-    else showStatus('被拒：' + (r.errors || []).join('；'), true);
+    const r = await api.postBatch(store.project, t('胶水合并'),
+      [{ op: 'merge_notes', track: hit.track, index: hit.index }], t('胶水：合并相邻音'));
+    if (r.applied) showStatus(t('已合并 ') + refTag(r));
+    else showStatus(t('被拒：') + (r.errors || []).join('；'), true);
   } catch (err) { showStatus(err.message, true); }
 }
 
@@ -830,10 +831,10 @@ async function commitErase() {
   if (!ed || !ed.set.size) { draw(); return; }
   const idxs = Array.from(ed.set).sort((a, b) => b - a);   // 降序：索引不漂移
   try {
-    const r = await api.postBatch(store.project, '橡皮删除 ' + idxs.length + ' 音',
-      idxs.map((i) => ({ op: 'remove', track: ed.track, index: i })), '橡皮：删除 ' + idxs.length + ' 音');
-    if (r.applied) showStatus('已删除 ' + idxs.length + ' 音 ' + refTag(r));
-    else showStatus('被拒：' + (r.errors || []).join('；'), true);
+    const r = await api.postBatch(store.project, t('橡皮删除 ') + idxs.length + t(' 音'),
+      idxs.map((i) => ({ op: 'remove', track: ed.track, index: i })), t('橡皮：删除 ') + idxs.length + t(' 音'));
+    if (r.applied) showStatus(t('已删除 ') + idxs.length + t(' 音 ') + refTag(r));
+    else showStatus(t('被拒：') + (r.errors || []).join('；'), true);
   } catch (err) { showStatus(err.message, true); }
   draw();
 }
@@ -859,7 +860,7 @@ function commitRange() {
       });
       setSelection(ti, idxs);
       if (t1 - t0 > 1e-3) setRange({ start: Math.max(0, t0), end: Math.max(0, t1) });
-      if (idxs.length) showStatus('框选 ' + idxs.length + ' 音');
+      if (idxs.length) showStatus(t('框选 ') + idxs.length + t(' 音'));
     }
   }
   draw();
@@ -1134,7 +1135,7 @@ export function init(rollCanvas) {
       const lhit = (rr && rr.edit) ? hitNote(e.offsetX, e.offsetY) : null;
       if (lhit && store.project) {
         const n = store.score.tracks[lhit.track].notes[lhit.index];
-        await postNoteOp(lhit, [{ op: 'remove', track: lhit.track, index: lhit.index }], '双击删除 ' + midiName(n.pitch_midi));
+        await postNoteOp(lhit, [{ op: 'remove', track: lhit.track, index: lhit.index }], t('双击删除 ') + midiName(n.pitch_midi));
         return;
       }
       swapSplit();
@@ -1145,7 +1146,7 @@ export function init(rollCanvas) {
     const hit = hitNote(e.offsetX, e.offsetY);
     if (!hit || !store.project) return;
     const n = store.score.tracks[hit.track].notes[hit.index];
-    await postNoteOp(hit, [{ op: 'remove', track: hit.track, index: hit.index }], '双击删除 ' + midiName(n.pitch_midi));
+    await postNoteOp(hit, [{ op: 'remove', track: hit.track, index: hit.index }], t('双击删除 ') + midiName(n.pitch_midi));
   });
 
   /* M-V3：右键菜单（删除 / ±半音 / ±八度） */

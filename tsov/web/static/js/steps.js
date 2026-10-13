@@ -7,6 +7,7 @@
    - 置灰规则：未处置永不置灰；已处置折叠；stale 轮置灰
    - 状态暴露：__tsovState().steps.feed（计数 + DOM 实测数，CDP 断言用）
    - 视觉复用 chat.js 的 ac- 卡族样式（卡片口径与对话内一致） */
+import { t } from './i18n.js';
 
 import { bus } from './events.js';
 import { api } from './api.js';
@@ -14,12 +15,12 @@ import { store, setError } from './state.js';
 import { itemCard, refreshStaging } from './staging.js';   // D 件：配器/链/已处置 → 复用完整操作区；E 件：数据订阅保活
 
 const VIEW_KEY = 'tsov-rail-view';            // 切换态记忆（C 件 §5）
-const STATE_TEXT = { pending: '待处置', adopted: '已采纳', discarded: '已丢弃' };
-const KIND_TEXT = { chain: '处理链', tune: '调参', arrange: '配器' };
+const STATE_TEXT = { pending: t('待处置'), adopted: t('已采纳'), discarded: t('已丢弃') };
+const KIND_TEXT = { chain: t('处理链'), tune: t('调参'), arrange: t('配器') };
 // 口径与 chat.js 一致（B 件；重构可抽公共模块）
-const STAT_LABELS = { notes: '修改音符', track_add: '轨道', track_del: '轨道', track_edit: '轨名',
-                      fx: '效果器', param: '参数', other: '动作' };
-const TUNE_KIND_TEXT = { level: '电平', pan: '声像', effect: '效果链' };
+const STAT_LABELS = { notes: t('修改音符'), track_add: t('轨道'), track_del: t('轨道'), track_edit: t('轨名'),
+                      fx: t('效果器'), param: t('参数'), other: t('动作') };
+const TUNE_KIND_TEXT = { level: t('电平'), pan: t('声像'), effect: t('效果链') };
 
 let panelEl = null;
 let viewEl = null;
@@ -79,12 +80,12 @@ function renderRoundCard(rd, entries) {
   const details = el('div', 'step-details');
   details.hidden = true;
   if (entries.length) for (const e of entries) details.appendChild(entryRow(e));
-  else details.appendChild(el('div', 'ac-readrow', '（该轮无聚合条目）'));
+  else details.appendChild(el('div', 'ac-readrow', t('（该轮无聚合条目）')));
 
   // 头（点击展开/折叠）
   const head = el('button', 'ac-group-head');
   let open = false;
-  const paint = () => { head.textContent = `本轮变更 · ${n} 个动作 ` + (open ? '\u25be' : '\u25b8'); };
+  const paint = () => { head.textContent = t(`本轮变更 · {p0} 个动作 `, { p0: (n) }) + (open ? '\u25be' : '\u25b8'); };
   paint();
   head.addEventListener('click', () => { open = !open; details.hidden = !open; paint(); });
 
@@ -92,12 +93,12 @@ function renderRoundCard(rd, entries) {
   const stats = el('div', 'ac-stats');
   for (const [k, v] of Object.entries(rd.stats || {})) if (v) stats.appendChild(el('span', 'ac-stat', statText(k, v)));
 
-  if ((rd.n_stale || 0) > 0) root.appendChild(el('div', 'step-stale-flag', '（本轮已失效/撤销）'));
+  if ((rd.n_stale || 0) > 0) root.appendChild(el('div', 'step-stale-flag', t('（本轮已失效/撤销）')));
 
   // 底部动作：撤销本轮（后端 action_undone 事件全链置灰后本视图刷新）
   const acts = el('div', 'ac-round-actions');
-  const undo = el('button', 'ac-btn ac-undo', '撤销本轮');
-  undo.title = '撤销本轮全部动作（其后动作将失效）';
+  const undo = el('button', 'ac-btn ac-undo', t('撤销本轮'));
+  undo.title = t('撤销本轮全部动作（其后动作将失效）');
   if (!seqs.length || (rd.n_stale || 0) > 0) undo.disabled = true;
   undo.addEventListener('click', async () => {
     if (!store.project || !seqs.length) return;
@@ -107,7 +108,7 @@ function renderRoundCard(rd, entries) {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => refreshSteps(), 500);
     } catch (e) {
-      setError('撤销本轮失败：' + e.message);
+      setError(t('撤销本轮失败：') + e.message);
       undo.disabled = false;
     }
   });
@@ -124,11 +125,11 @@ function entryRow(e) {
   const row = el('div', 'actcard step-entry' + (e.stale ? ' stale' : ''));
   row.dataset.seq = String(e.seq != null ? e.seq : '');
   const hd = el('div', 'ac-head');
-  hd.appendChild(el('span', 'ac-label', '\u2699 ' + (e.label || e.tool || '工具')));
+  hd.appendChild(el('span', 'ac-label', '\u2699 ' + (e.label || e.tool || t('工具'))));
   if (e.args) hd.appendChild(el('span', 'ac-sum', e.args));
   row.appendChild(hd);
   const imp = e.impact && e.impact.text;
-  if (imp) row.appendChild(el('div', 'ac-impact', '影响：' + imp));
+  if (imp) row.appendChild(el('div', 'ac-impact', t('影响：') + imp));
   return row;
 }
 
@@ -139,11 +140,11 @@ function renderItemRow(it) {
   row.dataset.itemId = it.id || '';
   row.appendChild(el('span', 'stg-badge stg-badge-' + state, STATE_TEXT[state] || state));
   row.appendChild(el('span', 'stg-title step-item-title', it.title || it.id || ''));
-  const sub = [KIND_TEXT[it.producer] || it.producer || '', it.ready === false ? '未就绪' : '']
+  const sub = [KIND_TEXT[it.producer] || it.producer || '', it.ready === false ? t('未就绪') : '']
     .filter(Boolean).join(' · ');
   row.appendChild(el('span', 'step-item-sub', sub));
-  const t = itemTs(it);
-  if (t) row.appendChild(el('span', 'step-item-ts', new Date(t * 1000).toTimeString().slice(0, 8)));
+  const ts = itemTs(it);
+  if (ts) row.appendChild(el('span', 'step-item-ts', new Date(ts * 1000).toTimeString().slice(0, 8)));
   const arrow = el('span', 'step-item-arrow', '\u25b8');
   row.appendChild(arrow);
 
@@ -156,7 +157,7 @@ function renderItemRow(it) {
     arrow.textContent = body.hidden ? '\u25b8' : '\u25be';
     if (body.hidden || loaded) return;
     loaded = true;
-    const tip = el('div', 'stg-sub', '加载中…');
+    const tip = el('div', 'stg-sub', t('加载中…'));
     body.appendChild(tip);
     try {
       const node = await buildItemBody(it);
@@ -164,7 +165,7 @@ function renderItemRow(it) {
       body.appendChild(node);
     } catch (e) {
       body.innerHTML = '';
-      body.appendChild(el('div', 'stg-sub', '展开失败：' + ((e && e.message) || e)));
+      body.appendChild(el('div', 'stg-sub', t('展开失败：') + ((e && e.message) || e)));
     }
   });
   box.appendChild(row);
@@ -220,18 +221,18 @@ async function buildTuneBody(it) {
     cbody.appendChild(hd);
     if (s.reason) cbody.appendChild(el('div', 'tune-reason', s.reason));
     const acts = el('div', 'stg-acts');
-    const pv = el('button', 'stg-btn stg-play', '▶ 试听');
+    const pv = el('button', 'stg-btn stg-play', t('▶ 试听'));
     pv.dataset.role = 'steps-tune-preview';
-    pv.title = '在副本上试跑渲染（工程零改动）';
+    pv.title = t('在副本上试跑渲染（工程零改动）');
     pv.addEventListener('click', async (ev) => {
       ev.stopPropagation();
       pv.disabled = true;
-      pv.textContent = '渲染中…';
+      pv.textContent = t('渲染中…');
       try {
         const rr = await api.tunePreview(store.project, ts, s.id);
         playUrl(rr.url);
-      } catch (e) { setError('试听失败：' + ((e && e.message) || e)); }
-      finally { pv.disabled = false; pv.textContent = '▶ 试听'; }
+      } catch (e) { setError(t('试听失败：') + ((e && e.message) || e)); }
+      finally { pv.disabled = false; pv.textContent = t('▶ 试听'); }
     });
     acts.appendChild(pv);
     cbody.appendChild(acts);
@@ -241,34 +242,34 @@ async function buildTuneBody(it) {
   wrap.appendChild(list);
 
   const foot = el('div', 'stg-acts');
-  const all = el('button', 'stg-btn', '全选');
+  const all = el('button', 'stg-btn', t('全选'));
   all.addEventListener('click', () => {
     for (const s of sels) selected[s.id] = true;
     for (const cb of list.querySelectorAll('input[type=checkbox]')) cb.checked = true;
     for (const c of list.querySelectorAll('.tune-card')) c.classList.add('sel');
   });
-  const none = el('button', 'stg-btn', '全不选');
+  const none = el('button', 'stg-btn', t('全不选'));
   none.addEventListener('click', () => {
     for (const s of sels) selected[s.id] = false;
     for (const cb of list.querySelectorAll('input[type=checkbox]')) cb.checked = false;
     for (const c of list.querySelectorAll('.tune-card')) c.classList.remove('sel');
   });
-  const okBtn = el('button', 'stg-btn stg-adopt', '⇥ 应用选中');
+  const okBtn = el('button', 'stg-btn stg-adopt', t('⇥ 应用选中'));
   okBtn.dataset.role = 'steps-tune-apply';
-  okBtn.title = '命令层事务 + 自动对拍；可整批撤销';
+  okBtn.title = t('命令层事务 + 自动对拍；可整批撤销');
   okBtn.addEventListener('click', async () => {
     const ids = Object.keys(selected).filter((k) => selected[k]);
-    if (!ids.length) { setError('未勾选任何建议'); return; }
+    if (!ids.length) { setError(t('未勾选任何建议')); return; }
     okBtn.disabled = true;
-    okBtn.textContent = '应用中…';
+    okBtn.textContent = t('应用中…');
     try {
       const rr = await api.tuneApply(store.project, { batch_ts: ts, ids });
-      bus.dispatch('toast', '已应用 ' + ((rr.applied || []).length || ids.length) + ' 条建议（对拍小结；可整批撤销）');
+      bus.dispatch('toast', t('已应用 ') + ((rr.applied || []).length || ids.length) + t(' 条建议（对拍小结；可整批撤销）'));
       setTimeout(() => refreshSteps(), 500);
     } catch (e) {
-      setError('应用失败：' + ((e && e.message) || e));
+      setError(t('应用失败：') + ((e && e.message) || e));
       okBtn.disabled = false;
-      okBtn.textContent = '⇥ 应用选中';
+      okBtn.textContent = t('⇥ 应用选中');
     }
   });
   foot.appendChild(all);
@@ -294,12 +295,12 @@ function renderFeed() {
   // 顶部折叠区：更早 N 步（已处置产物）
   if (handled.length) {
     const box = el('div', 'step-earlier');
-    const head = el('button', 'step-earlier-head', `更早 ${handled.length} 步 \u25b8`);
+    const head = el('button', 'step-earlier-head', t(`更早 {p0} 步 \u25b8`, { p0: (handled.length) }));
     const body = el('div', 'step-earlier-body');
     body.hidden = true;
     head.addEventListener('click', () => {
       body.hidden = !body.hidden;
-      head.textContent = `更早 ${handled.length} 步 ` + (body.hidden ? '\u25b8' : '\u25be');
+      head.textContent = t(`更早 {p0} 步 `, { p0: (handled.length) }) + (body.hidden ? '\u25b8' : '\u25be');
     });
     for (const it of handled) body.appendChild(renderItemRow(it));
     box.appendChild(head);
@@ -317,7 +318,7 @@ function renderFeed() {
   for (const f of flow) feedEl.appendChild(f.node());
 
   if (!flow.length && !handled.length) {
-    feedEl.appendChild(el('div', 'step-empty', '暂无步骤——发一条指令，或从快捷命令触发产物。'));
+    feedEl.appendChild(el('div', 'step-empty', t('暂无步骤——发一条指令，或从快捷命令触发产物。')));
   }
   syncSnapshot();
 }
@@ -347,7 +348,7 @@ export async function refreshSteps() {
     updateBadge(stg && stg.counts);
     renderFeed();
   } catch (e) {
-    setError('步骤视图加载失败：' + e.message);
+    setError(t('步骤视图加载失败：') + e.message);
   } finally {
     busy = false;
   }

@@ -2,6 +2,7 @@
 
 消息记录按工程持久化到 sessionStorage（回滚/刷新不丢，仅 新会话/导入 时清空重载）。
 模块间只经 api/state/events 交互。 */
+import { t } from './i18n.js';
 
 import { api } from './api.js';
 import { bus } from './events.js';
@@ -22,40 +23,40 @@ let cmpSel;
 /* D 件：AI 动作 chips（快捷命令改造——结构化触发，确定性 REST 不经 LLM；
    参数走默认，要改就在对话里说） */
 async function runAiChip(name, btn) {
-  if (!store.project) { setError('先打开一个工程'); return; }
+  if (!store.project) { setError(t('先打开一个工程')); return; }
   const old = btn.textContent;
   btn.disabled = true;
   try {
     if (name === 'analyze') {
-      btn.textContent = '分析中…';
+      btn.textContent = t('分析中…');
       const r = await api.tuneAnalyze(store.project, store.tune.pack || '');
       const f = (r && r.facts) || {};
       const st = f.structure || {}, lv = f.levels || {};
       const bits = [];
-      if (st.tracks) bits.push(st.tracks.length + ' 轨');
-      if (lv.mix_peak_dbfs != null) bits.push('混音峰值 ' + lv.mix_peak_dbfs + ' dBFS');
-      if (lv.clipping) bits.push('⚠ 削波');
-      sysMsg('🔍 分析电平（只读）：' + (bits.join(' · ') || '事实包已就绪（结构 / 电平 / 逐段 / 频谱 / 目标）'));
+      if (st.tracks) bits.push(st.tracks.length + t(' 轨'));
+      if (lv.mix_peak_dbfs != null) bits.push(t('混音峰值 ') + lv.mix_peak_dbfs + ' dBFS');
+      if (lv.clipping) bits.push(t('⚠ 削波'));
+      sysMsg(t('🔍 分析电平（只读）：') + (bits.join(' · ') || t('事实包已就绪（结构 / 电平 / 逐段 / 频谱 / 目标）')));
     } else if (name === 'suggest') {
-      btn.textContent = '生成中…';
+      btn.textContent = t('生成中…');
       const r = await api.tuneSuggest(store.project, { pack: store.tune.pack || null, context: '' });
       const n = ((((r || {}).batch) || {}).suggestions || []).length;
-      toast('＋ 调参建议：批次已生成（' + n + ' 条）→ 步骤流「待处置」');
+      toast(t('＋ 调参建议：批次已生成（') + n + t(' 条）→ 步骤流「待处置」'));
     } else if (name === 'arrange') {
-      btn.textContent = '生成中…';
+      btn.textContent = t('生成中…');
       let pk = store.arrange.pack;
       if (!pk) {
         const rp = await api.arrangePacks(store.project);
         const list = (rp && rp.packs) || [];
         pk = (list[0] && list[0].pack) || '';
       }
-      if (!pk) { setError('没有可用风格包（presets/arrangements 为空）'); return; }
+      if (!pk) { setError(t('没有可用风格包（presets/arrangements 为空）')); return; }
       const r = await api.arrangeGenerate(store.project, { pack: pk, strength: 'standard', context: '' });
       const st2 = (((r || {}).batch) || {}).stats || {};
-      toast('＋ 配器初稿（包 ' + pk + ' · 标准档）：' + (st2.tracks || 0) + ' 轨 / ' + (st2.notes || 0) + ' 音 → 步骤流「待处置」');
+      toast(t('＋ 配器初稿（包 ') + pk + t(' · 标准档）：') + (st2.tracks || 0) + t(' 轨 / ') + (st2.notes || 0) + t(' 音 → 步骤流「待处置」'));
     } else if (name === 'chain') {
       bus.dispatch('focus-chain');
-      toast('已定位「链」页签——选好入参后点「运行全链」');
+      toast(t('已定位「链」页签——选好入参后点「运行全链」'));
     }
   } catch (e) { setError(String((e && e.message) || e)); }
   finally { btn.disabled = false; btn.textContent = old; }
@@ -68,7 +69,7 @@ async function renderEngCtx() {
   if (!engCtxBody) return;
   const seq = ++engCtxSeq;
   engCtxBody.innerHTML = '';
-  if (!store.project) { engCtxBody.appendChild(text('msg', '未打开工程')); return; }
+  if (!store.project) { engCtxBody.appendChild(text('msg', t('未打开工程'))); return; }
   await refreshAgents().catch(() => {});
   if (seq !== engCtxSeq) return;   // 过期渲染丢弃
   engCtxBody.innerHTML = '';
@@ -174,8 +175,8 @@ function groupFor(key) {
   return g;
 }
 
-const STAT_LABELS = { notes: '修改音符', track_add: '轨道', track_del: '轨道', track_edit: '轨名',
-                      fx: '效果器', param: '参数', other: '动作' };
+const STAT_LABELS = { notes: t('修改音符'), track_add: t('轨道'), track_del: t('轨道'), track_edit: t('轨名'),
+                      fx: t('效果器'), param: t('参数'), other: t('动作') };
 
 /** 计数 → 卡面文案（修改音符 ×16 · 轨道 +2 · 效果器 +1 …） */
 function statText(k, v) {
@@ -197,7 +198,7 @@ function updateGroupHead(g) {
     g.root.prepend(g.head);
   }
   const collapsed = g.root.classList.contains('collapsed');
-  g.head.textContent = '本轮变更 · ' + g.cards + ' 个动作 ' + (collapsed ? '\u25b8' : '\u25be');
+  g.head.textContent = t('本轮变更 · ') + g.cards + t(' 个动作 ') + (collapsed ? '\u25b8' : '\u25be');
 }
 
 /** 统计行（对话产物流 B 件：同类合并计数） */
@@ -217,12 +218,12 @@ function ensureRoundActions(g) {
   if (!g.actionsNode) {
     g.actionsNode = el('ac-round-actions');
     const diff = document.createElement('button');
-    diff.className = 'ac-btn'; diff.textContent = '查看 diff';
-    diff.title = '跳转并标记本轮改动范围';
+    diff.className = 'ac-btn'; diff.textContent = t('查看 diff');
+    diff.title = t('跳转并标记本轮改动范围');
     diff.addEventListener('click', () => viewRoundDiff(g));
     const undo = document.createElement('button');
-    undo.className = 'ac-btn ac-undo'; undo.textContent = '撤销本轮';
-    undo.title = '撤销本轮全部动作（其后动作将失效）';
+    undo.className = 'ac-btn ac-undo'; undo.textContent = t('撤销本轮');
+    undo.title = t('撤销本轮全部动作（其后动作将失效）');
     undo.addEventListener('click', () => doRoundUndo(g, undo));
     g.actionsNode.appendChild(diff);
     g.actionsNode.appendChild(undo);
@@ -238,9 +239,9 @@ async function doRoundUndo(g, btn) {
   try {
     const min = Math.min.apply(null, seqs);
     const r = await api.actionUndo(store.project, min);
-    toast('已撤销本轮（#' + min + ' 起）：' + g.cards + ' 个动作' + (refTag(r) ? ' ' + refTag(r) : ''));
+    toast(t('已撤销本轮（#') + min + t(' 起）：') + g.cards + t(' 个动作') + (refTag(r) ? ' ' + refTag(r) : ''));
   } catch (e) {
-    setError('撤销本轮失败：' + e.message);
+    setError(t('撤销本轮失败：') + e.message);
     btn.disabled = false;
   }
 }
@@ -248,7 +249,7 @@ async function doRoundUndo(g, btn) {
 /** 查看 diff：标记 + 跳转该轮改动范围（三色叠层=最新轮由 diff_applied 自动叠加） */
 function viewRoundDiff(g) {
   const tracks = Array.from(g.seenTracks);
-  if (!tracks.length) { toast('本轮无谱面改动'); return; }
+  if (!tracks.length) { toast(t('本轮无谱面改动')); return; }
   addAgentTracks(tracks);
   focusImpact({ impact: { tracks: tracks.map((i) => ({ index: i })) } });
 }
@@ -265,41 +266,41 @@ function syncStepsSnapshot() {
 
 function buildActionCard(rec) {
   const root = el('actcard');
-  root.title = '点击聚焦改动范围';
+  root.title = t('点击聚焦改动范围');
   root.dataset.actionId = rec.action_id || '';
   if (rec.seq != null) root.dataset.seq = String(rec.seq);
   if (rec.tool) root.dataset.tool = rec.tool;
 
   const head = el('ac-head');
-  head.appendChild(text('ac-label', '⚙ ' + (rec.label || rec.tool || '工具')));
+  head.appendChild(text('ac-label', '⚙ ' + (rec.label || rec.tool || t('工具'))));
   if (rec.summary) head.appendChild(text('ac-sum', rec.summary));
   head.appendChild(el('ac-sp'));
   if (rec.undoable && rec.seq != null) {
     const b = document.createElement('button');
     b.className = 'ac-btn ac-undo';
-    b.textContent = '撤销';
-    b.title = '撤销这个动作（其后动作将失效）';
+    b.textContent = t('撤销');
+    b.title = t('撤销这个动作（其后动作将失效）');
     b.addEventListener('click', () => doActionUndo(rec, b));
     head.appendChild(b);
   }
   const more = document.createElement('button');
   more.className = 'ac-btn ac-more';
-  more.textContent = '详情';
+  more.textContent = t('详情');
   head.appendChild(more);
   root.appendChild(head);
 
-  if (rec.impact && rec.impact.text) root.appendChild(text('ac-impact', '影响：' + rec.impact.text));
+  if (rec.impact && rec.impact.text) root.appendChild(text('ac-impact', t('影响：') + rec.impact.text));
   const rc = receiptLine(rec.observation);
-  if (rc) root.appendChild(text('ac-receipt', '回执：' + rc));
+  if (rc) root.appendChild(text('ac-receipt', t('回执：') + rc));
 
   const detail = document.createElement('pre');
   detail.className = 'ac-detail';
   detail.hidden = true;
-  detail.textContent = (rec.args ? '参数：' + rec.args + LF : '') + '回执：' + LF + (rec.observation || '');
+  detail.textContent = (rec.args ? t('参数：') + rec.args + LF : '') + t('回执：') + LF + (rec.observation || '');
   root.appendChild(detail);
   more.addEventListener('click', () => {
     detail.hidden = !detail.hidden;
-    more.textContent = detail.hidden ? '详情' : '收起';
+    more.textContent = detail.hidden ? t('详情') : t('收起');
   });
   // 批B B1-3：点动作卡 → 聚焦改动范围（选中该轨 / 单轨视图切到该轨）
   root.addEventListener('click', (e) => {
@@ -320,9 +321,9 @@ function buildActionCard(rec) {
 function appendActionRec(rec) {
   const g = groupFor(groupKey(rec));
   if (rec.read_only) {
-    g.readLabels.push(rec.label || rec.tool || '工具');
+    g.readLabels.push(rec.label || rec.tool || t('工具'));
     if (!g.readNode) { g.readNode = text('ac-readrow', ''); g.root.appendChild(g.readNode); }
-    g.readNode.textContent = '只读 ×' + g.readLabels.length + '：' + g.readLabels.join(' · ');
+    g.readNode.textContent = t('只读 ×') + g.readLabels.length + '：' + g.readLabels.join(' · ');
     if (g.actionsNode) g.root.appendChild(g.actionsNode);   // 动作行垫底
     syncStepsSnapshot();
     return;
@@ -355,10 +356,10 @@ async function doActionUndo(rec, btn) {
   btn.disabled = true;
   try {
     const r = await api.actionUndo(store.project, rec.seq);
-    toast('已撤销动作 #' + rec.seq + '：' + (rec.label || rec.tool) + (refTag(r) ? ' ' + refTag(r) : ''));
+    toast(t('已撤销动作 #') + rec.seq + '：' + (rec.label || rec.tool) + (refTag(r) ? ' ' + refTag(r) : ''));
     markStaleFrom(groupKey(rec), rec.action_id);
   } catch (e) {
-    setError('撤销失败：' + e.message);
+    setError(t('撤销失败：') + e.message);
     btn.disabled = false;
   }
 }
@@ -402,7 +403,7 @@ function focusImpact(rec) {
   const ti = Number(tracks[0].index) || 0;
   if (store.viewMode === 'single') setSingleTrack(ti);
   else setSelection(ti, []);
-  toast('聚焦：' + (tracks[0].name || ('轨 ' + ti)));
+  toast(t('聚焦：') + (tracks[0].name || (t('轨 ') + ti)));
 }
 
 function renderAll() {
@@ -462,7 +463,7 @@ function ensureStreamCard() {
   const summary = document.createElement('summary');
   const tLab = document.createElement('span');
   tLab.className = 'think-lab';
-  tLab.textContent = '思考中';
+  tLab.textContent = t('思考中');
   const tSep = document.createElement('span');
   tSep.className = 'think-sep';
   tSep.textContent = '·';
@@ -553,14 +554,14 @@ function renderStreamStatus() {
   if (!sc || !sc.statusEl) return;
   const L = sc.line || {};
   const elapsed = Math.floor((Date.now() - busyStartTs) / 1000);
-  const segs = [L.phase === 'stream' ? ('模型输出中… ' + fmtDur(elapsed))
-    : L.phase === 'thinking' ? ('模型思考中… ' + fmtDur(elapsed))
-    : ('等待模型响应… ' + fmtDur(elapsed))];
-  if (L.tool) segs.push('正在生成 ' + L.tool + ' 参数…（' + (L.toolChars >= 1000 ? (L.toolChars / 1000).toFixed(1) + 'k' : L.toolChars) + ' 字）');
+  const segs = [L.phase === 'stream' ? (t('模型输出中… ') + fmtDur(elapsed))
+    : L.phase === 'thinking' ? (t('模型思考中… ') + fmtDur(elapsed))
+    : (t('等待模型响应… ') + fmtDur(elapsed))];
+  if (L.tool) segs.push(t('正在生成 ') + L.tool + t(' 参数…（') + (L.toolChars >= 1000 ? (L.toolChars / 1000).toFixed(1) + 'k' : L.toolChars) + t(' 字）'));
   let silentLive = null;
   if (L.silent != null) {
     silentLive = Math.round(L.silent + (Date.now() - (L.silentTs || Date.now())) / 1000);
-    segs.push('模型静默 ' + fmtDur(silentLive));
+    segs.push(t('模型静默 ') + fmtDur(silentLive));
   }
   sc.statusEl.textContent = segs.join(' · ');
   sc.statusEl.className = 'statusline' + (silentLive != null && silentLive >= 90 ? ' danger' : silentLive != null && silentLive >= 60 ? ' warn' : '');
@@ -569,7 +570,7 @@ function renderStreamStatus() {
 /* ---------------- 发送 ---------------- */
 
 async function send(message) {
-  if (!store.project) { setError('先打开一个工程'); return; }
+  if (!store.project) { setError(t('先打开一个工程')); return; }
   if (!message.trim() || store.agentBusy) return;
   if (streamCard) finalizeStreamCard();   // 批A P18：新轮开工前清理上轮残留（异常路径防线）
 
@@ -585,10 +586,10 @@ async function send(message) {
   autoGrowInput();
   setAgentBusy(true);
   startBusyTicker();
-  sysMsg('已发送（' + (anns.length ? '含 ' + anns.length + ' 条人工标注：确定性先行、不走 LLM；' : '')
-    + (refs.length ? '含 ' + refs.length + ' 条对象引用；' : '')
-    + (ua.length ? '含 ' + ua.length + ' 条手动操作摘要；' : '')
-    + 'SSE 事件流；目标版本 ' + baseRev + '）…');
+  sysMsg(t('已发送（') + (anns.length ? t('含 ') + anns.length + t(' 条人工标注：确定性先行、不走 LLM；') : '')
+    + (refs.length ? t('含 ') + refs.length + t(' 条对象引用；') : '')
+    + (ua.length ? t('含 ') + ua.length + t(' 条手动操作摘要；') : '')
+    + t('SSE 事件流；目标版本 ') + baseRev + '）…');
   try {
     const res = await api.chat(store.project, message, baseRev, anns.length ? anns : null, sel, ua.length ? ua : null, refs.length ? refs : null);
     sysMsg('session：' + res.session_id);
@@ -598,9 +599,9 @@ async function send(message) {
   } catch (e) {
     setAgentBusy(false);
     stopBusyTicker();
-    const msg = '启动失败：' + e.message;
+    const msg = t('启动失败：') + e.message;
     appendCard(text('msg error', msg), { kind: 'error', text: msg, ts: Date.now() });
-    if (String(e.message || '').indexOf('409') >= 0) sysMsg('（已有会话在跑：若界面卡在"运行中"，刷新页面即可复位）');
+    if (String(e.message || '').indexOf('409') >= 0) sysMsg(t('（已有会话在跑：若界面卡在"运行中"，刷新页面即可复位）'));
   }
 }
 
@@ -644,25 +645,25 @@ function wireEvents() {
     sc.thinkPre.textContent = '';
     sc.thinkInline.textContent = '';
     sc.thinkInline.classList.remove('head');
-    sc.thinkLab.textContent = '思考中';
+    sc.thinkLab.textContent = t('思考中');
     sc.thinkDs.hidden = true;
     sc.thinkDs.open = false;
     sc.body.textContent = '';
     sc.line = { phase: 'waiting', silent: null, silentTs: 0, tool: null, toolChars: 0 };
     if (sc.statusEl) sc.statusEl.className = 'statusline';
     renderStreamStatus();
-    sysMsg('流式连接中断，正在重试…');
+    sysMsg(t('流式连接中断，正在重试…'));
   });
 
   bus.on('agent_turn', (d) => {
-    const tag = 'agent·第 ' + d.turn + ' 轮' + ((d.tool_calls || []).length ? ' · 调用 ' + d.tool_calls.length + ' 个工具' : '');
+    const tag = t('agent·第 ') + d.turn + t(' 轮') + ((d.tool_calls || []).length ? t(' · 调用 ') + d.tool_calls.length + t(' 个工具') : '');
     if (streamCard) {
       // 批B P8：定稿=转正——流式卡升格为本轮正式消息（思考链折叠保留；不再「移除+重挂」，P18 不回归）
       const sc = streamCard;
       if (sc.buf && sc.buf.t) { clearTimeout(sc.buf.t); sc.buf.t = 0; }
       flushDelta(sc);   // 批B 修正轮2：落掉缓冲残量
       streamCard = null;
-      const textContent = d.content || '（本轮仅工具调用）';
+      const textContent = d.content || t('（本轮仅工具调用）');
       const hasThink = !!(sc.thinkFull && sc.thinkFull.length);
       if (!hasThink && !d.content) {
         sc.root.remove();   // 空卡（无思考无正文）直接移除
@@ -671,14 +672,14 @@ function wireEvents() {
         if (sc.statusEl) sc.statusEl.remove();          // 状态行只属于流式期
         sc.body.innerHTML = mdToHtml(textContent);      // 正文以 turn 终值为准（替换流式累积）
         if (hasThink) {
-          sc.thinkLab.textContent = '思考';   // 定稿：单行条保留（每思考块 2 行 = tag + 思考条）
+          sc.thinkLab.textContent = t('思考');   // 定稿：单行条保留（每思考块 2 行 = tag + 思考条）
           sc.thinkPre.textContent = sc.thinkFull;                    // 全量入 pre（点开即读，不再随流重写）
           sc.thinkInline.textContent = sc.thinkFull.slice(0, 240);   // 定稿归位头部窗口（dsh 静置观感）
           sc.thinkInline.classList.add('head');
         } else {
           sc.thinkDs.remove();                // 空思考行不保留
         }
-        const t = el('tag'); t.textContent = tag; sc.root.prepend(t);
+        const tg = el('tag'); tg.textContent = tag; sc.root.prepend(tg);
         appendCard(sc.root, { kind: 'assistant', text: textContent, tag, ts: Date.now() });
       }
     } else if (d.content && d.content.trim()) {
@@ -746,9 +747,9 @@ function wireEvents() {
     stopBusyTicker();
     if (streamCard) finalizeStreamCard();   // 批A P18：防御——残留流式卡一并清理
     for (const k of Object.keys(pendingTools)) delete pendingTools[k];
-    const tag = 'agent 完成 · ' + d.turns + ' 轮 · ' + d.tool_calls_made + ' 次工具调用' +
-      (d.adopted ? ' · 编辑已采用（见 diff 叠层）' : ' · 无谱面改动') +
-      (d.stopped ? ' · 已停止' : '');
+    const tag = t('agent 完成 · ') + d.turns + t(' 轮 · ') + d.tool_calls_made + t(' 次工具调用') +
+      (d.adopted ? t(' · 编辑已采用（见 diff 叠层）') : t(' · 无谱面改动')) +
+      (d.stopped ? t(' · 已停止') : '');
     const arr = logs[currentProject] || [];
     const last = arr.length ? arr[arr.length - 1] : null;
     if (last && last.kind === 'assistant' && last.text === (d.content || '')) {
@@ -771,7 +772,7 @@ function wireEvents() {
     stopBusyTicker();
     if (streamCard) finalizeStreamCard();   // 批A P18：出错时残留流式卡一并清理
     for (const k of Object.keys(pendingTools)) delete pendingTools[k];
-    appendCard(text('msg error', 'agent 出错：' + (d.error || '')), { kind: 'error', text: 'agent 出错：' + (d.error || ''), ts: Date.now() });
+    appendCard(text('msg error', t('agent 出错：') + (d.error || '')), { kind: 'error', text: t('agent 出错：') + (d.error || ''), ts: Date.now() });
   });
 }
 
@@ -792,19 +793,19 @@ async function refreshRollbackOptions() {
     const entries = w.entries || [];
     if (entries.length) {
       const g = document.createElement('optgroup');
-      g.label = '最近窗口（快照）';
+      g.label = t('最近窗口（快照）');
       for (let k = entries.length; k >= 1; k--) {
         const e = entries[k - 1];
         const opt = document.createElement('option');
         opt.value = 'win:' + k;
-        opt.textContent = '#' + k + ' ' + (e.label || e.tool || '编辑')
-          + ((typeof w.cursor === 'number' && k === w.cursor) ? '（当前）' : '')
-          + (e.stale ? ' · 已失效' : '');
+        opt.textContent = '#' + k + ' ' + (e.label || e.tool || t('编辑'))
+          + ((typeof w.cursor === 'number' && k === w.cursor) ? t('（当前）') : '')
+          + (e.stale ? t(' · 已失效') : '');
         g.appendChild(opt);
       }
       const opt0 = document.createElement('option');
       opt0.value = 'win:0';
-      opt0.textContent = '#0 窗口起点（保留窗口内最早状态）';
+      opt0.textContent = t('#0 窗口起点（保留窗口内最早状态）');
       g.appendChild(opt0);
       rollbackSel.appendChild(g);
     }
@@ -817,7 +818,7 @@ async function refreshRollbackOptions() {
     const favs = r.favorites || [];
     if (favs.length) {
       const g = document.createElement('optgroup');
-      g.label = '收藏（git）';
+      g.label = t('收藏（git）');
       for (const f of favs) {
         const opt = document.createElement('option');
         opt.value = 'rev:' + f.tag;
@@ -831,7 +832,7 @@ async function refreshRollbackOptions() {
   // 段三：全部 git 版本（log）——缺省折叠在最后
   if ((store.gitLog || []).length) {
     const g = document.createElement('optgroup');
-    g.label = '全部 git 版本';
+    g.label = t('全部 git 版本');
     store.gitLog.forEach((line) => {
       const opt = document.createElement('option');
       opt.value = 'rev:' + line.split(' ')[0];
@@ -848,20 +849,20 @@ async function doNewSession() {
     await api.chatReset(store.project);
     if (logs[store.project]) { logs[store.project] = []; persist(); }
     renderAll();
-    sysMsg('已开新会话：下一轮对话将写入新的会话文件');
+    sysMsg(t('已开新会话：下一轮对话将写入新的会话文件'));
   } catch (e) { setError(e.message); }
 }
 
 async function doStop() {
   try {
     const r = await api.chatStop();
-    if (r.stopping) toast('已请求停止 agent 会话…');
-    else toast('当前没有运行中的会话');
+    if (r.stopping) toast(t('已请求停止 agent 会话…'));
+    else toast(t('当前没有运行中的会话'));
   } catch (e) { setError(e.message); }
 }
 
 async function openImportRow() {
-  if (!store.project) { setError('先打开一个工程'); return; }
+  if (!store.project) { setError(t('先打开一个工程')); return; }
   try {
     const r = await api.listSessions();
     importSelect.innerHTML = '';
@@ -872,7 +873,7 @@ async function openImportRow() {
       importSelect.appendChild(opt);
     });
     if (!importSelect.options.length) {
-      sysMsg('（没有可导入的历史会话）');
+      sysMsg(t('（没有可导入的历史会话）'));
     }
     importRow.hidden = false;
     importSelect.focus();
@@ -880,22 +881,22 @@ async function openImportRow() {
 }
 
 async function confirmImport() {
-  if (!store.project || !importSelect.value) { setError('先选一个会话文件'); return; }
+  if (!store.project || !importSelect.value) { setError(t('先选一个会话文件')); return; }
   try {
     const r = await api.loadSession(store.project, importSelect.value);
     importRow.hidden = true;
     logs[store.project] = [];
     renderAll();
-    sysMsg('已导入会话 ' + r.session_id + '（消息回放 + 续接同一 JSONL）');
+    sysMsg(t('已导入会话 ') + r.session_id + t('（消息回放 + 续接同一 JSONL）'));
     for (const m of r.messages || []) {
       if (m.role === 'user') logs[store.project].push({ kind: 'user', text: m.content || '', ts: Date.now() });
-      else if (m.role === 'assistant') logs[store.project].push({ kind: 'assistant', text: m.content || '', tag: '（历史）', ts: Date.now() });
+      else if (m.role === 'assistant') logs[store.project].push({ kind: 'assistant', text: m.content || '', tag: t('（历史）'), ts: Date.now() });
       else if (m.role === 'tool') logs[store.project].push({ kind: 'tool', name: 'tool', text: m.content || '', ts: Date.now() });
       else if (m.role === 'system') logs[store.project].push({ kind: 'sys', text: m.content || '', ts: Date.now() });
     }
     persist();
     renderAll();
-    toast('已续接会话 ' + r.session_id);
+    toast(t('已续接会话 ') + r.session_id);
   } catch (e) { setError(e.message); }
 }
 
@@ -980,7 +981,7 @@ export function init(opts) {
     try { liveChk.checked = localStorage.getItem('tsov.autorender') === '1'; } catch (e) { /* 忽略 */ }
     liveChk.addEventListener('change', () => {
       try { localStorage.setItem('tsov.autorender', liveChk.checked ? '1' : '0'); } catch (e) { /* 忽略 */ }
-      toast(liveChk.checked ? '跟随重渲：开（每步采用后自动重渲试听）' : '跟随重渲：关');
+      toast(liveChk.checked ? t('跟随重渲：开（每步采用后自动重渲试听）') : t('跟随重渲：关'));
     });
   }
 
@@ -1019,9 +1020,9 @@ export function init(opts) {
       try { ref = JSON.parse(e.dataTransfer.getData('application/x-tsov-ref') || 'null'); } catch (err) { ref = null; }
       if (!ref || !ref.kind) return;
       const q = store.pendingRefs || [];
-      if (q.some((x) => JSON.stringify(x) === JSON.stringify(ref))) { toast('已在引用队列（未重复添加）'); return; }
+      if (q.some((x) => JSON.stringify(x) === JSON.stringify(ref))) { toast(t('已在引用队列（未重复添加）')); return; }
       setRefs(q.concat([ref]));
-      toast('已加入对象引用（随下条消息发送）');
+      toast(t('已加入对象引用（随下条消息发送）'));
     });
   }
 
@@ -1030,24 +1031,24 @@ export function init(opts) {
     try {
       await api.undo(store.project);   // M-V7 D2/D3：窗口游标撤销（零 commit）
       clearDiff();
-      toast('已撤销一步（快照窗口）');
+      toast(t('已撤销一步（快照窗口）'));
     } catch (e) { setError(e.message); }
   });
 
   rollbackBtn.addEventListener('click', async () => {
     const v = rollbackSel.value;
-    if (!store.project || !v) { setError('先选一个恢复点'); return; }
+    if (!store.project || !v) { setError(t('先选一个恢复点')); return; }
     try {
       if (v.startsWith('win:')) {
         // M-V7 D3：窗口段 = 快照点恢复（零新版本）
         const k = parseInt(v.slice(4), 10);
         await api.windowJump(store.project, k);
         clearDiff();
-        toast('已恢复到快照 #' + k + '（窗口内 · 零新版本）');
+        toast(t('已恢复到快照 #') + k + t('（窗口内 · 零新版本）'));
       } else {
         await api.rollback(store.project, v.slice(4));
         clearDiff();
-        toast('已回滚到 ' + v.slice(4));
+        toast(t('已回滚到 ') + v.slice(4));
       }
     } catch (e) { setError(e.message); }
   });

@@ -1,5 +1,6 @@
 /* dock.js —— 下方面板：效果器 / 音源 / 混音台（UI 批A；可折叠 + localStorage 记忆）
    与命令层 op 直连：add_effect / remove_effect / set_instrument / set_track_mix */
+import { t } from './i18n.js';
 
 import { bus } from './events.js';
 import { api } from './api.js';
@@ -22,11 +23,11 @@ function selectedTrack() {
 }
 
 async function post(label, commands) {
-  if (!store.project) { setError('先打开一个工程'); return null; }
+  if (!store.project) { setError(t('先打开一个工程')); return null; }
   try {
-    const r = await api.postBatch(store.project, label, commands, '面板：' + label);
-    if (r.applied) bus.dispatch('toast', '已执行 ' + label + ' ' + refTag(r));
-    else setError('被拒：' + (r.errors || []).join('；'));
+    const r = await api.postBatch(store.project, label, commands, t('面板：') + label);
+    if (r.applied) bus.dispatch('toast', t('已执行 ') + label + ' ' + refTag(r));
+    else setError(t('被拒：') + (r.errors || []).join('；'));
     return r;
   } catch (e) { setError(e.message); return null; }
 }
@@ -49,7 +50,7 @@ function renderFx() {
   fxPane.innerHTML = '';
   const cur = selectedTrack();
   if (!cur) {
-    fxPane.innerHTML = '<div class="fx-none">（先选一条轨道）</div>';
+    fxPane.innerHTML = t('<div class="fx-none">（先选一条轨道）</div>');
     return;
   }
   /* E5 段2：目标解析——当前轨 / 各总线 / master */
@@ -82,12 +83,12 @@ function renderFx() {
     const sub = document.createElement('div');
     sub.className = 'fx-sub';
     const keys = Object.keys(fx.params || {});
-    sub.textContent = keys.slice(0, 3).map((k) => k.replace(/_db|_hz|_seconds|_level/g, '') + ' ' + fx.params[k]).join(' · ') || '默认参数';
+    sub.textContent = keys.slice(0, 3).map((k) => k.replace(/_db|_hz|_seconds|_level/g, '') + ' ' + fx.params[k]).join(' · ') || t('默认参数');
     const x = document.createElement('button');
     x.className = 'fx-x';
     x.textContent = '✕';
-    x.title = '移除该效果（一个 commit，可撤销）';
-    x.onclick = () => post('移除效果 ' + fx.type, [{ op: 'remove_effect', track: cur.index, index: i, value: Object.assign({}, tbase) }]);
+    x.title = t('移除该效果（一个 commit，可撤销）');
+    x.onclick = () => post(t('移除效果 ') + fx.type, [{ op: 'remove_effect', track: cur.index, index: i, value: Object.assign({}, tbase) }]);
     slot.appendChild(hd);
     slot.appendChild(sub);
     /* v0.2 批D（P6）：效果器卡 = 对象引用源（拖到对话栏 = 效果器引用） */
@@ -104,7 +105,7 @@ function renderFx() {
     const gear = document.createElement('button');
     gear.className = 'fx-gear';
     gear.textContent = '⚙';
-    gear.title = '编辑该效果参数（范围=注册表；一命令提交，可撤销）';
+    gear.title = t('编辑该效果参数（范围=注册表；一命令提交，可撤销）');
     gear.onclick = (e) => { e.stopPropagation(); fxEdit = (fxEdit === i ? null : i); renderFx(); };
     slot.appendChild(gear);
     slot.appendChild(x);
@@ -118,13 +119,13 @@ function renderFx() {
   });
   const tgtSel = document.createElement('select');
   tgtSel.className = 'fx-kind';
-  tgtSel.title = '效果目标：当前轨 / 总线 / master（E5）';
+  tgtSel.title = t('效果目标：当前轨 / 总线 / master（E5）');
   {
     const ot = document.createElement('option');
-    ot.value = 'track'; ot.textContent = '当前轨'; tgtSel.appendChild(ot);
+    ot.value = 'track'; ot.textContent = t('当前轨'); tgtSel.appendChild(ot);
     for (const b of busList) {
       const ob = document.createElement('option');
-      ob.value = 'bus:' + b.name; ob.textContent = '总线 ' + b.name; tgtSel.appendChild(ob);
+      ob.value = 'bus:' + b.name; ob.textContent = t('总线 ') + b.name; tgtSel.appendChild(ob);
     }
     const om = document.createElement('option');
     om.value = 'master'; om.textContent = 'master'; tgtSel.appendChild(om);
@@ -137,7 +138,7 @@ function renderFx() {
   }
   const kindSel = document.createElement('select');
   kindSel.className = 'fx-kind';
-  kindSel.title = '选择效果类型后点「＋」加入链尾';
+  kindSel.title = t('选择效果类型后点「＋」加入链尾');
   for (const k of meta.effect_kinds) {
     const o = document.createElement('option');
     o.value = k; o.textContent = k;
@@ -146,16 +147,16 @@ function renderFx() {
   const add = document.createElement('button');
   add.className = 'fx-add';
   add.textContent = '＋';
-  add.title = '添加效果（默认参数，可在检查器/预设里再调）';
+  add.title = t('添加效果（默认参数，可在检查器/预设里再调）');
   add.onclick = async () => {
     const v = Object.assign({}, tbase, { type: kindSel.value });
     if (kindSel.value === 'vst3') {
-      const p = window.prompt('vst3 效果：内层二进制路径（相对仓库或绝对路径）',
+      const p = window.prompt(t('vst3 效果：内层二进制路径（相对仓库或绝对路径）'),
         'vendor/vst3/TAL-Chorus-LX.vst3/Contents/x86_64-win/TAL-Chorus-LX.vst3');
       if (!p || !p.trim()) return;
       v.params = { path: p.trim() };
     }
-    await post('添加效果 ' + kindSel.value, [{ op: 'add_effect', track: cur.index, value: v }]);
+    await post(t('添加效果 ') + kindSel.value, [{ op: 'add_effect', track: cur.index, value: v }]);
   };
   wrap.appendChild(tgtSel);
   wrap.appendChild(kindSel);
@@ -170,14 +171,14 @@ function renderFx() {
     ed.className = 'fx-edit';
     const ttl = document.createElement('div');
     ttl.className = 'fx-edit-ttl';
-    ttl.textContent = '参数编辑：' + fxe.type + '（第 ' + (fxEdit + 1) + ' 槽；范围=注册表）';
+    ttl.textContent = t('参数编辑：') + fxe.type + t('（第 ') + (fxEdit + 1) + t(' 槽；范围=注册表）');
     ed.appendChild(ttl);
     const keys = Object.keys(specs);
     const inputs = {};
     if (!keys.length) {
       const none = document.createElement('div');
       none.className = 'fx-none';
-      none.textContent = '（该类型无注册表参数——vst3 动态参数请走插件面）';
+      none.textContent = t('（该类型无注册表参数——vst3 动态参数请走插件面）');
       ed.appendChild(none);
     }
     for (const k of keys) {
@@ -194,7 +195,7 @@ function renderFx() {
       if (rng) { num.min = rng[0]; num.max = rng[1]; }
       const curVal = (fxe.params || {})[k];
       num.value = (curVal == null ? '' : String(curVal));
-      num.placeholder = rng ? ('[' + rng[0] + '~' + rng[1] + ']') : '默认';
+      num.placeholder = rng ? ('[' + rng[0] + '~' + rng[1] + ']') : t('默认');
       sld.value = (curVal == null ? (rng ? (rng[0] + rng[1]) / 2 : 0) : curVal);
       sld.oninput = () => { num.value = String(Math.round(Number(sld.value) * 1000) / 1000); };
       num.oninput = () => { const vv = Number(num.value); if (Number.isFinite(vv)) sld.value = String(vv); };
@@ -206,7 +207,7 @@ function renderFx() {
     ft.className = 'fx-edit-ft';
     const applyB = document.createElement('button');
     applyB.className = 'primary fx-edit-apply';
-    applyB.textContent = '应用';
+    applyB.textContent = t('应用');
     applyB.onclick = async () => {
       const patch = {};
       let n = 0;
@@ -218,24 +219,24 @@ function renderFx() {
         const oldV = (fxe.params || {})[k];
         if (oldV == null || Math.abs(vv - Number(oldV)) > 1e-9) { patch[k] = vv; n += 1; }
       }
-      if (!n) { bus.dispatch('toast', '无改动'); return; }
+      if (!n) { bus.dispatch('toast', t('无改动')); return; }
       const idxEdit = fxEdit;
-      await post('参数编辑 ' + fxe.type, [{ op: 'set_effect_params', track: cur.index, value: Object.assign({}, tbase, { index: idxEdit, params: patch }) }]);
+      await post(t('参数编辑 ') + fxe.type, [{ op: 'set_effect_params', track: cur.index, value: Object.assign({}, tbase, { index: idxEdit, params: patch }) }]);
       fxEdit = null;
       renderFx();
       setTimeout(renderFx, 450);   /* 批处理回包后刷新显示值 */
     };
     const closeB = document.createElement('button');
-    closeB.textContent = '收起';
+    closeB.textContent = t('收起');
     closeB.onclick = () => { fxEdit = null; renderFx(); };
     /* v0.2 批C 后段（P26）：重置 = 回填引擎默认（注册表 effect_defaults；点「应用」才写入） */
     const resetB = document.createElement('button');
     resetB.className = 'fx-edit-reset';
-    resetB.textContent = '重置（回默认）';
-    resetB.title = '各参数填回引擎默认值（/api/meta params.effect_defaults）；点「应用」才落盘';
+    resetB.textContent = t('重置（回默认）');
+    resetB.title = t('各参数填回引擎默认值（/api/meta params.effect_defaults）；点「应用」才落盘');
     resetB.onclick = () => {
       const defs = ((store.metaParams && store.metaParams.effect_defaults) || {})[String(fxe.type || '')] || {};
-      if (!Object.keys(defs).length) { bus.dispatch('toast', '该类型无默认值表（vst3 走插件面）'); return; }
+      if (!Object.keys(defs).length) { bus.dispatch('toast', t('该类型无默认值表（vst3 走插件面）')); return; }
       let n = 0;
       for (const [k, el] of Object.entries(inputs)) {
         if (defs[k] == null) continue;
@@ -244,7 +245,7 @@ function renderFx() {
         if (sld) sld.value = String(defs[k]);
         n += 1;
       }
-      bus.dispatch('toast', n ? ('已回填 ' + n + ' 项默认值（点「应用」写入）') : '无默认值可回填');
+      bus.dispatch('toast', n ? (t('已回填 ') + n + t(' 项默认值（点「应用」写入）')) : t('无默认值可回填'));
     };
     ft.appendChild(applyB);
     ft.appendChild(resetB);
@@ -262,7 +263,7 @@ function renderSrc() {
   srcPane.innerHTML = '';
   const cur = selectedTrack();
   if (!cur) {
-    srcPane.innerHTML = '<div class="fx-none">（先选一条轨道）</div>';
+    srcPane.innerHTML = t('<div class="fx-none">（先选一条轨道）</div>');
     return;
   }
   const inst = cur.track.instrument || {};
@@ -272,12 +273,12 @@ function renderSrc() {
   const row1 = document.createElement('div');
   row1.className = 'src-row';
   const l1 = document.createElement('label');
-  l1.textContent = '音源';
+  l1.textContent = t('音源');
   const sel = document.createElement('select');
   const curProg = inst.program || '';
   const isPreset = meta.programs.includes(curProg);
   const o0 = document.createElement('option');
-  o0.value = ''; o0.textContent = isPreset ? '（默认钢琴）' : ('当前：' + (curProg || '默认'));
+  o0.value = ''; o0.textContent = isPreset ? t('（默认钢琴）') : (t('当前：') + (curProg || t('默认')));
   if (!isPreset) { o0.value = curProg; }
   sel.appendChild(o0);
   for (const name of meta.programs) {
@@ -286,20 +287,20 @@ function renderSrc() {
     if (name === curProg) o.selected = true;
     sel.appendChild(o);
   }
-  sel.onchange = () => post('音源 ' + (sel.value || '默认'), [{ op: 'set_instrument', track: cur.index, value: { program: sel.value } }]);
+  sel.onchange = () => post(t('音源 ') + (sel.value || t('默认')), [{ op: 'set_instrument', track: cur.index, value: { program: sel.value } }]);
   row1.appendChild(l1);
   row1.appendChild(sel);
 
   const row2 = document.createElement('div');
   row2.className = 'src-row';
   const l2 = document.createElement('label');
-  l2.textContent = '路径';
+  l2.textContent = t('路径');
   const pth = document.createElement('input');
-  pth.placeholder = 'vst3:<内层二进制路径> 或 sfz:<路径>（回车应用）';
+  pth.placeholder = t('vst3:<内层二进制路径> 或 sfz:<路径>（回车应用）');
   pth.value = (curProg.startsWith('vst3:') || curProg.startsWith('sfz:')) ? curProg : '';
   pth.onkeydown = (e) => {
     if (e.key === 'Enter' && pth.value.trim()) {
-      post('音源路径', [{ op: 'set_instrument', track: cur.index, value: { program: pth.value.trim() } }]);
+      post(t('音源路径'), [{ op: 'set_instrument', track: cur.index, value: { program: pth.value.trim() } }]);
     }
   };
   row2.appendChild(l2);
@@ -307,7 +308,7 @@ function renderSrc() {
 
   const note = document.createElement('div');
   note.className = 'src-note';
-  note.textContent = 'backend=' + (inst.backend || 'fluidsynth') + ' ｜ GM 名 / vst3: / sfz: / 空串=默认 ｜ 改动一个 commit、可撤销';
+  note.textContent = 'backend=' + (inst.backend || 'fluidsynth') + t(' ｜ GM 名 / vst3: / sfz: / 空串=默认 ｜ 改动一个 commit、可撤销');
 
   form.appendChild(row1);
   form.appendChild(row2);
@@ -326,17 +327,17 @@ function renderChan() {
     /* 项目 profile（总谱视图默认显示） */
     const nm = document.createElement('span');
     nm.className = 'ch-name';
-    nm.innerHTML = '<b>项目 profile</b><span class="chan-sub muted small">主输出 · master</span>';
+    nm.innerHTML = t('<b>项目 profile</b><span class="chan-sub muted small">主输出 · master</span>');
 
     const volCell = document.createElement('span');
     volCell.className = 'ch-cell';
-    const volLb = document.createElement('label'); volLb.textContent = '主输出';
+    const volLb = document.createElement('label'); volLb.textContent = t('主输出');
     const vol = document.createElement('input');
     vol.type = 'range'; vol.min = '0'; vol.max = '200';
     const mv = store.score && store.score.master ? store.score.master.volume : 1;
     vol.value = String(Math.round((mv != null ? mv : 1) * 100));
     vol.disabled = true;
-    vol.title = '总线混音命令层后续迭代（Q45/批4）';
+    vol.title = t('总线混音命令层后续迭代（Q45/批4）');
     const volVal = document.createElement('span'); volVal.className = 'ch-val';
     volVal.textContent = vol.value + '%';
     volCell.appendChild(volLb); volCell.appendChild(vol); volCell.appendChild(volVal);
@@ -346,12 +347,12 @@ function renderChan() {
     const sc = store.score;
     info.textContent = sc
       ? ('tempo ' + Math.round(sc.tempo) + ' · ' + (sc.time_signature || '4/4') + ' · ' +
-         sc.tracks.length + ' 轨 · ' + sc.tracks.reduce((a, t) => a + t.notes.length, 0) + ' 音')
-      : '（未打开工程）';
+         sc.tracks.length + t(' 轨 · ') + sc.tracks.reduce((a, t) => a + t.notes.length, 0) + t(' 音'))
+      : t('（未打开工程）');
 
     const hint2 = document.createElement('span');
     hint2.className = 'ch-hint';
-    hint2.textContent = '双击轨道 → 单轨写谱（此处改为该轨通道条）｜全轨推子见「混音台」';
+    hint2.textContent = t('双击轨道 → 单轨写谱（此处改为该轨通道条）｜全轨推子见「混音台」');
 
     strip.appendChild(nm); strip.appendChild(volCell); strip.appendChild(info); strip.appendChild(hint2);
     chanPane.appendChild(strip);
@@ -360,7 +361,7 @@ function renderChan() {
 
   /* 单轨：该轨通道条（音源 + 音量/声像/M/S + 效果链摘要） */
   const cur = selectedTrack();
-  if (!cur) { chanPane.innerHTML = '<div class="fx-none">（先选一条轨道）</div>'; return; }
+  if (!cur) { chanPane.innerHTML = t('<div class="fx-none">（先选一条轨道）</div>'); return; }
   const inst = cur.track.instrument || {};
   const tc = trackColors();
 
@@ -377,11 +378,11 @@ function renderChan() {
   /* 音源 */
   const srcCell = document.createElement('span');
   srcCell.className = 'ch-cell';
-  const srcLb = document.createElement('label'); srcLb.textContent = '音源';
+  const srcLb = document.createElement('label'); srcLb.textContent = t('音源');
   const srcSel = document.createElement('select');
   const curProg = inst.program || '';
   const o0 = document.createElement('option');
-  o0.value = ''; o0.textContent = meta.programs.includes(curProg) ? '（默认钢琴）' : ('当前：' + (curProg || '默认'));
+  o0.value = ''; o0.textContent = meta.programs.includes(curProg) ? t('（默认钢琴）') : (t('当前：') + (curProg || t('默认')));
   if (!meta.programs.includes(curProg)) o0.value = curProg;
   srcSel.appendChild(o0);
   for (const p of meta.programs) {
@@ -390,7 +391,7 @@ function renderChan() {
     if (p === curProg) o.selected = true;
     srcSel.appendChild(o);
   }
-  srcSel.onchange = () => post('音源 ' + (srcSel.value || '默认'), [{ op: 'set_instrument', track: cur.index, value: { program: srcSel.value } }]);
+  srcSel.onchange = () => post(t('音源 ') + (srcSel.value || t('默认')), [{ op: 'set_instrument', track: cur.index, value: { program: srcSel.value } }]);
   srcCell.appendChild(srcLb); srcCell.appendChild(srcSel);
 
   /* 音量 / 声像 */
@@ -406,9 +407,9 @@ function renderChan() {
     cell.appendChild(lb); cell.appendChild(rg); cell.appendChild(vv);
     return cell;
   };
-  const volCell = mkRange('音量', 0, 200, Math.round((inst.volume != null ? inst.volume : 1) * 100),
+  const volCell = mkRange(t('音量'), 0, 200, Math.round((inst.volume != null ? inst.volume : 1) * 100),
     (v) => v + '%', (v) => ({ volume: v / 100 }));
-  const panCell = mkRange('声像', -100, 100, Math.round((cur.track.pan || 0) * 100),
+  const panCell = mkRange(t('声像'), -100, 100, Math.round((cur.track.pan || 0) * 100),
     (v) => (v === 0 ? 'C' : (v > 0 ? 'R' + v : 'L' + (-v))), (v) => ({ pan: v / 100 }));
 
   /* M/S */
@@ -417,11 +418,11 @@ function renderChan() {
   const m = document.createElement('button');
   m.className = 'ms' + (cur.track.mute ? ' on' : '');
   m.textContent = 'M';
-  m.onclick = () => post(cur.track.mute ? '取消静音' : '静音', [{ op: 'set_track_mix', track: cur.index, value: { mute: !cur.track.mute } }]);
+  m.onclick = () => post(cur.track.mute ? t('取消静音') : t('静音'), [{ op: 'set_track_mix', track: cur.index, value: { mute: !cur.track.mute } }]);
   const s = document.createElement('button');
   s.className = 'ms solo' + (cur.track.solo ? ' on' : '');
   s.textContent = 'S';
-  s.onclick = () => post(cur.track.solo ? '取消独奏' : '独奏', [{ op: 'set_track_mix', track: cur.index, value: { solo: !cur.track.solo } }]);
+  s.onclick = () => post(cur.track.solo ? t('取消独奏') : t('独奏'), [{ op: 'set_track_mix', track: cur.index, value: { solo: !cur.track.solo } }]);
   msCell.appendChild(m); msCell.appendChild(s);
 
   /* 效果链摘要 */
@@ -429,12 +430,12 @@ function renderChan() {
   fxCell.className = 'ch-fx';
   const fxs = (inst.effects || []);
   const fxLb = document.createElement('label');
-  fxLb.textContent = '效果链';
+  fxLb.textContent = t('效果链');
   fxLb.style.color = 'var(--muted)';
   fxLb.style.fontSize = 'var(--fs-xs)';
   fxCell.appendChild(fxLb);
   if (!fxs.length) {
-    const none = document.createElement('span'); none.className = 'cf off'; none.textContent = '（空）';
+    const none = document.createElement('span'); none.className = 'cf off'; none.textContent = t('（空）');
     fxCell.appendChild(none);
   } else {
     fxs.forEach((fx, i) => {
@@ -460,7 +461,7 @@ function renderMix() {
   if (!mixPane) return;
   mixPane.innerHTML = '';
   if (!store.score || !store.score.tracks.length) {
-    mixPane.innerHTML = '<div class="fx-none">（无音轨）</div>';
+    mixPane.innerHTML = t('<div class="fx-none">（无音轨）</div>');
     return;
   }
   const wrap = document.createElement('div');
@@ -470,7 +471,7 @@ function renderMix() {
     const inst = tr.instrument || {};
     const cell = document.createElement('div');
     cell.className = 'fader' + (ti === selTi ? ' sel' : '');
-    cell.title = '选中轨：' + (tr.name || ('track ' + ti));
+    cell.title = t('选中轨：') + (tr.name || ('track ' + ti));
     const nm = document.createElement('div');
     nm.className = 'f-name';
     nm.textContent = tr.name || ('track ' + ti);
@@ -478,22 +479,22 @@ function renderMix() {
     const val = Math.round((inst.volume != null ? inst.volume : 1) * 100);
     const rg = document.createElement('input');
     rg.type = 'range'; rg.min = '0'; rg.max = '200'; rg.value = String(val);
-    rg.title = '音量（%）';
+    rg.title = t('音量（%）');
     const vv = document.createElement('div');
     vv.className = 'f-val';
     vv.textContent = val + '%';
     rg.addEventListener('input', () => { vv.textContent = rg.value + '%'; });
-    rg.addEventListener('change', () => post('音量 ' + rg.value + '%', [{ op: 'set_track_mix', track: ti, value: { volume: Number(rg.value) / 100 } }]));
+    rg.addEventListener('change', () => post(t('音量 ') + rg.value + '%', [{ op: 'set_track_mix', track: ti, value: { volume: Number(rg.value) / 100 } }]));
     const ms = document.createElement('div');
     ms.className = 'f-ms';
     const m = document.createElement('button');
     m.className = 'ms' + (tr.mute ? ' on' : '');
     m.textContent = 'M';
-    m.onclick = () => post(tr.mute ? '取消静音' : '静音', [{ op: 'set_track_mix', track: ti, value: { mute: !tr.mute } }]);
+    m.onclick = () => post(tr.mute ? t('取消静音') : t('静音'), [{ op: 'set_track_mix', track: ti, value: { mute: !tr.mute } }]);
     const s = document.createElement('button');
     s.className = 'ms solo' + (tr.solo ? ' on' : '');
     s.textContent = 'S';
-    s.onclick = () => post(tr.solo ? '取消独奏' : '独奏', [{ op: 'set_track_mix', track: ti, value: { solo: !tr.solo } }]);
+    s.onclick = () => post(tr.solo ? t('取消独奏') : t('独奏'), [{ op: 'set_track_mix', track: ti, value: { solo: !tr.solo } }]);
     ms.appendChild(m);
     ms.appendChild(s);
     cell.appendChild(nm);
@@ -512,11 +513,11 @@ function renderMix() {
       const nmx = document.createElement('span');
       nmx.className = 'fs-nm';
       nmx.textContent = '→' + sname;
-      nmx.title = 'Send 支路：post-fader → 总线 ' + sname;
+      nmx.title = t('Send 支路：post-fader → 总线 ') + sname;
       const rng = document.createElement('input');
       rng.type = 'range'; rng.min = '0'; rng.max = '100';
       rng.value = String(Math.round(Number(sends[sname]) * 100));
-      rng.title = 'Send 量（%）：改动一个 commit、可撤销';
+      rng.title = t('Send 量（%）：改动一个 commit、可撤销');
       rng.addEventListener('change', () => {
         const next = Object.assign({}, sends);
         next[sname] = Number(rng.value) / 100;
@@ -525,18 +526,18 @@ function renderMix() {
       const x = document.createElement('button');
       x.className = 'fs-x';
       x.textContent = '✕';
-      x.title = '移除该 Send 支路';
+      x.title = t('移除该 Send 支路');
       x.onclick = () => {
         const next = Object.assign({}, sends);
         delete next[sname];
-        post('移除 Send ' + sname, [{ op: 'set_track_mix', track: ti, value: { sends: next } }]);
+        post(t('移除 Send ') + sname, [{ op: 'set_track_mix', track: ti, value: { sends: next } }]);
       };
       row.appendChild(nmx); row.appendChild(rng); row.appendChild(x);
       sendCell.appendChild(row);
     }
     if (busNames.some((bn) => sends[bn] == null)) {
       const addSel = document.createElement('select');
-      addSel.title = '添加 Send：选目标总线（默认量 50%）';
+      addSel.title = t('添加 Send：选目标总线（默认量 50%）');
       const o0 = document.createElement('option');
       o0.value = ''; o0.textContent = '＋ Send →';
       addSel.appendChild(o0);
@@ -550,7 +551,7 @@ function renderMix() {
         if (!addSel.value) return;
         const next = Object.assign({}, sends);
         next[addSel.value] = 0.5;
-        post('新增 Send ' + addSel.value, [{ op: 'set_track_mix', track: ti, value: { sends: next } }]);
+        post(t('新增 Send ') + addSel.value, [{ op: 'set_track_mix', track: ti, value: { sends: next } }]);
       };
       sendCell.appendChild(addSel);
     }
@@ -562,7 +563,7 @@ function renderMix() {
 
 function renderTabs() {
   const cur = selectedTrack();
-  if (hintEl) hintEl.textContent = cur ? ((cur.track.name || ('track ' + cur.index)) + ' · 轨道参数') : '';
+  if (hintEl) hintEl.textContent = cur ? ((cur.track.name || ('track ' + cur.index)) + t(' · 轨道参数')) : '';
 }
 
 /* M-V8 E2 段 3：录音面板（设备 / 录制 / 监听 → 录完直进时间线） */
@@ -579,18 +580,18 @@ function recFmt(sec) {
 function renderRec() {
   if (!recPane) return;
   if (recState.recording) return;   // 录音中不重建（计时器原地更新）
-  if (!store.project) { recPane.innerHTML = '<div class="fx-none">先打开一个工程</div>'; return; }
+  if (!store.project) { recPane.innerHTML = t('<div class="fx-none">先打开一个工程</div>'); return; }
   recPane.innerHTML =
     '<div class="rec-wrap">' +
-      '<div class="rec-row"><label>输入</label><select id="rec-in"></select>' +
-      '<label>输出·监听</label><select id="rec-out"></select></div>' +
+      t('<div class="rec-row"><label>输入</label><select id="rec-in"></select>') +
+      t('<label>输出·监听</label><select id="rec-out"></select></div>') +
       '<div class="rec-row"><label class="rec-mon"><input type="checkbox" id="rec-monitor">' +
-      ' 监听（软件直通，实测延迟约 30-90ms）</label></div>' +
-      '<div class="rec-row"><button id="rec-btn" class="rec-btn">● 开始录制</button>' +
+      t(' 监听（软件直通，实测延迟约 30-90ms）</label></div>') +
+      t('<div class="rec-row"><button id="rec-btn" class="rec-btn">● 开始录制</button>') +
       '<span id="rec-timer" class="rec-timer">00:00.0</span>' +
-      '<span class="rec-hint">录完自动入库（44.1k flac）并加入时间线</span></div>' +
-      '<div class="rec-row"><button id="rec-v2s" class="chain-btn">转乐谱 ◈实验性</button>' +
-      '<span class="rec-hint">录音 / 任意音频轨 → 哼唱快车道（降噪→响度→转录→量化→吸附）</span></div>' +
+      t('<span class="rec-hint">录完自动入库（44.1k flac）并加入时间线</span></div>') +
+      t('<div class="rec-row"><button id="rec-v2s" class="chain-btn">转乐谱 ◈实验性</button>') +
+      t('<span class="rec-hint">录音 / 任意音频轨 → 哼唱快车道（降噪→响度→转录→量化→吸附）</span></div>') +
     '</div>';
   const selIn = recPane.querySelector('#rec-in');
   const selOut = recPane.querySelector('#rec-out');
@@ -605,7 +606,7 @@ function renderRec() {
       recState.devs = recState.devs || await api.recordDevices();
       fill(selIn, recState.devs.inputs, recState.devs.default_in);
       fill(selOut, recState.devs.outputs, recState.devs.default_out);
-    } catch (e) { setError('设备枚举失败：' + e.message); }
+    } catch (e) { setError(t('设备枚举失败：') + e.message); }
   })();
   btn.addEventListener('click', () => recToggle(btn, selIn, selOut));
   /* E3 段2：「转乐谱」——切到处理链面板（voice2score 在 init 里接） */
@@ -627,13 +628,13 @@ async function recToggle(btn, selIn, selOut) {
       });
       recState.recording = true;
       recState.startedAt = Date.now();
-      btn.textContent = '■ 停止';
+      btn.textContent = t('■ 停止');
       btn.classList.add('recording');
       recState.timer = setInterval(() => {
         const el = recPane.querySelector('#rec-timer');
         if (el) el.textContent = recFmt((Date.now() - recState.startedAt) / 1000);
       }, 200);
-      bus.dispatch('toast', monitor ? '开始录制（监听已开）' : '开始录制');
+      bus.dispatch('toast', monitor ? t('开始录制（监听已开）') : t('开始录制'));
     } else {
       btn.disabled = true;
       const r = await api.recordStop(recState.project, {});
@@ -641,13 +642,13 @@ async function recToggle(btn, selIn, selOut) {
       recState.timer = null;
       recState.recording = false;
       const secs = Number(r.seconds || 0);
-      bus.dispatch('toast', '已录音 ' + secs.toFixed(1) + 's → 时间线' + (r.added ? '（已入轨）' : '（未加轨）'));
+      bus.dispatch('toast', t('已录音 ') + secs.toFixed(1) + t('s → 时间线') + (r.added ? t('（已入轨）') : t('（未加轨）')));
       renderRec();
     }
   } catch (e) {
     if (recState.timer) { clearInterval(recState.timer); recState.timer = null; }
     recState.recording = false;
-    setError('录音：' + e.message);
+    setError(t('录音：') + e.message);
     renderRec();
   } finally {
     recState.busy = false;
@@ -666,7 +667,7 @@ function applyFold(folded) {
   if (!dockEl) return;
   dockEl.classList.toggle('folded', folded);
   const btn = dockEl.querySelector('#dock-fold');
-  if (btn) btn.textContent = folded ? '▸ 展开' : '▾ 收起';
+  if (btn) btn.textContent = folded ? t('▸ 展开') : t('▾ 收起');
   try { localStorage.setItem('tsov.dock', folded ? 'folded' : 'open'); } catch (e) { /* ignore */ }
 }
 
@@ -696,8 +697,8 @@ export function init(el) {
     activateTab('chain');
     const hasAudio = !!(store.score && store.score.tracks.some((t) => t.kind === 'audio'));
     bus.dispatch('toast', hasAudio
-      ? '已挂链「哼唱快车道」：降噪→响度→转录→量化→吸附——点「运行全链」开始'
-      : '本工程暂无音频轨：先录音或导入音频，链会以它为首环');
+      ? t('已挂链「哼唱快车道」：降噪→响度→转录→量化→吸附——点「运行全链」开始')
+      : t('本工程暂无音频轨：先录音或导入音频，链会以它为首环'));
   });
 
   /* 折叠（记忆；无记忆时：紧凑档默认折叠） */
@@ -710,7 +711,7 @@ export function init(el) {
   const folded = saved ? saved === 'folded' : compact;
   dockEl.classList.toggle('folded', folded);
   const btn = dockEl.querySelector('#dock-fold');
-  if (btn) btn.textContent = folded ? '▸ 展开' : '▾ 收起';
+  if (btn) btn.textContent = folded ? t('▸ 展开') : t('▾ 收起');
 
   initChain(chainPane);   // E3 段2：处理链面板（自挂 bus；tab 打开时懒渲染）
   bus.on('state', renderAll);

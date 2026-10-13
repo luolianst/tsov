@@ -4,6 +4,7 @@
    - 快档改参 → config 返回 plan.auto → 自动顺跑；慢档 → needs_apply 亮「应用」
    - 运行中轮询 status（600ms）；结束即停表
    - __tsovState().chain 暴露给 CDP 断言 */
+import { t } from './i18n.js';
 
 import { bus } from './events.js';
 import { api } from './api.js';
@@ -16,7 +17,7 @@ let busy = false;
 let lastProject = null;
 let refreshing = false;
 
-const STATUS_TEXT = { pending: '待跑', running: '运行中', done: '完成', failed: '失败', skipped: '跳过', cancelled: '已取消', dirty: '待应用' };
+const STATUS_TEXT = { pending: t('待跑'), running: t('运行中'), done: t('完成'), failed: t('失败'), skipped: t('跳过'), cancelled: t('已取消'), dirty: t('待应用') };
 
 function el(tag, cls, text) {
   const d = document.createElement(tag);
@@ -28,11 +29,11 @@ function el(tag, cls, text) {
 function finalText(steps) {
   const cnt = (x) => steps.filter((i) => i.status === x).length;
   const parts = [];
-  if (cnt('done')) parts.push('完成 ' + cnt('done'));
-  if (cnt('skipped')) parts.push('跳过 ' + cnt('skipped'));
-  if (cnt('failed')) parts.push('失败 ' + cnt('failed'));
-  if (cnt('cancelled')) parts.push('取消 ' + cnt('cancelled'));
-  return parts.join(' · ') || '无变化';
+  if (cnt('done')) parts.push(t('完成 ') + cnt('done'));
+  if (cnt('skipped')) parts.push(t('跳过 ') + cnt('skipped'));
+  if (cnt('failed')) parts.push(t('失败 ') + cnt('failed'));
+  if (cnt('cancelled')) parts.push(t('取消 ') + cnt('cancelled'));
+  return parts.join(' · ') || t('无变化');
 }
 
 async function ensureTools() {
@@ -62,7 +63,7 @@ export async function refreshChain() {
       error: st.error || null,
     });
     if (st.running) ensurePoll(); else stopPoll();
-    if (prevRunning && !st.running) bus.dispatch('toast', '处理链结束：' + finalText(store.chain.steps));
+    if (prevRunning && !st.running) bus.dispatch('toast', t('处理链结束：') + finalText(store.chain.steps));
   } catch (e) {
     /* 工程无链也无妨（status 恒可读） */
   } finally {
@@ -81,17 +82,17 @@ function stopPoll() {
 
 async function doRun(steps) {
   if (busy) return;
-  if (!store.project) { setError('先打开一个工程'); return; }
+  if (!store.project) { setError(t('先打开一个工程')); return; }
   busy = true;
   try {
     const body = {};
     if (steps && steps.length) body.steps = steps;
     const r = await api.chainRun(store.project, body);
     setChainState({ running: !!r.running, needsApply: '', steps: r.steps || store.chain.steps });
-    bus.dispatch('toast', '链已开跑（' + (steps && steps.length ? steps.join(' → ') : '全链') + '）');
+    bus.dispatch('toast', t('链已开跑（') + (steps && steps.length ? steps.join(' → ') : t('全链')) + t('）'));
     ensurePoll();
   } catch (e) {
-    setError('链运行：' + e.message);
+    setError(t('链运行：') + e.message);
   } finally {
     busy = false;
   }
@@ -101,8 +102,8 @@ async function doCancel() {
   if (!store.project) return;
   try {
     await api.chainCancel(store.project);
-    bus.dispatch('toast', '已请求取消（步边界生效；已完成产物保留）');
-  } catch (e) { setError('取消：' + e.message); }
+    bus.dispatch('toast', t('已请求取消（步边界生效；已完成产物保留）'));
+  } catch (e) { setError(t('取消：') + e.message); }
 }
 
 async function changeParam(idx, key, val) {
@@ -115,11 +116,11 @@ async function changeParam(idx, key, val) {
       await doRun(plan.auto);                       // 快档：从脏步起自动顺跑（Q2；步序子集）
     } else if (plan.needs_apply != null) {
       setChainState({ needsApply: plan.needs_apply });
-      bus.dispatch('toast', '慢档参数已存：点该步「应用」重跑');
+      bus.dispatch('toast', t('慢档参数已存：点该步「应用」重跑'));
     } else {
       await refreshChain();
     }
-  } catch (e) { setError('参数保存：' + e.message); }
+  } catch (e) { setError(t('参数保存：') + e.message); }
 }
 
 async function toggleMute(idx, mute) {
@@ -139,8 +140,8 @@ async function changePreset(presetId) {
     setChainState({ preset: presetId, needsApply: '', steps: [] });
     await refreshChain();
     renderChain();
-    bus.dispatch('toast', '链预设已切换：' + presetId);
-  } catch (e) { setError('预设切换：' + e.message); }
+    bus.dispatch('toast', t('链预设已切换：') + presetId);
+  } catch (e) { setError(t('预设切换：') + e.message); }
 }
 
 function restIds(fromIdx) {
@@ -165,7 +166,7 @@ async function rerunWithParams(s, idx) {
   try {
     if (p) await api.chainConfig(store.project, { step_overrides: { [idx]: p } });
   } catch (e) {
-    setError('参数保存：' + e.message);
+    setError(t('参数保存：') + e.message);
     return;
   }
   doRun(restIds(idx));
@@ -181,17 +182,17 @@ async function doApply() {
     if (r.folder) {
       const nA = (r.audio_tracks || []).length;
       const nM = (r.midi_tracks || []).length;
-      let msg = '已落位「' + r.folder + '」：' + nA + ' 音频轨' + (nM ? ' + ' + nM + ' MIDI 轨' : '');
+      let msg = t('已落位「') + r.folder + '」：' + nA + t(' 音频轨') + (nM ? ' + ' + nM + t(' MIDI 轨') : '');
       if (r.tempo && r.tempo.to != null) {
-        msg += '；tempo ' + r.tempo.from + ' → ' + r.tempo.to + (r.tempo.applied ? '' : '（未生效）');
+        msg += '；tempo ' + r.tempo.from + ' → ' + r.tempo.to + (r.tempo.applied ? '' : t('（未生效）'));
       }
       bus.dispatch('toast', msg);
     } else {
-      bus.dispatch('toast', '已进工程：' + (r.names || []).join(' + ')
-        + '（轨 ' + (r.tracks != null ? r.tracks : '?') + '，命令 ' + (r.applied || 0) + '）');
+      bus.dispatch('toast', t('已进工程：') + (r.names || []).join(' + ')
+        + t('（轨 ') + (r.tracks != null ? r.tracks : '?') + t('，命令 ') + (r.applied || 0) + t('）'));
     }
   } catch (e) {
-    setError('进工程：' + e.message);
+    setError(t('进工程：') + e.message);
   } finally {
     busy = false;
   }
@@ -243,7 +244,7 @@ function renderStep(s, idx) {
       ctl.value = String(s.params[key] != null ? s.params[key] : spec.default);
     }
     ctl.title = spec.type === 'text'
-      ? '调性：auto=自动检测；或形如 C major / a minor / D dorian'
+      ? t('调性：auto=自动检测；或形如 C major / a minor / D dorian')
       : ((tool && tool.desc && (tool.desc.zh || tool.desc.en)) || '');
     ctl.dataset.param = key;
     ctl.addEventListener('change', () => {
@@ -263,29 +264,29 @@ function renderStep(s, idx) {
 
   /* 失败：错误行（卡内全宽，悬停看全） */
   if (s.status === 'failed') {
-    const err = el('span', 'chain-err', s.error || '失败');
+    const err = el('span', 'chain-err', s.error || t('失败'));
     err.title = s.error || '';
     card.appendChild(err);
   }
 
   /* 卡脚：动作 + 产物 */
   const ft = el('div', 'chain-ft');
-  const mb = el('button', 'chain-btn chain-mute' + (s.mute ? ' on' : ''), s.mute ? '已静音' : '静音');
-  mb.title = 'mute：本步跳过（存 chain.json，可撤销式重跑）';
+  const mb = el('button', 'chain-btn chain-mute' + (s.mute ? ' on' : ''), s.mute ? t('已静音') : t('静音'));
+  mb.title = t('mute：本步跳过（存 chain.json，可撤销式重跑）');
   mb.onclick = () => toggleMute(idx, !s.mute);
   ft.appendChild(mb);
 
-  if (s.status === 'running') ft.appendChild(el('span', 'chain-sub', '运行中…'));
+  if (s.status === 'running') ft.appendChild(el('span', 'chain-sub', t('运行中…')));
 
   if (s.status === 'failed') {
-    const retry = el('button', 'chain-btn', '重试');
-    retry.title = '从该步起重跑（输入用上一轮产物，免重跑上游）';
+    const retry = el('button', 'chain-btn', t('重试'));
+    retry.title = t('从该步起重跑（输入用上一轮产物，免重跑上游）');
     retry.onclick = () => doRun(restIds(idx));
-    const rerun = el('button', 'chain-btn', '改参再跑');
-    rerun.title = '读取本步当前参数并保存，从该步起重跑（先在上方输入框改好参数）';
+    const rerun = el('button', 'chain-btn', t('改参再跑'));
+    rerun.title = t('读取本步当前参数并保存，从该步起重跑（先在上方输入框改好参数）');
     rerun.onclick = () => rerunWithParams(s, idx);
-    const skip = el('button', 'chain-btn', '跳过');
-    skip.title = '静音该步并从其后继续';
+    const skip = el('button', 'chain-btn', t('跳过'));
+    skip.title = t('静音该步并从其后继续');
     skip.onclick = () => toggleMute(idx, true).then(() => doRun(restIds(idx + 1)));
     ft.appendChild(retry);
     ft.appendChild(rerun);
@@ -295,8 +296,8 @@ function renderStep(s, idx) {
   /* 慢档「应用」（needsApply → 从该步起跑）；段2：needsApply 为步序 */
   if (tool && tool.tier === 'slow' && store.chain.needsApply != null
       && String(store.chain.needsApply) === String(idx)) {
-    const ap = el('button', 'chain-btn chain-apply', '应用');
-    ap.title = '从该步起重跑（含下游）';
+    const ap = el('button', 'chain-btn chain-apply', t('应用'));
+    ap.title = t('从该步起重跑（含下游）');
     ap.onclick = () => doRun(restIds(idx));
     ft.appendChild(ap);
   }
@@ -308,7 +309,7 @@ function renderStep(s, idx) {
     a.textContent = '↗ ' + s.artifact;
     a.href = api.chainArtifactUrl(store.project, s.artifact);
     a.target = '_blank';
-    a.title = '打开产物（wav 直接试听；json 下载）';
+    a.title = t('打开产物（wav 直接试听；json 下载）');
     ft.appendChild(a);
   }
 
@@ -331,23 +332,23 @@ export function renderChain() {
   const oldWrap = pane.querySelector('.chain-wrap');
   const keep = { row: oldRow ? oldRow.scrollLeft : 0, wrap: oldWrap ? oldWrap.scrollTop : 0 };
   pane.innerHTML = '';
-  if (!store.project) { pane.innerHTML = '<div class="fx-none">先打开一个工程</div>'; return; }
+  if (!store.project) { pane.innerHTML = t('<div class="fx-none">先打开一个工程</div>'); return; }
   const wrap = el('div', 'chain-wrap');
 
   const head = el('div', 'chain-head');
   const presetMeta = (store.chain.presets || []).find((p) => p.id === store.chain.preset) || null;
   const title = el('span', 'chain-title',
-    (presetMeta && presetMeta.name && (presetMeta.name.zh || presetMeta.name.en)) || '处理链');
+    (presetMeta && presetMeta.name && (presetMeta.name.zh || presetMeta.name.en)) || t('处理链'));
   title.title = (presetMeta && presetMeta.description
     && (presetMeta.description.zh || presetMeta.description.en))
-    || '链 = 预设里的工具序列 + 参数；快档改参即自动顺跑，慢档改参后点「应用」｜静音=跳过该步｜产物在 chain/<运行时间戳>/';
+    || t('链 = 预设里的工具序列 + 参数；快档改参即自动顺跑，慢档改参后点「应用」｜静音=跳过该步｜产物在 chain/<运行时间戳>/');
   head.appendChild(title);
 
   /* E1-6：预设选择器（切换 → 存 chain.json → 面板按新预设重渲染；运行中禁切） */
   const presetSel = document.createElement('select');
   presetSel.id = 'chain-preset-select';
   presetSel.className = 'chain-preset-select';
-  presetSel.title = store.chain.running ? '运行中不可切换预设' : '链预设（哼唱快车道 / 成品歌拆解）';
+  presetSel.title = store.chain.running ? t('运行中不可切换预设') : t('链预设（哼唱快车道 / 成品歌拆解）');
   for (const p of (store.chain.presets || [])) {
     const o = document.createElement('option');
     o.value = p.id;
@@ -359,27 +360,27 @@ export function renderChain() {
   presetSel.addEventListener('change', () => changePreset(presetSel.value));
   head.appendChild(presetSel);
 
-  const runAll = el('button', 'chain-btn chain-run', store.chain.running ? '运行中…' : '▶ 运行全链');
+  const runAll = el('button', 'chain-btn chain-run', store.chain.running ? t('运行中…') : t('▶ 运行全链'));
   runAll.disabled = store.chain.running || busy;
   runAll.onclick = () => doRun(null);
   head.appendChild(runAll);
 
-  const cancel = el('button', 'chain-btn', '■ 取消');
+  const cancel = el('button', 'chain-btn', t('■ 取消'));
   cancel.disabled = !store.chain.running;
   cancel.onclick = doCancel;
   head.appendChild(cancel);
 
-  const toProj = el('button', 'chain-btn chain-to-proj', '⇥ 进工程');
+  const toProj = el('button', 'chain-btn chain-to-proj', t('⇥ 进工程'));
   toProj.disabled = store.chain.running || busy || !store.chain.runTs;
   toProj.title = (store.chain.preset === 'song-decompose')
-    ? '把最近一次拆解落成「拆解 · <源轨名>」文件夹（4 音频轨 + 转录 MIDI，并写入网格 tempo）；重跑幂等；undo 可回'
-    : '把最近一次链产物落成一条「处理版」MIDI 轨（量化 + 调内吸附），插在源轨正下方；'
-      + '重跑幂等（先删旧同名轨、含旧版双轨遗留）；undo 可回';
+    ? t('把最近一次拆解落成「拆解 · <源轨名>」文件夹（4 音频轨 + 转录 MIDI，并写入网格 tempo）；重跑幂等；undo 可回')
+    : t('把最近一次链产物落成一条「处理版」MIDI 轨（量化 + 调内吸附），插在源轨正下方；')
+      + t('重跑幂等（先删旧同名轨、含旧版双轨遗留）；undo 可回');
   toProj.onclick = doApply;
   head.appendChild(toProj);
 
   head.appendChild(el('span', 'chain-sub',
-    store.chain.running ? '运行中…' : (store.chain.runTs ? ('最近运行 ' + store.chain.runTs) : '未运行')));
+    store.chain.running ? t('运行中…') : (store.chain.runTs ? (t('最近运行 ') + store.chain.runTs) : t('未运行'))));
   /* E1-7（P50）：显示当前应用轨道（缺省=第一条音频轨，标注「自动」） */
   {
     const tracks = (store.score && store.score.tracks) || [];
@@ -391,14 +392,14 @@ export function renderChain() {
     }
     if (typeof idx === 'number' && idx >= 0 && tracks[idx]) {
       head.appendChild(el('span', 'chain-sub chain-applied',
-        '应用到：轨 ' + (idx + 1) + ' · ' + (tracks[idx].name || '未命名') + (auto ? '（自动）' : '')));
+        t('应用到：轨 ') + (idx + 1) + ' · ' + (tracks[idx].name || t('未命名')) + (auto ? t('（自动）') : '')));
     }
   }
   if (store.chain.error) head.appendChild(el('span', 'chain-err', store.chain.error));
   wrap.appendChild(head);
 
   if (!store.chain.steps.length) {
-    wrap.appendChild(el('div', 'fx-none', '链未初始化（打开工程后自动取 5 步槽位）'));
+    wrap.appendChild(el('div', 'fx-none', t('链未初始化（打开工程后自动取 5 步槽位）')));
   } else {
     /* 09-26 卡片化：横排卡片 + › 连接（对齐效果器栏 .fx-chain 设计语言） */
     const row = el('div', 'chain-row');
