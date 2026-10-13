@@ -1,5 +1,6 @@
 /* state.js —— 前端状态 store（不可变更新 + 订阅；选区/播放头/视图全在这里） */
 
+import { t } from './i18n.js';
 import { bus } from './events.js';
 
 export const KEYS_W = 56;   // 卷帘左侧钢琴键盘列宽（roll/timeline 共用）
@@ -139,9 +140,9 @@ export function refTag(r) {
 /* M-V7 D3：收藏 tag → 来源标注（手动 / 自动·迭代 / 自动·定时） */
 export function favSource(tag) {
   const t = String(tag || '');
-  if (t.endsWith('-auto')) return '自动·迭代';
-  if (t.endsWith('-time')) return '自动·定时';
-  return '手动';
+  if (t.endsWith('-auto')) return t('自动·迭代');
+  if (t.endsWith('-time')) return t('自动·定时');
+  return t('手动');
 }
 
 /* 用 GET state / state_updated 事件的数据装载 store（保持选区不闪断） */
@@ -257,16 +258,16 @@ export function hasVelocityLane(ti) {
    前端不再有第三份硬编码参数值域（原 autoroll.js RANGE 已归并至此）。 */
 const PARAM_FALLBACK = {
   automation: {
-    volume: { label: '音量', lo: 0.0, hi: 2.0 },
-    pan: { label: '声像', lo: -1.0, hi: 1.0 },
+    volume: { label: t('音量'), lo: 0.0, hi: 2.0 },
+    pan: { label: t('声像'), lo: -1.0, hi: 1.0 },
   },
   /* v0.2 批C 后段（挂道族）：perf 域兜底（label/范围；快照缺失时仍可用） */
   perf: {
-    velocity: { label: '力度', lo: 0.0, hi: 1.0 },
-    bend: { label: '弯音', lo: -1.0, hi: 1.0 },
-    cc1: { label: '调制', lo: 0.0, hi: 1.0 },
-    cc11: { label: '表情', lo: 0.0, hi: 1.0 },
-    cc64: { label: '延音', lo: 0.0, hi: 1.0 },
+    velocity: { label: t('力度'), lo: 0.0, hi: 1.0 },
+    bend: { label: t('弯音'), lo: -1.0, hi: 1.0 },
+    cc1: { label: t('调制'), lo: 0.0, hi: 1.0 },
+    cc11: { label: t('表情'), lo: 0.0, hi: 1.0 },
+    cc64: { label: t('延音'), lo: 0.0, hi: 1.0 },
   },
 };
 

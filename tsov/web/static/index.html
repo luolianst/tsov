@@ -8,128 +8,133 @@
 </head>
 <body>
 <header id="topbar">
-  <div class="brand">tsov<span class="brand-sub">可视化宿主</span></div>
+  <div class="brand">tsov<span class="brand-sub" data-i18n>可视化宿主</span></div>
 
-  <select id="project-select" title="选择工程"></select>
+  <select id="project-select" title="选择工程" data-i18n-title></select>
 
   <div class="group menu-wrap">
-    <button id="btn-menu-file" class="menu-btn" title="文件：新建 / 导入 / 导出 / 版本 / 收藏">☰ 文件</button>
+    <button id="btn-menu-file" class="menu-btn" title="文件：新建 / 导入 / 导出 / 版本 / 收藏" data-i18n-title data-i18n>☰ 文件</button>
     <div id="menu-file" class="menu-pop" hidden>
-      <button class="mi" id="mi-new">新建工程…</button>
-      <button class="mi" id="mi-rename">重命名工程…</button>
-      <button class="mi mi-danger" id="mi-delete">删除当前工程…<span class="mi-sub">移入 .trash · 可找回</span></button>
-      <button class="mi" id="mi-import">导入工程…<span class="mi-sub">score.json 回流</span></button>
-      <button class="mi" id="mi-import-audio">导入音频素材…<span class="mi-sub">参考轨 / 原曲对照</span></button>
+      <button class="mi" id="mi-new" data-i18n>新建工程…</button>
+      <button class="mi" id="mi-rename" data-i18n>重命名工程…</button>
+      <button class="mi mi-danger" id="mi-delete" data-i18n>删除当前工程…<span class="mi-sub" data-i18n>移入 .trash · 可找回</span></button>
+      <button class="mi" id="mi-import" data-i18n>导入工程…<span class="mi-sub" data-i18n>score.json 回流</span></button>
+      <button class="mi" id="mi-import-audio" data-i18n>导入音频素材…<span class="mi-sub" data-i18n>参考轨 / 原曲对照</span></button>
       <input type="file" id="audio-file-input" accept="audio/*,.flac,.mp3,.wav,.m4a,.ogg,.opus,.aiff" hidden>
-      <button class="mi" id="mi-import-midi">导入 MIDI…<span class="mi-sub">.mid/.midi → 追加轨</span></button>
+      <button class="mi" id="mi-import-midi" data-i18n>导入 MIDI…<span class="mi-sub" data-i18n>.mid/.midi → 追加轨</span></button>
       <input type="file" id="midi-file-input" accept=".mid,.midi,audio/midi,audio/x-midi" hidden>
-      <button class="mi" id="mi-import-decompose">导入成品歌拆解…<span class="mi-sub">整曲 → 分离四轨 + 人声 MIDI</span></button>
+      <button class="mi" id="mi-import-decompose" data-i18n>导入成品歌拆解…<span class="mi-sub" data-i18n>整曲 → 分离四轨 + 人声 MIDI</span></button>
       <div class="mi-block" id="import-project-row" hidden>
-        <select id="import-project-select" title="候选：output/ 下可导入的 score json"></select>
-        <input id="import-project-path" placeholder="或粘贴 output/ 内 json 路径">
+        <select id="import-project-select" title="候选：output/ 下可导入的 score json" data-i18n-title></select>
+        <input id="import-project-path" placeholder="或粘贴 output/ 内 json 路径" data-i18n-placeholder>
         <div class="mi-block-row">
-          <input id="import-project-name" placeholder="工程名（可改）" size="14">
-          <button id="btn-import-project-confirm">导入</button>
+          <input id="import-project-name" placeholder="工程名（可改）" size="14" data-i18n-placeholder>
+          <button id="btn-import-project-confirm" data-i18n>导入</button>
           <button id="btn-import-project-cancel">✕</button>
         </div>
       </div>
-      <button class="mi" id="mi-refresh">刷新工程列表</button>
+      <button class="mi" id="mi-refresh" data-i18n>刷新工程列表</button>
       <div class="mi-sep"></div>
-      <button class="mi" id="mi-export">导出…<span class="mi-sub">master · 分轨 stems · MIDI</span></button>
+      <button class="mi" id="mi-export" data-i18n>导出…<span class="mi-sub" data-i18n>master · 分轨 stems · MIDI</span></button>
       <div class="mi-row">
-        <span class="mi-label">听旧版</span>
-        <select id="cmp-base" title="对比基准（旧版本，只读参考）"></select>
-        <button id="btn-cmp-listen" title="试听左槽版本（缓存渲染，不动 HEAD）">▶</button>
+        <span class="mi-label" data-i18n>听旧版</span>
+        <select id="cmp-base" title="对比基准（旧版本，只读参考）" data-i18n-title></select>
+        <button id="btn-cmp-listen" title="试听左槽版本（缓存渲染，不动 HEAD）" data-i18n-title>▶</button>
         <span id="cmp-head" class="muted small"></span>
       </div>
       <div class="mi-sep"></div>
-      <button class="mi" id="mi-fav">收藏当前版本 ★<span class="mi-sub">强留存</span></button>
-      <button class="mi" id="mi-fav-restore">恢复收藏版本…</button>
+      <button class="mi" id="mi-fav" data-i18n>收藏当前版本 ★<span class="mi-sub" data-i18n>强留存</span></button>
+      <button class="mi" id="mi-fav-restore" data-i18n>恢复收藏版本…</button>
       <div class="mi-sep"></div>
-      <button class="mi" id="mi-settings">设置…</button>
+      <button class="mi" id="mi-settings" data-i18n>设置…</button>
     </div>
   </div>
 
   <div class="group transport">
-    <button id="btn-play-wav" title="浏览器试听（Space 播放/暂停；从播放轴起播）">▶<span class="btn-txt">试听</span></button>
-    <button id="btn-play-host" title="后端宿主播放（sounddevice；从播放轴起播）">🔊<span class="btn-txt">宿主</span></button>
-    <button id="btn-stop" title="停止（停在原地；Home 回零点）">⏹</button>
-    <button id="btn-loop" title="循环播放（L）：在标尺上拖动划区间；双击区间清除">🔁</button>
-    <button id="btn-metro" title="节拍器（随播放走拍：强拍高音）">🥁</button>
-    <button id="btn-render" title="离线渲染试听 wav（导出见「☰ 文件 → 导出…」）">渲染</button>
+    <button id="btn-play-wav" title="浏览器试听（Space 播放/暂停；从播放轴起播）" data-i18n-title>▶<span class="btn-txt" data-i18n>试听</span></button>
+    <button id="btn-play-host" title="后端宿主播放（sounddevice；从播放轴起播）" data-i18n-title>🔊<span class="btn-txt" data-i18n>宿主</span></button>
+    <button id="btn-stop" title="停止（停在原地；Home 回零点）" data-i18n-title>⏹</button>
+    <button id="btn-loop" title="循环播放（L）：在标尺上拖动划区间；双击区间清除" data-i18n-title>🔁</button>
+    <button id="btn-metro" title="节拍器（随播放走拍：强拍高音）" data-i18n-title>🥁</button>
+    <button id="btn-render" title="离线渲染试听 wav（导出见「☰ 文件 → 导出…」）" data-i18n-title data-i18n>渲染</button>
   </div>
 
   <div class="group metro-group">
-    <label class="metro" title="速度（BPM：回车/失焦提交，命令层 set_tempo）">♩=<input id="tempo-input" type="number" min="20" max="400" step="0.1"></label>
-    <label class="metro metro-chk" title="改速度时音符/书签/automation 一起等比缩放（默认开，DAW 习惯）；取消勾选 = 仅改谱面"><input id="tempo-rescale" type="checkbox" checked><span class="chk-txt">跟速</span></label>
-    <label class="metro" title="拍号（形如 6/8 / 3/4）"><input id="sig-input" placeholder="4/4" size="4"></label>
+    <label class="metro" title="速度（BPM：回车/失焦提交，命令层 set_tempo）" data-i18n-title>♩=<input id="tempo-input" type="number" min="20" max="400" step="0.1"></label>
+    <label class="metro metro-chk" title="改速度时音符/书签/automation 一起等比缩放（默认开，DAW 习惯）；取消勾选 = 仅改谱面" data-i18n-title><input id="tempo-rescale" type="checkbox" checked><span class="chk-txt" data-i18n>跟速</span></label>
+    <label class="metro" title="拍号（形如 6/8 / 3/4）" data-i18n-title><input id="sig-input" placeholder="4/4" size="4"></label>
   </div>
 
   <div class="group editor-group">
-    <button id="btn-undo" title="撤销一步（快照窗口 · 零新版本）">↩</button>
-    <button id="btn-redo" title="重做（快照窗口）">↪</button>
+    <button id="btn-undo" title="撤销一步（快照窗口 · 零新版本）" data-i18n-title>↩</button>
+    <button id="btn-redo" title="重做（快照窗口）" data-i18n-title>↪</button>
     <span class="tb-sep"></span>
-    <button id="btn-zoom-out" title="缩小时间轴">−</button>
-    <button id="btn-zoom-in" title="放大时间轴">＋</button>
-    <button id="btn-fit" title="适配整谱">适配</button>
-    <select id="snap-sel" title="写谱吸附：新建/移动/缩放的时值对齐网格">
-      <option value="0">吸附关</option>
-      <option value="0.5">吸附 1/8</option>
-      <option value="0.25">吸附 1/16</option>
+    <button id="btn-zoom-out" title="缩小时间轴" data-i18n-title>−</button>
+    <button id="btn-zoom-in" title="放大时间轴" data-i18n-title>＋</button>
+    <button id="btn-fit" title="适配整谱" data-i18n-title data-i18n>适配</button>
+    <select id="snap-sel" title="写谱吸附：新建/移动/缩放的时值对齐网格" data-i18n-title>
+      <option value="0" data-i18n>吸附关</option>
+      <option value="0.5" data-i18n>吸附 1/8</option>
+      <option value="0.25" data-i18n>吸附 1/16</option>
     </select>
   </div>
 
   <div class="tb-right">
-    <button id="btn-keys" title="快捷键速查（?）">?</button>
-    <span id="save-state" class="save-state" title="工程保存状态">—</span>
-    <button id="btn-theme" title="切换深/浅（母版双态）">◐</button>
+    <button id="btn-keys" title="快捷键速查（?）" data-i18n-title>?</button>
+    <span id="save-state" class="save-state" title="工程保存状态" data-i18n-title>—</span>
+    <button id="btn-theme" title="切换深/浅（母版双态）" data-i18n-title>◐</button>
     <div class="menu-wrap">
-      <button id="btn-menu-set" class="menu-btn" title="设置（输出 / 主题 / 版本留存 / 对话）">⚙</button>
+      <button id="btn-menu-set" class="menu-btn" title="设置（输出 / 主题 / 版本留存 / 对话）" data-i18n-title>⚙</button>
       <div id="menu-set" class="menu-pop right" hidden>
-        <div class="set-group"><div class="sg-t">音频输出</div>
-          <div class="set-row"><label>输出</label><select id="set-out"><option>系统共享（默认 · 零配置）</option></select></div>
-          <div class="set-row"><label>设备</label><span class="muted small" id="set-device">系统默认设备</span></div>
-          <div class="set-hint">ASIO / 低延迟后续迭代（Q-UI-3）</div>
+        <div class="set-group"><div class="sg-t" data-i18n>音频输出</div>
+          <div class="set-row"><label data-i18n>输出</label><select id="set-out"><option data-i18n>系统共享（默认 · 零配置）</option></select></div>
+          <div class="set-row"><label data-i18n>设备</label><span class="muted small" id="set-device" data-i18n>系统默认设备</span></div>
+          <div class="set-hint" data-i18n>ASIO / 低延迟后续迭代（Q-UI-3）</div>
         </div>
-        <div class="set-group"><div class="sg-t">外观</div>
-          <div class="set-row"><label>主题</label>
-            <select id="set-theme"><option value="light">浅色（默认）</option><option value="dark">深色</option></select>
+        <div class="set-group"><div class="sg-t" data-i18n>外观</div>
+          <div class="set-row"><label data-i18n>主题</label>
+            <select id="set-theme"><option value="light" data-i18n>浅色（默认）</option><option value="dark" data-i18n>深色</option></select>
           </div>
         </div>
-        <div class="set-group"><div class="sg-t">版本留存</div>
-          <div class="set-row"><label>自动收藏</label>
-            <input id="set-rt-iters" type="number" min="1" max="9999" step="1" title="迭代阈值（轮）">
-            <span class="muted small">轮迭代后自动收藏</span>
+        <div class="set-group"><div class="sg-t" data-i18n>版本留存</div>
+          <div class="set-row"><label data-i18n>自动收藏</label>
+            <input id="set-rt-iters" type="number" min="1" max="9999" step="1" title="迭代阈值（轮）" data-i18n-title>
+            <span class="muted small" data-i18n>轮迭代后自动收藏</span>
           </div>
-          <div class="set-row"><label>定时档</label>
-            <input id="set-rt-timer" type="checkbox" title="开启定时自动收藏">
-            <input id="set-rt-min" type="number" min="1" max="1440" step="1" title="间隔（分钟）">
-            <span class="muted small">分钟（只收有改动）</span>
+          <div class="set-row"><label data-i18n>定时档</label>
+            <input id="set-rt-timer" type="checkbox" title="开启定时自动收藏" data-i18n-title>
+            <input id="set-rt-min" type="number" min="1" max="1440" step="1" title="间隔（分钟）" data-i18n-title>
+            <span class="muted small" data-i18n>分钟（只收有改动）</span>
           </div>
-          <div class="set-row"><label>当前计数</label><span class="muted small" id="set-rt-count">-</span></div>
-          <div class="set-hint">弱留存：用户 20 步 / 对话 5 轮滑动窗口 · 强留存：★ 收藏 / 自动收藏（改动即存·本工程）</div>
-          <div class="set-row"><button id="set-rt-apply-all" class="fav-del" style="margin-left:0;border:1px solid var(--border);" title="把当前阈值/定时档写入全局档，对所有工程生效">应用到全部工程…</button></div>
+          <div class="set-row"><label data-i18n>当前计数</label><span class="muted small" id="set-rt-count">-</span></div>
+          <div class="set-hint" data-i18n>弱留存：用户 20 步 / 对话 5 轮滑动窗口 · 强留存：★ 收藏 / 自动收藏（改动即存·本工程）</div>
+          <div class="set-row"><button id="set-rt-apply-all" class="fav-del" style="margin-left:0;border:1px solid var(--border);" title="把当前阈值/定时档写入全局档，对所有工程生效" data-i18n-title data-i18n>应用到全部工程…</button></div>
         </div>
-        <div class="set-group"><div class="sg-t">对话 / LLM</div>
+        <div class="set-group"><div class="sg-t">语言 / Language</div>
+          <div class="set-row"><label data-i18n>界面</label>
+            <select id="set-lang"><option value="zh">中文</option><option value="en">English</option></select>
+          </div>
+        </div>
+        <div class="set-group"><div class="sg-t" data-i18n>对话 / LLM</div>
           <div class="set-row"><label>Key</label>
-            <input id="set-llm-key" type="password" placeholder="未配置（粘贴 API Key）" size="16" autocomplete="off" spellcheck="false">
+            <input id="set-llm-key" type="password" placeholder="未配置（粘贴 API Key）" size="16" autocomplete="off" spellcheck="false" data-i18n-placeholder>
           </div>
-          <div class="set-row"><label>地址</label>
-            <input id="set-llm-endpoint" type="text" placeholder="默认（DeepSeek 官方）" size="16" spellcheck="false">
+          <div class="set-row"><label data-i18n>地址</label>
+            <input id="set-llm-endpoint" type="text" placeholder="默认（DeepSeek 官方）" size="16" spellcheck="false" data-i18n-placeholder>
           </div>
-          <div class="set-row"><label>模型</label>
+          <div class="set-row"><label data-i18n>模型</label>
             <input id="set-llm-model" type="text" placeholder="deepseek-v4-flash" size="16" spellcheck="false">
           </div>
           <div class="set-hint" id="set-llm-src">—</div>
-          <div class="set-hint">支持任意 OpenAI 兼容接口（…/v1/chat/completions）。Key 只存本机 tsov-settings.json，不上传。</div>
+          <div class="set-hint" data-i18n>支持任意 OpenAI 兼容接口（…/v1/chat/completions）。Key 只存本机 tsov-settings.json，不上传。</div>
           <div class="set-row">
-            <button id="set-llm-test" title="用当前填写的参数发一个微型请求验证连通（不保存）">测试连接</button>
-            <button id="set-llm-save" title="保存到本机设置档（地址/模型留空=回默认；Key 留空=不改动）">保存</button>
-            <button id="set-llm-clear" title="清除设置档里的 Key（环境变量/.env 的仍生效）">清除 Key</button>
+            <button id="set-llm-test" title="用当前填写的参数发一个微型请求验证连通（不保存）" data-i18n-title data-i18n>测试连接</button>
+            <button id="set-llm-save" title="保存到本机设置档（地址/模型留空=回默认；Key 留空=不改动）" data-i18n-title data-i18n>保存</button>
+            <button id="set-llm-clear" title="清除设置档里的 Key（环境变量/.env 的仍生效）" data-i18n-title data-i18n>清除 Key</button>
           </div>
           <div class="set-hint" id="set-llm-status"></div>
         </div>
-        <div class="set-foot">留存设置改动即生效 · 对话设置改完点「保存」</div>
+        <div class="set-foot" data-i18n>留存设置改动即生效 · 对话设置改完点「保存」</div>
       </div>
     </div>
   </div>
@@ -138,134 +143,134 @@
 <main id="layout">
   <aside id="tracks-panel">
     <div class="panel-head">
-      <span class="panel-title">轨道</span>
-      <button id="btn-fold-tracks" class="fold-btn" title="收起面板（收成窄边条）">◀</button>
+      <span class="panel-title" data-i18n>轨道</span>
+      <button id="btn-fold-tracks" class="fold-btn" title="收起面板（收成窄边条）" data-i18n-title>◀</button>
     </div>
     <!-- UI 修正轮3：占位 = 段道行高（--markers-h）→ 轨道行与卷帘逐行对齐 -->
     <div id="track-list-top" aria-hidden="true"></div>
     <div id="tracks-scroll">
       <div id="track-list"></div>
-      <div class="panel-title">乐句</div>
-      <div id="segments-info" class="muted small">（无）</div>
-      <div class="panel-title">工程</div>
-      <div id="meta-info" class="muted small">（未打开）</div>
-      <div class="panel-title">书签<span class="muted small" id="bm-hint">（M 建旗 · Shift+M 项目 · 段道拖建段）</span></div>
-      <div id="bm-list" class="muted small bm-list">（未打开）</div>
+      <div class="panel-title" data-i18n>乐句</div>
+      <div id="segments-info" class="muted small" data-i18n>（无）</div>
+      <div class="panel-title" data-i18n>工程</div>
+      <div id="meta-info" class="muted small" data-i18n>（未打开）</div>
+      <div class="panel-title" data-i18n>书签<span class="muted small" id="bm-hint" data-i18n>（M 建旗 · Shift+M 项目 · 段道拖建段）</span></div>
+      <div id="bm-list" class="muted small bm-list" data-i18n>（未打开）</div>
     </div>
   </aside>
-  <div id="rail-tracks" class="rail" title="展开轨道面板"><span>轨道 ▶</span></div>
+  <div id="rail-tracks" class="rail" title="展开轨道面板" data-i18n-title><span data-i18n>轨道 ▶</span></div>
 
   <section id="roll-wrap">
     <div id="stage-head" hidden>
-      <button id="btn-back-lanes" title="返回总谱预览（Esc）">◀ 总谱</button>
+      <button id="btn-back-lanes" title="返回总谱预览（Esc）" data-i18n-title data-i18n>◀ 总谱</button>
       <span class="sb-chip"><span id="single-chip" class="track-chip"></span><b id="single-name">—</b></span>
       <span class="muted small" id="single-info"></span>
-      <button id="btn-split-axis" hidden title="副区音轴：同音轴 = 与主区同音高映射（可编辑）｜ 自适配 = 紧凑概览（只读）">同音轴</button>
-      <span class="sb-hint muted small">单击其他轨 = 副区 ｜ Ctrl+单击 = 切主（原主降副）｜ 双击 = 独立打开 ｜ Esc 返回</span>
+      <button id="btn-split-axis" hidden title="副区音轴：同音轴 = 与主区同音高映射（可编辑）｜ 自适配 = 紧凑概览（只读）" data-i18n-title data-i18n>同音轴</button>
+      <span class="sb-hint muted small" data-i18n>单击其他轨 = 副区 ｜ Ctrl+单击 = 切主（原主降副）｜ 双击 = 独立打开 ｜ Esc 返回</span>
     </div>
     <div id="tools-bar" hidden>
-      <button class="tool-btn" data-tool="smart" title="智能指针：选择 / 拖动 / 手绘">🖱 智能</button>
-      <button class="tool-btn" data-tool="range" title="范围：框选音符（循环区间 = 标尺右键拖动）">▭ 范围</button>
-      <button class="tool-btn" data-tool="scissors" title="剪刀：点击音符切分（按住 Alt 临时切换）">✂ 剪刀</button>
-      <button class="tool-btn" data-tool="glue" title="胶水：与后邻同音高合并（gap ≤ 0.5s）">🩹 胶水</button>
-      <button class="tool-btn" data-tool="eraser" title="橡皮：拖刷删除（划过即删，可撤销）">🧽 橡皮</button>
+      <button class="tool-btn" data-tool="smart" title="智能指针：选择 / 拖动 / 手绘" data-i18n-title data-i18n>🖱 智能</button>
+      <button class="tool-btn" data-tool="range" title="范围：框选音符（循环区间 = 标尺右键拖动）" data-i18n-title data-i18n>▭ 范围</button>
+      <button class="tool-btn" data-tool="scissors" title="剪刀：点击音符切分（按住 Alt 临时切换）" data-i18n-title data-i18n>✂ 剪刀</button>
+      <button class="tool-btn" data-tool="glue" title="胶水：与后邻同音高合并（gap ≤ 0.5s）" data-i18n-title data-i18n>🩹 胶水</button>
+      <button class="tool-btn" data-tool="eraser" title="橡皮：拖刷删除（划过即删，可撤销）" data-i18n-title data-i18n>🧽 橡皮</button>
       <span class="tl-sep"></span>
-      <label class="tl-ck" title="写谱吸附：新建 / 移动 / 微推按网格对齐"><input type="checkbox" id="tl-snap"> 吸附</label>
-      <select id="tl-grid" title="网格：吸附 / 微推步进 / 量化共用（1/4 · 1/8 · 1/16 · 三连 8T/16T）">
+      <label class="tl-ck" title="写谱吸附：新建 / 移动 / 微推按网格对齐" data-i18n-title data-i18n><input type="checkbox" id="tl-snap"> 吸附</label>
+      <select id="tl-grid" title="网格：吸附 / 微推步进 / 量化共用（1/4 · 1/8 · 1/16 · 三连 8T/16T）" data-i18n-title>
         <option value="4">1/4</option>
         <option value="8">1/8</option>
         <option value="16" selected>1/16</option>
-        <option value="8T">1/8T 三连</option>
-        <option value="16T">1/16T 三连</option>
+        <option value="8T" data-i18n>1/8T 三连</option>
+        <option value="16T" data-i18n>1/16T 三连</option>
       </select>
-      <label class="tl-ck" title="Swing：量化到后半格的音符再顺延 0~100% 半格">Swing <input id="tl-swing" type="number" min="0" max="100" step="5" value="0">%</label>
-      <button id="tl-quant" title="量化：选区（无选中 = 整轨）对齐网格 + Swing">量化选区</button>
+      <label class="tl-ck" title="Swing：量化到后半格的音符再顺延 0~100% 半格" data-i18n-title>Swing <input id="tl-swing" type="number" min="0" max="100" step="5" value="0">%</label>
+      <button id="tl-quant" title="量化：选区（无选中 = 整轨）对齐网格 + Swing" data-i18n-title data-i18n>量化选区</button>
       <span class="tl-sep"></span>
-      <label class="tl-ck" title="自动化 lane（单轨视图底部子道）：点=加点 ｜ 拖=移动 ｜ 双击/右键点=删除"><input type="checkbox" id="tl-auto"> 自动化</label>
-      <select id="tl-auto-param" title="自动化参数：音量（0~200%）/ 声像（L~R）">
-        <option value="volume" selected>音量</option>
-        <option value="pan">声像</option>
+      <label class="tl-ck" title="自动化 lane（单轨视图底部子道）：点=加点 ｜ 拖=移动 ｜ 双击/右键点=删除" data-i18n-title data-i18n><input type="checkbox" id="tl-auto"> 自动化</label>
+      <select id="tl-auto-param" title="自动化参数：音量（0~200%）/ 声像（L~R）" data-i18n-title>
+        <option value="volume" selected data-i18n>音量</option>
+        <option value="pan" data-i18n>声像</option>
       </select>
-      <span class="sb-hint muted small">1-5 工具 · Esc 回智能 · ←/→ 微推一格 · Shift+←/→ 一小节 · Ctrl+C/X/V/D 剪贴板</span>
+      <span class="sb-hint muted small" data-i18n>1-5 工具 · Esc 回智能 · ←/→ 微推一格 · Shift+←/→ 一小节 · Ctrl+C/X/V/D 剪贴板</span>
     </div>
-    <canvas id="ruler" title="标尺：单击 / 拖动 = 定位播放起点 ｜ 右键拖动 = 划循环区间（右键双击区间清除）"></canvas>
-    <canvas id="markers" title="乐段（段道）：拖动空白新建 ｜ 拖动段移动 / 边缘拉伸 ｜ 双击跳转 ｜ 右键菜单"></canvas>
+    <canvas id="ruler" title="标尺：单击 / 拖动 = 定位播放起点 ｜ 右键拖动 = 划循环区间（右键双击区间清除）" data-i18n-title></canvas>
+    <canvas id="markers" title="乐段（段道）：拖动空白新建 ｜ 拖动段移动 / 边缘拉伸 ｜ 双击跳转 ｜ 右键菜单" data-i18n-title></canvas>
     <div id="stage-body">
-      <canvas id="lanes" title="总谱预览：单击选中 / Ctrl 多选 / 双击进入单轨写谱"></canvas>
+      <canvas id="lanes" title="总谱预览：单击选中 / Ctrl 多选 / 双击进入单轨写谱" data-i18n-title></canvas>
       <canvas id="roll" hidden></canvas>
-      <div id="autolanes" hidden title="自动化道（v0.2 批C：音量/声像可双道堆叠）：点=加点 ｜ 拖=移动 ｜ 双击/右键点=删除（每笔一个命令、可撤销）"></div>
+      <div id="autolanes" hidden title="自动化道（v0.2 批C：音量/声像可双道堆叠）：点=加点 ｜ 拖=移动 ｜ 双击/右键点=删除（每笔一个命令、可撤销）" data-i18n-title></div>
     </div>
   </section>
 
-  <div id="rail-chat" class="rail right" title="展开对话面板"><span>◀ 对话</span></div>
+  <div id="rail-chat" class="rail right" title="展开对话面板" data-i18n-title><span data-i18n>◀ 对话</span></div>
   <aside id="chat-panel">
-    <div id="chat-resize" title="拖动调整对话栏宽度；双击恢复默认（360px）"></div>
+    <div id="chat-resize" title="拖动调整对话栏宽度；双击恢复默认（360px）" data-i18n-title></div>
     <div id="chat-head">
-      <div id="sp-tabs" title="右栏视图：对话 / 步骤（选择记忆到 localStorage）">
-        <button class="sp-tab active" data-view="chat">对话</button>
-        <button class="sp-tab" data-view="steps">步骤<span id="sp-badge" class="sp-badge" hidden>0</span></button>
+      <div id="sp-tabs" title="右栏视图：对话 / 步骤（选择记忆到 localStorage）" data-i18n-title>
+        <button class="sp-tab active" data-view="chat" data-i18n>对话</button>
+        <button class="sp-tab" data-view="steps" data-i18n>步骤<span id="sp-badge" class="sp-badge" hidden>0</span></button>
       </div>
       <div id="chat-head-btns">
-        <button id="btn-fold-chat" class="fold-btn" title="收起面板（收成窄边条）">▶</button>
-        <button id="btn-new-session" title="结束当前对话线程；下一轮起新会话（历史 JSONL 保留）">🆕<span class="btn-txt"> 新会话</span></button>
-        <button id="btn-import-session" title="导入历史会话：回看消息 + 接着聊">📥<span class="btn-txt"> 导入</span></button>
-        <button id="btn-stop-agent" title="停止当前 agent 会话（已落盘修改保留）" hidden>⏹ 停止</button>
-        <label id="live-render-toggle" title="跟随重渲：agent 每步采用后自动重渲试听（默认关）"><input type="checkbox" id="chk-live-render"> 边跑边听</label>
+        <button id="btn-fold-chat" class="fold-btn" title="收起面板（收成窄边条）" data-i18n-title>▶</button>
+        <button id="btn-new-session" title="结束当前对话线程；下一轮起新会话（历史 JSONL 保留）" data-i18n-title>🆕<span class="btn-txt" data-i18n> 新会话</span></button>
+        <button id="btn-import-session" title="导入历史会话：回看消息 + 接着聊" data-i18n-title>📥<span class="btn-txt" data-i18n> 导入</span></button>
+        <button id="btn-stop-agent" title="停止当前 agent 会话（已落盘修改保留）" hidden data-i18n-title data-i18n>⏹ 停止</button>
+        <label id="live-render-toggle" title="跟随重渲：agent 每步采用后自动重渲试听（默认关）" data-i18n-title data-i18n><input type="checkbox" id="chk-live-render"> 边跑边听</label>
       </div>
     </div>
     <div id="import-row" hidden>
       <select id="import-select"></select>
-      <button id="btn-import-confirm">载入</button>
+      <button id="btn-import-confirm" data-i18n>载入</button>
       <button id="btn-import-cancel">✕</button>
     </div>
     <details id="eng-ctx">
-      <summary>工程上下文（agents.md）</summary>
+      <summary data-i18n>工程上下文（agents.md）</summary>
       <div id="eng-ctx-body"></div>
     </details>
     <div id="chat-log"></div>
     <div id="steps-view" hidden></div>
     <div id="chat-chips">
-      <button class="chip" data-chip="analyze" title="只读：事实包（结构/电平/逐段/频谱/目标），结果进对话、不出卡不进流">＋ 分析电平</button>
-      <button class="chip" data-chip="suggest" title="POST /tune/suggest（默认口径）→ 步骤流调参卡（待处置）">＋ 调参建议</button>
-      <button class="chip" data-chip="arrange" title="POST /arrange/generate（默认包/标准档）→ 步骤流配器卡（待处置）">＋ 配器初稿</button>
-      <button class="chip" data-chip="chain" title="聚焦 dock「链」页签（跑链有入参选择，保持在链面板内发起）">＋ 跑处理链</button>
+      <button class="chip" data-chip="analyze" title="只读：事实包（结构/电平/逐段/频谱/目标），结果进对话、不出卡不进流" data-i18n-title data-i18n>＋ 分析电平</button>
+      <button class="chip" data-chip="suggest" title="POST /tune/suggest（默认口径）→ 步骤流调参卡（待处置）" data-i18n-title data-i18n>＋ 调参建议</button>
+      <button class="chip" data-chip="arrange" title="POST /arrange/generate（默认包/标准档）→ 步骤流配器卡（待处置）" data-i18n-title data-i18n>＋ 配器初稿</button>
+      <button class="chip" data-chip="chain" title="聚焦 dock「链」页签（跑链有入参选择，保持在链面板内发起）" data-i18n-title data-i18n>＋ 跑处理链</button>
     </div>
     <div id="ann-queue" hidden>
-      <span class="muted small">待发送标注：</span>
+      <span class="muted small" data-i18n>待发送标注：</span>
       <span id="ann-queue-list"></span>
-      <button id="btn-ann-clear" title="清空待发送标注">✕</button>
+      <button id="btn-ann-clear" title="清空待发送标注" data-i18n-title>✕</button>
     </div>
     <div id="ref-queue" hidden>
       <div class="rq-head">
-        <span class="muted small">对象引用 · 随下条消息发送</span>
-        <button id="btn-ref-clear" title="清空对象引用">✕ 清空</button>
+        <span class="muted small" data-i18n>对象引用 · 随下条消息发送</span>
+        <button id="btn-ref-clear" title="清空对象引用" data-i18n-title data-i18n>✕ 清空</button>
       </div>
       <div id="ref-queue-list"></div>
     </div>
     <div id="chat-input-row">
-      <textarea id="chat-input" rows="1" placeholder="对乐谱说点什么…（如：改成 D 多利亚调式）｜Enter 发送 / Shift+Enter 换行"></textarea>
-      <button id="btn-send">发送</button>
+      <textarea id="chat-input" rows="1" placeholder="对乐谱说点什么…（如：改成 D 多利亚调式）｜Enter 发送 / Shift+Enter 换行" data-i18n-placeholder></textarea>
+      <button id="btn-send" data-i18n>发送</button>
     </div>
     <div id="chat-actions">
-      <button id="btn-undo-round" title="撤销一步（快照窗口；用户 20 步 / 对话 5 轮内，零新版本）">撤销一步</button>
-      <select id="rollback-select" title="选择恢复点：最近窗口（快照）/ 收藏（git）/ 全部 git 版本"></select>
-      <button id="btn-rollback" title="恢复：窗口段=快照恢复（零新版本）；收藏/git 段=检出该版本">恢复/回滚</button>
-      <button id="btn-clear-diff" title="清除三色 diff 叠层">清除 diff</button>
+      <button id="btn-undo-round" title="撤销一步（快照窗口；用户 20 步 / 对话 5 轮内，零新版本）" data-i18n-title data-i18n>撤销一步</button>
+      <select id="rollback-select" title="选择恢复点：最近窗口（快照）/ 收藏（git）/ 全部 git 版本" data-i18n-title></select>
+      <button id="btn-rollback" title="恢复：窗口段=快照恢复（零新版本）；收藏/git 段=检出该版本" data-i18n-title data-i18n>恢复/回滚</button>
+      <button id="btn-clear-diff" title="清除三色 diff 叠层" data-i18n-title data-i18n>清除 diff</button>
     </div>
   </aside>
 </main>
 
-<section id="dock" title="下方面板：通道 / 效果器 / 音源 / 混音台（可折叠）">
+<section id="dock" title="下方面板：通道 / 效果器 / 音源 / 混音台（可折叠）" data-i18n-title>
   <div class="dock-head">
-    <button class="dock-tab active" data-pane="chan">通道</button>
-    <button class="dock-tab" data-pane="fx">效果器</button>
-    <button class="dock-tab" data-pane="src">音源</button>
-    <button class="dock-tab" data-pane="mix">混音台</button>
-    <button class="dock-tab" data-pane="rec">录音</button>
-    <button class="dock-tab" data-pane="chain">链</button>
+    <button class="dock-tab active" data-pane="chan" data-i18n>通道</button>
+    <button class="dock-tab" data-pane="fx" data-i18n>效果器</button>
+    <button class="dock-tab" data-pane="src" data-i18n>音源</button>
+    <button class="dock-tab" data-pane="mix" data-i18n>混音台</button>
+    <button class="dock-tab" data-pane="rec" data-i18n>录音</button>
+    <button class="dock-tab" data-pane="chain" data-i18n>链</button>
     <span class="dh-spacer"></span>
     <span class="dh-hint" id="dock-hint"></span>
-    <button id="dock-fold" title="折叠/展开（记忆到 localStorage）" style="border:none;background:none;font-size:12px">▾ 收起</button>
+    <button id="dock-fold" title="折叠/展开（记忆到 localStorage）" style="border:none;background:none;font-size:12px" data-i18n-title data-i18n>▾ 收起</button>
   </div>
   <div id="dock-body">
     <div class="dock-pane active" id="dock-chan"></div>
@@ -279,89 +284,89 @@
 
 <div id="sel-bar" hidden>
   <span id="sel-info" class="muted small"></span>
-  <button data-op="pitch-1" title="选中音 -1 半音">♭ −1</button>
-  <button data-op="pitch+1" title="选中音 +1 半音">♯ +1</button>
-  <button data-op="oct-1" title="降八度">−8</button>
-  <button data-op="oct+1" title="升八度">+8</button>
-  <button data-op="vel-" title="力度 -0.1">力度 −</button>
-  <button data-op="vel+" title="力度 +0.1">力度 +</button>
-  <button data-op="delete" title="删除选中音（按索引降序执行）">🗑 删除</button>
-  <button id="ref-drag" draggable="true" title="拖入对话栏 = 把当前选区作为「对象引用」（音符），随下条消息发送给 agent">⇱ 拖入对话</button>
-  <label id="ann-mode-wrap" title="标注模式：选区操作先挂起为「人工标注」，随下条对话发送">
+  <button data-op="pitch-1" title="选中音 -1 半音" data-i18n-title>♭ −1</button>
+  <button data-op="pitch+1" title="选中音 +1 半音" data-i18n-title>♯ +1</button>
+  <button data-op="oct-1" title="降八度" data-i18n-title>−8</button>
+  <button data-op="oct+1" title="升八度" data-i18n-title>+8</button>
+  <button data-op="vel-" title="力度 -0.1" data-i18n-title data-i18n>力度 −</button>
+  <button data-op="vel+" title="力度 +0.1" data-i18n-title data-i18n>力度 +</button>
+  <button data-op="delete" title="删除选中音（按索引降序执行）" data-i18n-title data-i18n>🗑 删除</button>
+  <button id="ref-drag" draggable="true" title="拖入对话栏 = 把当前选区作为「对象引用」（音符），随下条消息发送给 agent" data-i18n-title data-i18n>⇱ 拖入对话</button>
+  <label id="ann-mode-wrap" title="标注模式：选区操作先挂起为「人工标注」，随下条对话发送" data-i18n-title data-i18n>
     <input type="checkbox" id="ann-mode"> 标注模式
   </label>
-  <button data-op="close" title="关闭工具条（保留选区）">✕</button>
+  <button data-op="close" title="关闭工具条（保留选区）" data-i18n-title>✕</button>
 </div>
 
 <div id="dlg-export" class="dlg-wrap" hidden>
   <div class="dlg">
-    <div class="dlg-hd">导出</div>
+    <div class="dlg-hd" data-i18n>导出</div>
     <div class="dlg-body">
-      <label class="ck"><input type="checkbox" id="ex-mix" checked> 混音 master（mix.wav）</label>
-      <label class="ck"><input type="checkbox" id="ex-stems" checked> 每轨 stems（stems/&lt;轨&gt;.wav）</label>
-      <label class="ck"><input type="checkbox" id="ex-buses"> 总线 stems（buses/，工程有总线时）</label>
-      <label class="ck"><input type="checkbox" id="ex-midi" checked> MIDI Type1（多轨 .mid）</label>
-      <label class="ck"><input type="checkbox" id="ex-midi-stems"> 每轨 MIDI（midi-stems/）</label>
-      <div class="dlg-row"><label for="ex-depth">位深</label>
+      <label class="ck" data-i18n><input type="checkbox" id="ex-mix" checked> 混音 master（mix.wav）</label>
+      <label class="ck" data-i18n><input type="checkbox" id="ex-stems" checked> 每轨 stems（stems/&lt;轨&gt;.wav）</label>
+      <label class="ck" data-i18n><input type="checkbox" id="ex-buses"> 总线 stems（buses/，工程有总线时）</label>
+      <label class="ck" data-i18n><input type="checkbox" id="ex-midi" checked> MIDI Type1（多轨 .mid）</label>
+      <label class="ck" data-i18n><input type="checkbox" id="ex-midi-stems"> 每轨 MIDI（midi-stems/）</label>
+      <div class="dlg-row"><label for="ex-depth" data-i18n>位深</label>
         <select id="ex-depth">
-          <option value="16">16-bit（默认 · PCM_16）</option>
+          <option value="16" data-i18n>16-bit（默认 · PCM_16）</option>
           <option value="24">24-bit（PCM_24）</option>
           <option value="32f">32-bit float（FLOAT）</option>
         </select>
       </div>
-      <label class="ck"><input type="checkbox" id="ex-range" disabled> 仅导出选段（循环区间）<span id="ex-range-hint" class="muted small"></span></label>
-      <div class="dlg-hint">产物目录：<code>output/&lt;工程&gt;/exports/&lt;时间戳&gt;/</code>（wav/mid 不入库）</div>
+      <label class="ck" data-i18n><input type="checkbox" id="ex-range" disabled> 仅导出选段（循环区间）<span id="ex-range-hint" class="muted small"></span></label>
+      <div class="dlg-hint" data-i18n>产物目录：<code data-i18n>output/&lt;工程&gt;/exports/&lt;时间戳&gt;/</code>（wav/mid 不入库）</div>
       <div id="ex-result" class="dlg-result" hidden></div>
     </div>
     <div class="dlg-ft">
-      <button id="ex-cancel">关闭</button>
-      <button id="ex-run" class="primary">开始导出</button>
+      <button id="ex-cancel" data-i18n>关闭</button>
+      <button id="ex-run" class="primary" data-i18n>开始导出</button>
     </div>
   </div>
 </div>
 
 <div id="dlg-del" class="dlg-wrap" hidden>
   <div class="dlg">
-    <div class="dlg-hd">删除工程</div>
+    <div class="dlg-hd" data-i18n>删除工程</div>
     <div class="dlg-body">
-      <div>将把工程 <b id="del-name">—</b> 移入 <code>output/.trash/</code>：从列表移除，文件完整保留（可手动找回）。</div>
-      <div class="dlg-hint">二次确认 · 安全删（非物理删除）· 打开中的工程会被安全关闭。</div>
+      <div data-i18n>将把工程 <b id="del-name">—</b> 移入 <code>output/.trash/</code>：从列表移除，文件完整保留（可手动找回）。</div>
+      <div class="dlg-hint" data-i18n>二次确认 · 安全删（非物理删除）· 打开中的工程会被安全关闭。</div>
       <div id="del-result" class="dlg-result" hidden></div>
     </div>
     <div class="dlg-ft">
-      <button id="del-cancel">取消</button>
-      <button id="del-run" class="danger">删除工程</button>
+      <button id="del-cancel" data-i18n>取消</button>
+      <button id="del-run" class="danger" data-i18n>删除工程</button>
     </div>
   </div>
 </div>
 
 <div id="dlg-keys" class="dlg-wrap" hidden>
   <div class="dlg dlg-keys">
-    <div class="dlg-hd">快捷键速查</div>
+    <div class="dlg-hd" data-i18n>快捷键速查</div>
     <div class="dlg-body" id="keys-body"></div>
-    <div class="dlg-ft"><button id="keys-close">关闭</button></div>
+    <div class="dlg-ft"><button id="keys-close" data-i18n>关闭</button></div>
   </div>
 </div>
 
 <div id="dlg-fav" class="dlg-wrap" hidden>
   <div class="dlg">
-    <div class="dlg-hd">收藏版本</div>
+    <div class="dlg-hd" data-i18n>收藏版本</div>
     <div class="dlg-body">
-      <div class="dlg-hint">收藏 = 工程 git tag（永久保留，不随日常提交清理）</div>
+      <div class="dlg-hint" data-i18n>收藏 = 工程 git tag（永久保留，不随日常提交清理）</div>
       <div id="fav-list" class="fav-list"></div>
     </div>
     <div class="dlg-ft">
-      <button id="fav-cancel">关闭</button>
-      <button id="fav-restore" class="primary">恢复到选中版本</button>
+      <button id="fav-cancel" data-i18n>关闭</button>
+      <button id="fav-restore" class="primary" data-i18n>恢复到选中版本</button>
     </div>
   </div>
 </div>
 
 <footer id="statusbar">
-  <span id="status-summary" class="muted">未打开工程</span>
+  <span id="status-summary" class="muted" data-i18n>未打开工程</span>
   <span id="status-diff"></span>
   <span id="status-error" class="error"></span>
-  <span id="meter" class="meter" title="试听电平（wav 通路）：L/R 峰值 + 峰值保持 + CLIP">
+  <span id="meter" class="meter" title="试听电平（wav 通路）：L/R 峰值 + 峰值保持 + CLIP" data-i18n-title>
     <span class="mt"><i id="mt-l"></i><b id="mt-lh"></b></span>
     <span class="mt"><i id="mt-r"></i><b id="mt-rh"></b></span>
     <span id="mt-clip" class="mclip" hidden>CLIP</span>
