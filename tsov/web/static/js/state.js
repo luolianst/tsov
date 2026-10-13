@@ -15,6 +15,7 @@ export const store = {
   savedAt: null,               // M-V8 E6 段2：score.json 落盘时间（epoch 秒；顶栏保存徽章）
   gitLog: [],
   history: { can_undo: false, can_redo: false },
+  chat: null,                  // 批I：当前会话摘要（session_id/title/turns/status；服务端 state.chat）
 
   /* 交互态 */
   selection: { track: 0, indices: [] },
@@ -156,6 +157,7 @@ export function setState(s, opts) {
   store.savedAt = Number(s.saved_at) || null; /* M-V8 E6 段2：保存徽章（服务端 score.json mtime） */
   store.gitLog = s.git_log || [];
   store.history = s.history || { can_undo: false, can_redo: false };
+  store.chat = s.chat || null;   // 批I：当前会话（指示条/面板）
   if (keep && store.score && store.score.tracks[keep.track]) {
     const n = store.score.tracks[keep.track].notes.length;
     store.selection = { track: keep.track, indices: keep.indices.filter((i) => i >= 0 && i < n) };

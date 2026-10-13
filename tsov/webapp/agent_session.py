@@ -771,4 +771,9 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
             _retention_tick(state, project_name, agent_turns=turns)
         except Exception:  # noqa: BLE001 留存钩子失败不影响主流程
             pass
+        try:   # 批I：轮末会话元数据（P14 短名 / 轮数 / 更新时间；失败静默）
+            from . import session_store as _ss
+            _ss.touch_session(session_id, project=project_name)
+        except Exception:  # noqa: BLE001
+            pass
         state.agent_lock.release()

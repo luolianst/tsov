@@ -119,7 +119,7 @@ def test_project_create_list_state(env):
     r = env["client"].get("/api/projects/p1/state")
     assert r.status_code == 200
     s = r.json()
-    assert set(s) == {"project", "score", "selection", "history", "git_log", "summary", "duration", "saved_at"}
+    assert set(s) == {"project", "score", "selection", "history", "git_log", "summary", "duration", "saved_at", "chat"}
     assert len(s["score"]["tracks"][0]["notes"]) == 3
     assert s["history"] == {"can_undo": False, "can_redo": False}
     assert any("init" in ln for ln in s["git_log"])
@@ -1249,3 +1249,54 @@ def test_chat_preseeds_working_copy(env, monkeypatch):
     assert "重置为本轮起点" in seen.get("brief", "")
     # 轮末：未改 → 采用跳过；草稿仍在（预置语义）
     assert (proj_root / "agent-edited-score.json").is_file()
+
+
+# ---------------------------------------------------------------------------
+# 批I：会话面板（列表富化 / 改名 / 软删 / 绑定落盘）
+# ---------------------------------------------------------------------------
+
+
+def test_sessions_enrich_rename_delete(env):
+    name = _make_project(env, "batch-i-" + uuid.uuid4().hex[:6])
+    c = env["client"]
+    sdir = env["dir"] / "agent-sessions"
+    sdir.mkdir(parents=True, exist_ok=True)
+    sid = "20261014-000000-aaaa1111"
+    (sdir / f"{sid}.jsonl").write_text(
+        json.dumps({"role": "system", "content": "sys", "ts": "2026-10-14T00:00:00"}, ensure_ascii=False) + "\n"
+        + json.dumps({"role": "user", "content": "帮我改一下弦乐音色", "ts": "2026-10-14T00:00:01"}, ensure_ascii=False) + "\n",
+        encoding="utf-8")
+
+    r = c.get("/api/sessions", params={"project": name}).json()["sessions"]
+    hit = [s for s in r if s["id"] == sid]
+    assert hit and hit[0]["title"] == "帮我改一下弦乐音色" and hit[0]["turns"] == 1
+
+    r2 = c.post("/api/sessions/rename", json={"name": f"{sid}.jsonl", "title": "弦乐音色调优"}).json()
+    assert r2["ok"] and r2["title"] == "弦乐音色调优"
+    r3 = [s for s in c.get("/api/sessions", params={"project": name}).json()["sessions"] if s["id"] == sid]
+    assert r3 and r3[0]["title"] == "弦乐音色调优"
+
+    r4 = c.post("/api/sessions/delete", json={"name": sid}).json()
+    assert r4["ok"] and "trash" in r4["trashed_to"]
+    assert (sdir / ".trash" / f"{sid}.jsonl").is_file()
+    r5 = [s for s in c.get("/api/sessions", params={"project": name}).json()["sessions"] if s["id"] == sid]
+    assert not r5
+    assert c.post("/api/sessions/delete", json={"name": "nope"}).status_code == 404
+
+
+def test_session_binding_persisted_and_restored(env):
+    """批I L2：绑定落盘（_current.json）；重启后 /api/chat 懒读路径可恢复同一会话。"""
+    name = _make_project(env, "batch-i-b-" + uuid.uuid4().hex[:6])
+    c = env["client"]
+    sdir = env["dir"] / "agent-sessions"
+    sdir.mkdir(parents=True, exist_ok=True)
+    sid = "20261014-000000-bbbb2222"
+    (sdir / f"{sid}.jsonl").write_text(json.dumps({"role": "system", "content": "s"}) + "\n", encoding="utf-8")
+    assert c.post("/api/sessions/load", json={"project": name, "name": f"{sid}.jsonl"}).json()["ok"]
+    cur = c.get(f"/api/projects/{name}/state").json()
+    assert (cur.get("chat") or {}).get("session_id") == sid
+    from tsov.webapp import session_store
+    assert session_store.bound_session(name) == sid          # 盘上绑定（模拟重启后的懒读源）
+    assert c.post("/api/chat/reset", json={"project": name}).json()["ok"]
+    assert session_store.bound_session(name) is None          # 新会话 = 结束续接，重启不复活
+    assert session_store.get_meta(sid)["status"] == "closed"

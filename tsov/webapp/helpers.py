@@ -22,7 +22,17 @@ def project_state(proj: Project) -> dict:
         "duration": score_duration(proj.score, proj.root),
         # M-V8 E6 段2：保存状态可见性——score.json 落盘时间（epoch 秒；顶栏「已保存 hh:mm:ss」）
         "saved_at": saved_at_of(proj),
+        # 批I：当前会话摘要（标题/轮数/状态；会话面板与指示条用；无绑定 → None）
+        "chat": _chat_info(proj.name),
     }
+
+
+def _chat_info(project: str) -> dict | None:
+    try:
+        from .session_store import current_info
+        return current_info(project)
+    except Exception:  # noqa: BLE001 —— 会话资产面失败不影响状态载荷
+        return None
 
 
 def saved_at_of(proj: Project) -> float | None:

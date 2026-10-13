@@ -213,16 +213,21 @@
       <div id="chat-head-btns">
         <button id="btn-fold-chat" class="fold-btn" title="收起面板（收成窄边条）" data-i18n-title>▶</button>
         <button id="btn-new-session" title="结束当前对话线程；下一轮起新会话（历史 JSONL 保留）" data-i18n-title>🆕<span class="btn-txt" data-i18n> 新会话</span></button>
-        <button id="btn-import-session" title="导入历史会话：回看消息 + 接着聊" data-i18n-title>📥<span class="btn-txt" data-i18n> 导入</span></button>
+        <button id="btn-import-session" title="会话面板：列表 / 续接 / 改名 / 删除（服务重启自动续接）" data-i18n-title>📥<span class="btn-txt" data-i18n> 会话</span></button>
         <button id="btn-stop-agent" title="停止当前 agent 会话（已落盘修改保留）" hidden data-i18n-title data-i18n>⏹ 停止</button>
         <label id="live-render-toggle" title="跟随重渲：agent 每步采用后自动重渲试听（默认关）" data-i18n-title data-i18n><input type="checkbox" id="chk-live-render"> 边跑边听</label>
       </div>
     </div>
     <div id="import-row" hidden>
-      <select id="import-select"></select>
-      <button id="btn-import-confirm" data-i18n>载入</button>
+      <select id="import-select" title="选择会话：续接 = 接着聊（同一 JSONL）" data-i18n-title></select>
+      <button id="btn-import-confirm" title="续接所选会话" data-i18n-title data-i18n>载入</button>
+      <button id="btn-import-rename" data-i18n>改名</button>
+      <button id="btn-import-delete" data-i18n>删除</button>
+      <label id="import-all-wrap" title="显示全部工程的会话" data-i18n-title><input type="checkbox" id="chk-import-all"> <span data-i18n>全部工程</span></label>
+      <input id="import-title" placeholder="新标题…" size="12" hidden data-i18n-placeholder>
       <button id="btn-import-cancel">✕</button>
     </div>
+    <div id="chat-session-bar" hidden title="当前会话：点击打开会话面板" data-i18n-title><span class="csb-dot">●</span> <span id="csb-title"></span><span id="csb-meta"></span></div>
     <details id="eng-ctx">
       <summary data-i18n>工程上下文（agents.md）</summary>
       <div id="eng-ctx-body"></div>

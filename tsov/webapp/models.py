@@ -103,6 +103,19 @@ class SessionLoadIn(BaseModel):
     name: str
 
 
+class SessionRenameIn(BaseModel):
+    """批I：会话改名（name = 会话文件名或 id；title 新标题）。"""
+
+    name: str
+    title: str
+
+
+class SessionDeleteIn(BaseModel):
+    """批I：会话软删（name = 会话文件名或 id）。"""
+
+    name: str
+
+
 class LlmSettingsIn(BaseModel):
     """LLM 接入设置补丁（E2）：api_key 非空 = 设置；clear_key = 清除设置档里的 key；
     endpoint/model 传空串 = 清除该项覆盖（回默认），不传 = 不改。"""

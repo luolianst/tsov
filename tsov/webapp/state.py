@@ -110,6 +110,11 @@ class WebState:
         with self.projects_lock:
             self.projects.pop(name, None)
         self.chat_sessions.pop(name, None)
+        try:   # 批I：清该工程的持久化会话绑定
+            from .session_store import clear_binding
+            clear_binding(name)
+        except Exception:  # noqa: BLE001
+            pass
         with self.chains_lock:
             self.chains.pop(name, None)
         trash = self.output_dir / ".trash"

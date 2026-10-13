@@ -89,8 +89,16 @@ export const api = {
   getLlmSettings: () => req('/api/llm/settings'),
   setLlmSettings: (patch) => post('/api/llm/settings', patch),
   testLlm: (body) => post('/api/llm/test', body || {}),
-  listSessions: () => req('/api/sessions'),
+  listSessions: (project, allProjects) => {
+    const q = new URLSearchParams();
+    if (project) q.set('project', project);
+    if (allProjects) q.set('all_projects', '1');
+    const qs = q.toString();
+    return req('/api/sessions' + (qs ? '?' + qs : ''));
+  },
   loadSession: (project, name) => post('/api/sessions/load', { project, name }),
+  renameSession: (name, title) => post('/api/sessions/rename', { name, title }),
+  deleteSession: (name) => post('/api/sessions/delete', { name }),
 
   wavUrl: (name) => '/api/projects/' + encodeURIComponent(name) + '/wav',
   wavUrlRev: (name, rev) => '/api/projects/' + encodeURIComponent(name) + '/wav?rev=' + encodeURIComponent(rev || 'HEAD'),

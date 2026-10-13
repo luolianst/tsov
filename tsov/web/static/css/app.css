@@ -392,10 +392,17 @@ body.chat-folded #rail-chat { display: flex; }
 #live-render-toggle { display: inline-flex; align-items: center; gap: 3px; font-size: var(--fs-sm); opacity: .78; cursor: pointer; user-select: none; white-space: nowrap; }
 #live-render-toggle input { margin: 0; }
 #live-render-toggle:has(input:checked) { opacity: 1; color: var(--ok); }
-#import-row { display: flex; gap: 4px; padding: 6px 10px; border-top: 1px dashed var(--border); }
+#import-row { display: flex; gap: 4px; row-gap: 4px; flex-wrap: wrap; padding: 6px 10px; border-top: 1px dashed var(--border); }
 #import-row[hidden] { display: none; }
-#import-select { flex: 1; min-width: 0; font-size: var(--fs-sm); }
+#import-select { flex: 1 1 100%; min-width: 0; font-size: var(--fs-sm); }
 #import-row button { font-size: var(--fs-sm); padding: 2px 7px; }
+/* 批I：会话面板小件 + 当前会话指示条 */
+#import-all-wrap { display: inline-flex; align-items: center; gap: 3px; font-size: var(--fs-sm); color: inherit; opacity: .72; user-select: none; }
+#import-title { flex: 1 1 90px; min-width: 0; font-size: var(--fs-sm); }
+#chat-session-bar { padding: 3px 10px 0; font-size: var(--fs-sm); color: inherit; opacity: .72; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#chat-session-bar[hidden] { display: none; }
+#chat-session-bar .csb-dot { color: var(--ok); font-size: 10px; }
+#chat-session-bar:hover { opacity: 1; }
 #chat-log { overflow-y: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
 
 .msg {

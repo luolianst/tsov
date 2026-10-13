@@ -18,6 +18,9 @@ const MAX_LOGS = 400;
 let logEl, inputEl, sendBtn;
 let undoRoundBtn, rollbackSel, rollbackBtn, stopBtn, newSessionBtn;
 let importBtn, importRow, importSelect, importConfirm, importCancel;
+let importRenameBtn, importDeleteBtn, importAllChk, importTitleInp, sessionBar, csbTitle, csbMeta;
+let sessionItems = {};
+let delTimer = 0;
 let cmpSel;
 
 /* D 件：AI 动作 chips（快捷命令改造——结构化触发，确定性 REST 不经 LLM；
@@ -593,6 +596,7 @@ async function send(message) {
   try {
     const res = await api.chat(store.project, message, baseRev, anns.length ? anns : null, sel, ua.length ? ua : null, refs.length ? refs : null);
     sysMsg('session：' + res.session_id);
+    refreshChatBar();
     if (anns.length) clearAnnotations();   // 已随消息送达（后端确定性应用；失败会出 agent_error）
     if (refs.length) clearRefs();          // 批D：引用已随消息送达（只读上下文，无回执）
     if (ua.length) clearUserActions();     // 批B B1-4：已送达，清缓冲
@@ -850,6 +854,7 @@ async function doNewSession() {
     if (logs[store.project]) { logs[store.project] = []; persist(); }
     renderAll();
     sysMsg(t('已开新会话：下一轮对话将写入新的会话文件'));
+    refreshChatBar();
   } catch (e) { setError(e.message); }
 }
 
@@ -864,18 +869,25 @@ async function doStop() {
 async function openImportRow() {
   if (!store.project) { setError(t('先打开一个工程')); return; }
   try {
-    const r = await api.listSessions();
+    const r = await api.listSessions(store.project, importAllChk.checked);
     importSelect.innerHTML = '';
+    sessionItems = {};
     (r.sessions || []).forEach((s) => {
       const opt = document.createElement('option');
       opt.value = s.name;
-      opt.textContent = s.name + '  (' + s.mtime + ')';
+      sessionItems[s.name] = s;
+      const title = s.title || (s.id ? s.id.slice(-8) : s.name);
+      const tag = s.current ? '● ' : '';
+      const when = String(s.updated || s.mtime || '').replace('T', ' ').slice(5, 16);
+      opt.textContent = tag + title + ' · ' + (s.turns || 0) + t('轮') + ' · ' + when
+        + (s.project ? '' : t('（未归类）'));
       importSelect.appendChild(opt);
     });
     if (!importSelect.options.length) {
       sysMsg(t('（没有可导入的历史会话）'));
     }
     importRow.hidden = false;
+    importTitleInp.hidden = true;
     importSelect.focus();
   } catch (e) { setError(e.message); }
 }
@@ -897,6 +909,67 @@ async function confirmImport() {
     persist();
     renderAll();
     toast(t('已续接会话 ') + r.session_id);
+    refreshChatBar();
+  } catch (e) { setError(e.message); }
+}
+
+/* ---------------- 批I：会话面板（续接/改名/软删）+ 当前会话指示 ---------------- */
+
+function selectedSession() { return sessionItems[importSelect.value] || null; }
+
+async function refreshChatBar() {
+  if (!store.project) { sessionBar.hidden = true; return; }
+  try {
+    const s = await api.getState(store.project);
+    store.chat = s.chat || null;
+    renderSessionBar();
+  } catch (e) { /* 静默：指示条非关键路径 */ }
+}
+
+function renderSessionBar() {
+  const c = store.chat;
+  if (!store.project || !c || !c.session_id) { sessionBar.hidden = true; return; }
+  csbTitle.textContent = c.title || t('（新会话）');
+  csbMeta.textContent = ' · ' + (c.turns || 0) + t('轮');
+  sessionBar.hidden = false;
+}
+
+async function renameSelected() {
+  const s = selectedSession();
+  if (!s) { setError(t('先选一个会话文件')); return; }
+  if (importTitleInp.hidden) {          // 第一步：展开输入框（预填现标题）
+    importTitleInp.value = s.title || '';
+    importTitleInp.hidden = false;
+    importTitleInp.focus();
+    importTitleInp.select();
+    return;
+  }
+  const title = importTitleInp.value.trim();
+  if (!title) { setError(t('标题为空')); return; }
+  try {
+    await api.renameSession(s.name, title);
+    toast(t('已改名：') + title);
+    importTitleInp.hidden = true;
+    await openImportRow();
+    await refreshChatBar();
+  } catch (e) { setError(e.message); }
+}
+
+async function deleteSelected() {
+  const s = selectedSession();
+  if (!s) { setError(t('先选一个会话文件')); return; }
+  if (!delTimer) {                      // 两步确认（3s 窗口）
+    delTimer = setTimeout(() => { delTimer = 0; importDeleteBtn.textContent = t('删除'); }, 3000);
+    importDeleteBtn.textContent = t('确定删除？');
+    return;
+  }
+  clearTimeout(delTimer); delTimer = 0;
+  importDeleteBtn.textContent = t('删除');
+  try {
+    await api.deleteSession(s.name);
+    toast(t('已移入 .trash：') + (s.title || s.id || s.name));
+    await openImportRow();
+    await refreshChatBar();
   } catch (e) { setError(e.message); }
 }
 
@@ -973,6 +1046,13 @@ export function init(opts) {
   importSelect = opts.importSelect;
   importConfirm = opts.importConfirm;
   importCancel = opts.importCancel;
+  importRenameBtn = opts.importRenameBtn;
+  importDeleteBtn = opts.importDeleteBtn;
+  importAllChk = opts.importAllChk;
+  importTitleInp = opts.importTitleInp;
+  sessionBar = opts.sessionBar;
+  csbTitle = opts.csbTitle;
+  csbMeta = opts.csbMeta;
   cmpSel = opts.cmpSel;
 
   /* 批B2 C3：跟随重渲开关（默认关；渲染行为在 playback.js 订阅 diff_applied.live） */
@@ -1058,6 +1138,14 @@ export function init(opts) {
   importBtn.addEventListener('click', openImportRow);
   importConfirm.addEventListener('click', confirmImport);
   importCancel.addEventListener('click', () => { importRow.hidden = true; });
+  importRenameBtn.addEventListener('click', renameSelected);
+  importDeleteBtn.addEventListener('click', deleteSelected);
+  importAllChk.addEventListener('change', () => { openImportRow(); });
+  sessionBar.addEventListener('click', openImportRow);
+  importTitleInp.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); renameSelected(); }
+    else if (e.key === 'Escape') { importTitleInp.hidden = true; }
+  });
 
   opts.chipsEl.addEventListener('click', (e) => {
     const chip = e.target.closest('.chip');
@@ -1067,6 +1155,7 @@ export function init(opts) {
   initChatResize();
   wireEvents();
   bus.on('state', refreshRollbackOptions);
+  bus.on('state', renderSessionBar);
   bus.on('agentbusy', () => {
     sendBtn.disabled = store.agentBusy;
     inputEl.disabled = store.agentBusy;
