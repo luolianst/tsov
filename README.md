@@ -69,11 +69,15 @@ Large third-party binaries are **not** shipped in this repo (size/licensing). Fo
 | `FluidR3_GM.sf2` soundfont | GM instruments | `vendor/soundfonts/FluidR3_GM.sf2` | [FluidR3_GM](https://member.keymusician.com/Member/FluidR3_GM/index.html) |
 | RMVPE (`rmvpe.pt`) | Humming transcription | `vendor/RMVPE/rmvpe.pt` | [RVC Project](https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI) |
 | [GAME](https://github.com/openvpi/GAME) | Produced-vocal transcription | `vendor/GAME/` | openvpi/GAME |
+| `htdemucs` / `htdemucs_ft` weights ([demucs](https://github.com/facebookresearch/demucs)) | Song decomposition — stem separation | HuggingFace cache (`adefossez/HTDemucs`, `HTDemucs-ft`) | [demucs](https://github.com/facebookresearch/demucs) |
+| `vocals_mel_band_roformer` ([python-audio-separator](https://github.com/nomadkaraoke/python-audio-separator)) | High-quality vocal separation | `vendor/audio-separator-models/` | [python-audio-separator releases](https://github.com/nomadkaraoke/python-audio-separator/releases) |
+| [ADTOF-pytorch](https://github.com/xavriley/ADTOF-pytorch) | Drum transcription | `vendor/ADTOF-pytorch/` | xavriley/ADTOF-pytorch |
+| [YourMT3](https://github.com/mimbres/YourMT3) checkpoint (`mt3-infer`) | Bass / everything-else transcription | `vendor/mt3-checkpoints/` | mimbres/YourMT3 |
 | Dexed (VST3 synth) · TAL-Chorus-LX (chorus) | VST3 instrument & effect support (the demo-tested pair) | `vendor/vst3/` | [Dexed](https://github.com/asb2m10/dexed) · [TAL](https://tal-software.com/products/tal-chorus-lx) |
 
-**Shortcut:** `python scripts/fetch_engines.py` downloads and places everything above — plus the two VST3 test plugins into `vendor/vst3/` — and runs quick functional checks (GAME's venv wiring included). See [docs/setup-engines.md](docs/setup-engines.md) for the manual walkthrough.
+**Shortcut:** `python scripts/fetch_engines.py` downloads and places everything above and runs quick functional checks (GAME's venv wiring and the pinned MT3 install included). The separation / drums / multi-instrument steps additionally use the `demucs`, `audio-separator` and `mt3-infer` Python packages — tested install commands are in [docs/setup-engines.md](docs/setup-engines.md) §2f–§2i, along with the manual walkthrough.
 
-Without these, the web UI, score editing, mixing and MIDI import/export still work — audio rendering and transcription won't.
+Without these, the web UI, score editing, mixing and MIDI import/export still work — audio rendering, transcription and song decomposition won't.
 
 ### One-click Windows bundle (optional)
 
@@ -136,4 +140,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Issues and small PRs are welcome; for bi
 
 ---
 
-<sub>Built on the shoulders of: [FluidSynth](https://www.fluidsynth.org/) · [pedalboard](https://github.com/spotify/pedalboard) · [librosa](https://librosa.org/) · [pretty_midi](https://github.com/craffel/pretty-midi) · [FastAPI](https://fastapi.tiangolo.com/) · [RMVPE](https://github.com/Dream-High/RMVPE) · [GAME](https://github.com/openvpi/GAME) — and an agent that never sleeps.</sub>
+<sub>Built on the shoulders of: [FluidSynth](https://www.fluidsynth.org/) · [pedalboard](https://github.com/spotify/pedalboard) · [librosa](https://librosa.org/) · [pretty_midi](https://github.com/craffel/pretty-midi) · [FastAPI](https://fastapi.tiangolo.com/) · [MCP](https://modelcontextprotocol.io) · [RMVPE](https://github.com/Dream-High/RMVPE) · [GAME](https://github.com/openvpi/GAME) · [demucs](https://github.com/facebookresearch/demucs) · [python-audio-separator](https://github.com/nomadkaraoke/python-audio-separator) · [ADTOF](https://github.com/xavriley/ADTOF-pytorch) · [YourMT3](https://github.com/mimbres/YourMT3) — and an agent that never sleeps.</sub>

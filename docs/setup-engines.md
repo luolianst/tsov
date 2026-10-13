@@ -3,7 +3,8 @@
 tsov ships **without** the large third-party engines (size + licensing). This
 repo still does a lot on its own: the web workspace, score editing, mixing,
 MIDI import/export and the agent chat all work with no engines installed — the
-engines add **transcription**, **audio rendering**, and **VST3 instrument/effect
+engines add **transcription**, **audio rendering**, **song decomposition**
+(stem separation), and **VST3 instrument/effect
 hosting** (demo-tested with the two plugins below).
 
 | Component | Unlocks | Download | Expected location |
@@ -12,6 +13,10 @@ hosting** (demo-tested with the two plugins below).
 | `FluidR3_GM.sf2` | GM instrument soundbank | ~148 MB | `vendor/soundfonts/` |
 | [RMVPE](https://github.com/Dream-High/RMVPE) + `rmvpe.pt` | Humming → notes | ~185 MB | `vendor/RMVPE/` |
 | [GAME](https://github.com/openvpi/GAME) + weights | Produced vocals → notes | ~290 MB | `vendor/GAME/` |
+| [demucs](https://github.com/facebookresearch/demucs) (HTDemucs / HTDemucs-ft) | Song decomposition — stem separation | ~400 MB | HuggingFace cache |
+| `vocals_mel_band_roformer` ([python-audio-separator](https://github.com/nomadkaraoke/python-audio-separator)) | High-quality vocal separation | ~872 MB | `vendor/audio-separator-models/` |
+| [ADTOF-pytorch](https://github.com/xavriley/ADTOF-pytorch) | Drums → notes | ~16 MB | `vendor/ADTOF-pytorch/` |
+| [YourMT3](https://github.com/mimbres/YourMT3) (`mt3-infer`) | Bass / everything-else → notes | ~540 MB | `vendor/mt3-checkpoints/` |
 | [Dexed](https://github.com/asb2m10/dexed) + [TAL-Chorus-LX](https://tal-software.com/products/tal-chorus-lx) | VST3 instrument & effect support (demo pair) | ~18 MB | `vendor/vst3/` |
 
 ---
@@ -28,7 +33,9 @@ python scripts/fetch_engines.py --no-verify         # skip the functional checks
 
 The script downloads and places everything below, sets up GAME's virtualenv
 (reusing the tsov venv's torch — see §2d), and finishes with quick functional
-checks (FluidSynth load, RMVPE/GAME wiring, VST3 plugin load). It is
+checks (FluidSynth load, RMVPE/GAME wiring, VST3 plugin load). It covers
+**assets** only — the `demucs` / `audio-separator` packages are one-time pip steps
+(§2f / §2g), while the pinned MT3 stack is installed by the script itself (§2i). It is
 idempotent — existing files are kept (`--force` to re-fetch).
 
 Requires `git` + Python 3.9+. GAME additionally needs [`uv`](https://docs.astral.sh/uv/)
@@ -169,6 +176,56 @@ Usage: bind an instrument with `program = "vst3:<inner path>"`; add an effect of
 kind `vst3` with `path = "<inner path>"`. The web UI's prompts prefill the TAL
 path for effects.
 
+### 2f. demucs (stem separation) — package + weights
+
+```bash
+# package (GPU acceleration comes from the tsov venv's torch):
+uv pip install --python tsov/.venv/Scripts/python.exe demucs==4.1.0
+
+# weights — HTDemucs + HTDemucs-ft into the HuggingFace cache (~400 MB total):
+python scripts/fetch_engines.py --only demucs
+# (needs the `hf` CLI — it ships with huggingface_hub in the tsov venv;
+#  add --hf-mirror https://hf-mirror.com for CN networks)
+```
+
+The chain's **separate** step drives `python -m demucs` (fast = `htdemucs`, quality = `htdemucs_ft`).
+
+### 2g. Mel-Band Roformer vocals (via python-audio-separator)
+
+```bash
+# audio-separator's metadata pulls dev-only deps and numpy>=2 — install in two cuts
+# (tested pins; the tsov venv's torch / numpy / scipy stay untouched):
+uv pip install --python tsov/.venv/Scripts/python.exe --no-deps audio-separator==0.47.0 onnx2torch-py313==1.6.0
+uv pip install --python tsov/.venv/Scripts/python.exe onnx==1.23.2 onnxruntime==1.31.0 ml-dtypes==0.5.4 beartype==0.18.5 diffq-fixed==0.2.4 ml-collections==1.1.0 pydub==0.25.1 rotary-embedding-torch==0.6.5 samplerate==0.1.0 torchvision==0.24.1
+
+# model files (ckpt + yaml + checks) → vendor/audio-separator-models/:
+python scripts/fetch_engines.py --only sep-model
+```
+
+tsov runs the venv's `audio-separator` CLI with `AUDIO_SEPARATOR_MODEL_DIR` pointed at
+`vendor/audio-separator-models/`. Quality mode **degrades gracefully**: if the package or
+the model is missing, separation falls back to plain `htdemucs_ft` and logs why.
+
+### 2h. ADTOF-pytorch (drums)
+
+```bash
+python scripts/fetch_engines.py --only adtof
+# -> vendor/ADTOF-pytorch/ (repo @ a pinned commit; the weights ship inside the repo, ~16 MB)
+```
+
+The drum-transcription backend runs from that clone with the tsov venv's Python.
+
+### 2i. MT3 / YourMT3 (bass & everything else)
+
+```bash
+python scripts/fetch_engines.py --only mt3
+# installs the pinned stack with --no-deps (torch / numpy stay untouched):
+#   mt3-infer==0.2.0 transformers==4.45.2 tokenizers==0.20.3
+#   huggingface-hub>=0.23.2,<1.0 regex>=2024.5.15 mir-eval
+# then downloads the ~536 MB checkpoint:
+#   vendor/mt3-checkpoints/yourmt3/<experiment>/last.ckpt
+```
+
 ---
 
 ## 3. Verify
@@ -176,7 +233,7 @@ path for effects.
 ```bash
 # 1) backend registry
 tsov/.venv/Scripts/tsov.exe backends
-#   -> DSP backends: game, rmvpe
+#   -> DSP backends（M4 插件注册表）: adtof, game, mt3, rmvpe
 #   -> Render backends: ['fluidsynth']
 
 # 2) transcription smoke test (any hummed clip; preprocess writes a 16 kHz wav under <out>/denoised/)
@@ -191,14 +248,18 @@ tsov/.venv/Scripts/tsov.exe render <some score.json> -o /tmp/out.wav
 
 # 4) VST3 test plugins (instrument + effect load via pedalboard)
 tsov/.venv/Scripts/python.exe -c "from pedalboard import load_plugin; d=load_plugin('vendor/vst3/Dexed.vst3/Contents/x86_64-win/Dexed.vst3'); t=load_plugin('vendor/vst3/TAL-Chorus-LX.vst3/Contents/x86_64-win/TAL-Chorus-LX.vst3'); print('vst3 ok:', d.is_instrument, t.is_instrument)"
+
+# 5) song-decomposition stack (separation / drums / multi-instrument)
+tsov/.venv/Scripts/python.exe -c "import demucs, audio_separator, mt3_infer; print('separation stack ok')"
+#   -> separation stack ok; missing pieces degrade gracefully inside the chain (with a logged reason)
 ```
 
 `python scripts/fetch_engines.py` runs a lighter version of these checks
 automatically after fetching (`--no-verify` to skip).
 
 In the web UI, a working setup means: **Render** plays, the humming
-quick-lane's transcription step produces MIDI, and a `vst3:` instrument /
-effect loads without errors.
+quick-lane's transcription step produces MIDI, a `vst3:` instrument /
+effect loads without errors, and the song-decomposition chain runs end to end.
 
 ## 4. Troubleshooting
 
@@ -224,3 +285,7 @@ projects, under their terms:
 - [GAME](https://github.com/openvpi/GAME) — MIT (openvpi)
 - [Dexed](https://github.com/asb2m10/dexed) — GPL-3.0 (asb2m10)
 - [TAL-Chorus-LX](https://tal-software.com/products/tal-chorus-lx) — freeware, see TAL's EULA
+- [demucs](https://github.com/facebookresearch/demucs) — MIT (facebookresearch) · HTDemucs / HTDemucs-ft weights
+- [python-audio-separator](https://github.com/nomadkaraoke/python-audio-separator) — MIT · hosts the Mel-Band Roformer vocal model used here
+- [ADTOF-pytorch](https://github.com/xavriley/ADTOF-pytorch) — no standard license declared upstream; see the repo for terms
+- [YourMT3](https://github.com/mimbres/YourMT3) — GPL-3.0 (Mimbres) · checkpoint hosted on Hugging Face

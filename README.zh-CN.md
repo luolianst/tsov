@@ -71,11 +71,15 @@ tsov/.venv/Scripts/tsov.exe web --host 127.0.0.1 --port 8790   # Windows
 | `FluidR3_GM.sf2` 音色库 | GM 乐器 | `vendor/soundfonts/FluidR3_GM.sf2` | [FluidR3_GM](https://member.keymusician.com/Member/FluidR3_GM/index.html) |
 | RMVPE（`rmvpe.pt`） | 哼唱转录 | `vendor/RMVPE/rmvpe.pt` | [RVC 项目](https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI) |
 | [GAME](https://github.com/openvpi/GAME) | 成品人声转录 | `vendor/GAME/` | openvpi/GAME |
+| `htdemucs` / `htdemucs_ft` 权重（[demucs](https://github.com/facebookresearch/demucs)） | 成品歌拆解——分轨分离 | HuggingFace 缓存（`adefossez/HTDemucs`、`HTDemucs-ft`） | [demucs](https://github.com/facebookresearch/demucs) |
+| `vocals_mel_band_roformer`（经 [python-audio-separator](https://github.com/nomadkaraoke/python-audio-separator)） | 高质量人声分离 | `vendor/audio-separator-models/` | [python-audio-separator releases](https://github.com/nomadkaraoke/python-audio-separator/releases) |
+| [ADTOF-pytorch](https://github.com/xavriley/ADTOF-pytorch) | 鼓转录 | `vendor/ADTOF-pytorch/` | xavriley/ADTOF-pytorch |
+| [YourMT3](https://github.com/mimbres/YourMT3) 权重（`mt3-infer`） | 贝斯 / 其他转录 | `vendor/mt3-checkpoints/` | mimbres/YourMT3 |
 | Dexed（VST3 合成器）· TAL-Chorus-LX（合唱） | VST3 乐器 / 效果支持（演示实测双件） | `vendor/vst3/` | [Dexed](https://github.com/asb2m10/dexed) · [TAL](https://tal-software.com/products/tal-chorus-lx) |
 
-**快捷方式：** `python scripts/fetch_engines.py` 一键下载归位以上全部（含 GAME 的 venv 接线，以及 Dexed / TAL-Chorus-LX 两个 VST3 测试插件 → `vendor/vst3/`），并跑一组功能自检；手把手搭建与验证见 [docs/setup-engines.md](docs/setup-engines.md)（英文）。
+**快捷方式：** `python scripts/fetch_engines.py` 一键下载归位以上全部并跑一组功能自检（含 GAME 的 venv 接线与 MT3 钉装）；分离 / 鼓 / 多器乐步骤另需 `demucs`、`audio-separator`、`mt3-infer` 三个 Python 包——实测安装命令见 [docs/setup-engines.md](docs/setup-engines.md) §2f–§2i（手把手搭建与验证，英文）。
 
-没有这些，Web UI、写谱、混音、MIDI 导入导出照常可用——只是音频渲染与转录不可用。
+没有这些，Web UI、写谱、混音、MIDI 导入导出照常可用——只是音频渲染、转录与成品歌拆解不可用。
 
 ### Windows 一键开箱包（可选）
 
@@ -138,4 +142,4 @@ tsov 还很年轻，也没打算装老成。全流程已经端到端跑通（哼
 
 ---
 
-<sub>站在这些肩膀之上：[FluidSynth](https://www.fluidsynth.org/) · [pedalboard](https://github.com/spotify/pedalboard) · [librosa](https://librosa.org/) · [pretty_midi](https://github.com/craffel/pretty-midi) · [FastAPI](https://fastapi.tiangolo.com/) · [RMVPE](https://github.com/Dream-High/RMVPE) · [GAME](https://github.com/openvpi/GAME) —— 以及一个不睡觉的 agent。</sub>
+<sub>站在这些肩膀之上：[FluidSynth](https://www.fluidsynth.org/) · [pedalboard](https://github.com/spotify/pedalboard) · [librosa](https://librosa.org/) · [pretty_midi](https://github.com/craffel/pretty-midi) · [FastAPI](https://fastapi.tiangolo.com/) · [MCP](https://modelcontextprotocol.io) · [RMVPE](https://github.com/Dream-High/RMVPE) · [GAME](https://github.com/openvpi/GAME) · [demucs](https://github.com/facebookresearch/demucs) · [python-audio-separator](https://github.com/nomadkaraoke/python-audio-separator) · [ADTOF](https://github.com/xavriley/ADTOF-pytorch) · [YourMT3](https://github.com/mimbres/YourMT3) —— 以及一个不睡觉的 agent。</sub>
