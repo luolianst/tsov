@@ -409,17 +409,21 @@ def _run_analyze_grid(ctx: ChainContext) -> dict:
 _SEP_STEMS = ("vocals", "drums", "bass", "other")
 
 
-def _sep_assets_check() -> tuple[bool, str]:
-    """质量档人声路资产：（audio-separator 可执行 ＋ Roformer 模型）就位？返回 (ok, 说明)。"""
-    import sys
+# 质量档人声路：解释器直启入口（2026-10-14——不再依赖 Scripts 启动器 exe；
+# uv 生成的 exe 内嵌装机绝对路径，开箱包搬家即废〔v0.1.6 轮同族教训〕）
+_SEP_ENTRY = ("import sys; sys.argv[0] = 'audio-separator'; "
+              "from audio_separator.utils.cli import main; sys.exit(main())")
 
-    exe_name = "audio-separator.exe" if os.name == "nt" else "audio-separator"
-    exe = Path(sys.executable).parent / exe_name
+
+def _sep_assets_check() -> tuple[bool, str]:
+    """质量档人声路资产：（audio-separator 包 ＋ Roformer 模型）就位？返回 (ok, 说明)。"""
+    import importlib.util
+
     model_file = (Path(__file__).resolve().parents[2] / "vendor" / "audio-separator-models"
                   / "vocals_mel_band_roformer.ckpt")
     missing: list[str] = []
-    if not exe.is_file():
-        missing.append(f"audio-separator 未安装（{exe}）")
+    if importlib.util.find_spec("audio_separator") is None:
+        missing.append("audio-separator 未安装（当前解释器环境找不到包）")
     if not model_file.is_file():
         missing.append(f"Roformer 模型缺失（{model_file}）")
     if not missing:
@@ -504,11 +508,10 @@ def _run_separate(ctx: ChainContext) -> dict:
         eta2 = 12.0 + 0.10 * duration
         label2 = "分离中（质量档·人声 Roformer）"
         ctx.log(f"{label2}：预计 ~{int(eta2)}s")
-        sep_exe = Path(py).parent / ("audio-separator.exe" if os.name == "nt" else "audio-separator")
         model_dir = Path(__file__).resolve().parents[2] / "vendor" / "audio-separator-models"
         raw_sep.mkdir(parents=True, exist_ok=True)
         rc2, tail2, elapsed2 = _exec_child(
-            ctx, [str(sep_exe), str(src), "-m", "vocals_mel_band_roformer.ckpt",
+            ctx, [str(py), "-c", _SEP_ENTRY, str(src), "-m", "vocals_mel_band_roformer.ckpt",
                   "--output_dir", str(raw_sep), "--output_format=WAV"],
             label=label2, eta_sec=eta2,
             env_extra={"AUDIO_SEPARATOR_MODEL_DIR": str(model_dir)}, on_cancel=_cleanup)
