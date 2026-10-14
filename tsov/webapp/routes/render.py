@@ -11,9 +11,29 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 
 from ...host.cache import StemStore, score_keys   # M-V7 D1（ADR-0018）：轨道级 freeze / stem 库
+from ...host.diagnostics import scan_silent_instruments   # P62a（10-14）：插件静音体检
 from .. import config
 from ..models import ExportIn, RenderIn
 from ..state import WebState
+
+
+def _pre_export_silence_check(engine, proj) -> list[dict]:
+    """P62a：导出前强制体检——「有音符但无输出」的 VST3 轨拦截用。
+
+    无 `vst3:` 轨（或全部无音符）→ 零成本直通（不渲染）。否则复用 stem 库整场渲染
+    （未缓存轨渲后入库；缓存命中为亚秒级）→ 采集 stem 峰值 → 扫描。
+    """
+    score = proj.score
+    if not any(str(getattr(t.instrument, "program", "")).startswith("vst3:") and len(t.notes) > 0
+               for t in score.tracks):
+        return []
+    stats: dict = {}
+    session = engine.load(score, base_dir=proj.root)
+    try:
+        engine.render(session, cache=StemStore(proj.root), stats=stats)
+    finally:
+        session.close()
+    return scan_silent_instruments(score, stats.get("stem_peaks") or {})
 
 
 def register(app: FastAPI) -> None:
@@ -40,6 +60,8 @@ def register(app: FastAPI) -> None:
             "rendered": stats.get("rendered", []),
             "cached": stats.get("cached", []),
             "duration": round(audio.shape[0] / engine.samplerate, 3),
+            # P62a（10-14）：插件静音体检（有音符但全零的 vst3 轨 → 推给用户/agent）
+            "warnings": scan_silent_instruments(score, stats.get("stem_peaks") or {}),
         }
         bus.publish(name, "render_done", {"rendered": info["rendered"], "cached": len(info["cached"]),
                                           **({"rev": rev[:8]} if rev else {})})
@@ -117,6 +139,15 @@ def register(app: FastAPI) -> None:
         proj = st().get_project(name)
         proj.save()
         engine = st().engine()
+        # P62a（10-14）：导出前强制体检——命中静音 VST3 轨 → 拦下（推卡）；allow_silent=true 可强制
+        if not body.allow_silent:
+            warns = _pre_export_silence_check(engine, proj)
+            if warns:
+                raise HTTPException(409, {
+                    "error": "存在「有音符但无输出」的 VST3 轨——请先处理（打开插件界面完成交互）再导出；"
+                             "或在导出选项里勾选「强制导出」。",
+                    "warnings": warns,
+                })
         out_dir = proj.root / "exports" / datetime.now().strftime("%Y%m%d-%H%M%S")
         session = engine.load(proj.score, base_dir=proj.root)
         try:

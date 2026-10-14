@@ -464,8 +464,12 @@ def tool_analyze_levels(args: dict) -> str:
 
 
 def tool_export_audio(args: dict) -> str:
-    """渲染（含效果链，立体声）→ 导出 mp3（ffmpeg 320k，ffmpeg 必需）或 wav。"""
+    """渲染（含效果链，立体声）→ 导出 mp3（ffmpeg 320k，ffmpeg 必需）或 wav。
+
+    P62a（10-14）：渲染后静音体检——「有音符但无输出」的 VST3 轨以警告附在返回值里。
+    """
     from ..host import HostEngine
+    from ..host.diagnostics import format_warnings_text, scan_silent_instruments
 
     score_path = args["score_path"]
     out = Path(args["out"])
@@ -474,27 +478,33 @@ def tool_export_audio(args: dict) -> str:
         raise ValueError(f"format 只支持 mp3/wav：{fmt!r}")
     engine = HostEngine()
     session = engine.load_score(score_path)
+    stats: dict = {}
     try:
         if fmt == "wav":
             wav_path = out if out.suffix.lower() == ".wav" else out.with_suffix(".wav")
-            audio = engine.render(session, out_wav=wav_path, stereo=True)
+            audio = engine.render(session, out_wav=wav_path, stereo=True, stats=stats)
             peak = float(max(abs(float(audio.min())), abs(float(audio.max())))) if audio.size else 0.0
-            return f"已导出 WAV：{wav_path}（{len(audio) / engine.samplerate:.2f}s，峰值 {peak:.3f}）"
-        ffmpeg = shutil.which("ffmpeg")
-        if not ffmpeg:
-            raise RuntimeError("找不到 ffmpeg（导出 mp3 需要）")
-        wav_path = out.with_suffix(".wav")
-        audio = engine.render(session, out_wav=wav_path, stereo=True)
-        peak = float(max(abs(float(audio.min())), abs(float(audio.max())))) if audio.size else 0.0
-        out.parent.mkdir(parents=True, exist_ok=True)
-        proc = subprocess.run([ffmpeg, "-y", "-i", str(wav_path), "-codec:a", "libmp3lame",
-                               "-b:a", "320k", str(out)],
-                              capture_output=True, text=True, encoding="utf-8", errors="replace")
-        if proc.returncode != 0:
-            raise RuntimeError(f"ffmpeg 失败：{proc.stderr[-300:]}")
-        size = out.stat().st_size
-        return (f"已导出 MP3：{out}（{len(audio) / engine.samplerate:.2f}s，峰值 {peak:.3f}，"
-                f"{size / 1024:.0f} KB；同目录保留 {wav_path.name}）")
+            text = f"已导出 WAV：{wav_path}（{len(audio) / engine.samplerate:.2f}s，峰值 {peak:.3f}）"
+        else:
+            ffmpeg = shutil.which("ffmpeg")
+            if not ffmpeg:
+                raise RuntimeError("找不到 ffmpeg（导出 mp3 需要）")
+            wav_path = out.with_suffix(".wav")
+            audio = engine.render(session, out_wav=wav_path, stereo=True, stats=stats)
+            peak = float(max(abs(float(audio.min())), abs(float(audio.max())))) if audio.size else 0.0
+            out.parent.mkdir(parents=True, exist_ok=True)
+            proc = subprocess.run([ffmpeg, "-y", "-i", str(wav_path), "-codec:a", "libmp3lame",
+                                   "-b:a", "320k", str(out)],
+                                  capture_output=True, text=True, encoding="utf-8", errors="replace")
+            if proc.returncode != 0:
+                raise RuntimeError(f"ffmpeg 失败：{proc.stderr[-300:]}")
+            size = out.stat().st_size
+            text = (f"已导出 MP3：{out}（{len(audio) / engine.samplerate:.2f}s，峰值 {peak:.3f}，"
+                    f"{size / 1024:.0f} KB；同目录保留 {wav_path.name}）")
+        warns = scan_silent_instruments(session.score, stats.get("stem_peaks") or {})
+        if warns:
+            text += "\n" + format_warnings_text(warns)
+        return text
     finally:
         session.close()
 

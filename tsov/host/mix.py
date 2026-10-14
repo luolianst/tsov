@@ -217,6 +217,11 @@ def render_buses(
         else:
             buf = render_track_source(ht, samplerate, n_frames)
 
+        # P62a（10-14）：stem 峰值采集（静音体检用；缓冲区已在手，零额外渲染成本）
+        if stats is not None:
+            arr = np.asarray(buf)
+            stats.setdefault("stem_peaks", {})[idx] = float(np.max(np.abs(arr))) if arr.size else 0.0
+
         # 轨内后段（混音期实时层）：推子 → automation → 声像
         stereo_buf = apply_track_mix(np.asarray(buf, dtype=np.float32), tr, times)
 

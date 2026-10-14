@@ -94,13 +94,15 @@ def generate_map(plugin_path: str, out_dir: Path | str | None = None) -> Path:
         raise RuntimeError("生成参数表需要插件 worker（当前 TSOV_VST_INPROC=1；去掉该环境变量后重试）")
     data = w.list_params(ap)
 
-    # 既有文件（重扫合并策展字段）
+    # 既有文件（重扫合并策展字段 + meta 级字段保留，P62a）
     target = map_path(plugin_path, out_dir)
     old_by: dict = {}
+    old_meta: dict | None = None
     if target.is_file():
         try:
             old = json.loads(target.read_text(encoding="utf-8"))
             old_by = {str(e.get("name")): e for e in (old.get("params") or []) if isinstance(e, dict)}
+            old_meta = old.get("meta") if isinstance(old.get("meta"), dict) else None
         except (OSError, ValueError):
             old_by = {}
 
@@ -117,18 +119,20 @@ def generate_map(plugin_path: str, out_dir: Path | str | None = None) -> Path:
         rel_path = str(Path(ap).relative_to(_REPO_ROOT))
     except ValueError:
         rel_path = ap
-    doc = {
+    doc: dict = {
         "plugin": Path(ap).stem,
         "plugin_path": rel_path,
-        "generator": {
-            "tool": "tsov vst3-map",
-            "protocol": vst_worker.PROTOCOL,
-            "dawdreamer": (getattr(w, "worker_info", {}) or {}).get("dawdreamer") or "?",
-            "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
-        },
-        "param_count": len(entries),
-        "params": entries,
     }
+    if old_meta:   # P62a：策展 meta（如静音提示 notes）重扫保留
+        doc["meta"] = old_meta
+    doc["generator"] = {
+        "tool": "tsov vst3-map",
+        "protocol": vst_worker.PROTOCOL,
+        "dawdreamer": (getattr(w, "worker_info", {}) or {}).get("dawdreamer") or "?",
+        "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+    }
+    doc["param_count"] = len(entries)
+    doc["params"] = entries
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(doc, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     return target

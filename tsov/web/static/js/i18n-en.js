@@ -1067,4 +1067,11 @@ export const EN = {
   '命令层：': 'Command layer: ',
   '<div class="fx-none">（先选一条轨道）</div>': '<div class="fx-none">(pick a track first)</div>',
   ' 个动作': ' actions',
+  /* P62a（10-14）：插件静音警告卡 / 导出拦截 */
+  '插件无输出提醒': 'Plugin has no output',
+  '「{name}」{plugin}：有音符但无输出（{n} 音符）': '"{name}" {plugin}: has notes but no output ({n} notes)',
+  '打开插件界面': 'Open plugin editor',
+  '段2（P62b）接线后可用': 'Available after stage 2 (P62b) wiring',
+  '忽略': 'Dismiss',
+  '强制导出（跳过插件静音拦截）': 'Force export (skip plugin silence gate)',
 };

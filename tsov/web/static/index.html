@@ -320,6 +320,7 @@
         </select>
       </div>
       <label class="ck" data-i18n><input type="checkbox" id="ex-range" disabled> 仅导出选段（循环区间）<span id="ex-range-hint" class="muted small"></span></label>
+      <label class="ck" data-i18n><input type="checkbox" id="ex-force"> 强制导出（跳过插件静音拦截）</label>
       <div class="dlg-hint" data-i18n>产物目录：<code data-i18n>output/&lt;工程&gt;/exports/&lt;时间戳&gt;/</code>（wav/mid 不入库）</div>
       <div id="ex-result" class="dlg-result" hidden></div>
     </div>
@@ -366,6 +367,8 @@
     </div>
   </div>
 </div>
+
+<div id="warn-card" class="warn-card" hidden></div>
 
 <footer id="statusbar">
   <span id="status-summary" class="muted" data-i18n>未打开工程</span>

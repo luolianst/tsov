@@ -15,6 +15,7 @@ import * as playback from './playback.js';
 import * as tools from './tools.js';
 import * as autoroll from './autoroll.js';
 import { initStepsPanel } from './steps.js';
+import { initWarnings, showWarnings } from './warnings.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -716,6 +717,7 @@ function boot() {
         midi: $('ex-midi').checked, midi_stems: $('ex-midi-stems').checked,
         bit_depth: $('ex-depth').value,
         range: ($('ex-range').checked && store.loop) ? [store.loop.start, store.loop.end] : null,
+        allow_silent: !!($('ex-force') && $('ex-force').checked),   /* P62a：强制导出（跳过静音拦截） */
       });
       const files = r.files || [];
       $('ex-result').hidden = false;
@@ -727,6 +729,7 @@ function boot() {
     } catch (e) {
       $('ex-result').hidden = false;
       $('ex-result').textContent = '✗ ' + e.message;
+      if (e.warnings && e.warnings.length) showWarnings(e.warnings);   /* P62a：静音拦截 → 警告卡 */
     } finally {
       btn.disabled = false; btn.textContent = t('开始导出');
     }
@@ -1430,6 +1433,8 @@ function boot() {
   bus.on('toast', showToast);
 
   initStepsPanel();   // 对话产物流 C 件：右栏双 tab（对话|步骤）+ 步骤视图
+
+  initWarnings($('warn-card'));   // P62a（10-14）：插件静音警告卡
 
   /* v0.2 批C 前段（R2 地基件）：拉一次参数注册表快照（前端同源的唯一来源；失败静默 → 回退内置） */
   api.meta().then((r) => { if (r && r.params) setMetaParams(r.params); }).catch(() => {});

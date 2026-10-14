@@ -157,14 +157,27 @@ def tool_set_tempo(args: dict) -> str:
 
 
 def tool_render_wav(args: dict) -> str:
-    """宿主离线渲染：Score JSON → WAV（ADR-0013 HostEngine）。"""
+    """宿主离线渲染：Score JSON → WAV（ADR-0013 HostEngine）。
+
+    P62a（10-14）：渲染后静音体检——「有音符但无输出」的 VST3 轨以警告附在返回值里（推给用户处理）。
+    """
     from ..host import HostEngine
+    from ..host.diagnostics import format_warnings_text, scan_silent_instruments
 
     score_path = args["score_path"]
     out_wav = args.get("out_wav") or "output/agent-render.wav"
     engine = HostEngine()
-    wav = engine.render_score(score_path, out_wav)
-    return f"已渲染：{wav}（{engine.samplerate}Hz，宿主 HostEngine/RF2 音源）"
+    stats: dict = {}
+    session = engine.load_score(score_path)
+    try:
+        engine.render(session, out_wav=out_wav, stats=stats)
+        warns = scan_silent_instruments(session.score, stats.get("stem_peaks") or {})
+    finally:
+        session.close()
+    msg = f"已渲染：{out_wav}（{engine.samplerate}Hz，宿主 HostEngine/RF2 音源）"
+    if warns:
+        msg += "\n" + format_warnings_text(warns)
+    return msg
 
 
 def tool_play_score(args: dict) -> str:

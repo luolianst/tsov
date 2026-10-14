@@ -1,6 +1,9 @@
 {
  "plugin": "MT-PowerDrumKit",
  "plugin_path": "D:\\VST3\\MT-PowerDrumKit.vst3",
+ "meta": {
+  "notes": "免费版催捐锁：本实例每次会话需先点插件窗口右下角 START 解除静音，再重新渲染（tsov 检测到「有音符但无输出」时给出此提示）。"
+ },
  "generator": {
   "tool": "tsov vst3-map",
   "protocol": 1,

@@ -62,6 +62,8 @@ class ExportIn(BaseModel):
     midi_stems: bool = False
     bit_depth: int | str = 16
     range: list[float] | None = None
+    # P62a（10-14）：导出前静音体检命中时强制导出（跳过 409 拦截）
+    allow_silent: bool = False
 
 
 class ChatIn(BaseModel):

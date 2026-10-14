@@ -25,6 +25,7 @@ export const store = {
   agentBusy: false,
   error: '',
   toast: '',
+  warnings: [],                /* P62a（10-14）：插件静音警告（渲染响应 / 导出拦截；警告卡 + CDP 观测） */
 
   /* 卷帘视图 */
   view: { pxPerSec: 90, pxPerSemi: 14, scrollSec: 0, midiTop: 84 },
@@ -826,6 +827,8 @@ export function snapshot() {
           /* C 件：步骤视图快照（服务端合流 feed 计数 + DOM 实测计数；CDP 断言用） */
           feed: store.steps.feed ? Object.assign({}, store.steps.feed) : null }
       : null,
+    /* P62a（10-14）：插件静音警告面（CDP / 外部 agent 观测） */
+    warnings: (store.warnings || []).slice(),
     error: store.error,
   };
 }

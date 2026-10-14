@@ -1215,3 +1215,13 @@ body.chat-resizing { cursor: col-resize; user-select: none; }
 .fav-ren { border: 0; background: transparent; color: var(--faint); cursor: pointer; padding: 2px 6px; border-radius: 4px; font-size: var(--fs-sm); }
 .fav-ren:hover { background: var(--bg-hover); color: var(--accent); }
 .fav-edit { flex: 1; min-width: 140px; padding: 3px 8px; font-size: var(--fs-sm); border: 1px solid var(--accent); background: var(--bg-elev); color: var(--text); border-radius: 4px; }
+
+
+/* ============ v0.2 P62a（10-14）：插件静音警告卡 ============ */
+
+.warn-card { position: fixed; right: 12px; bottom: 46px; z-index: 55; max-width: 460px; padding: 10px 12px; background: var(--bg-elev); border: 1px solid var(--warn); border-left-width: 3px; border-radius: 4px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12); font-size: var(--fs-sm); }
+.warn-card .warn-hd { font-weight: 600; color: var(--warn); margin-bottom: 6px; }
+.warn-card .warn-row { margin: 4px 0; line-height: 1.5; }
+.warn-card .warn-hint { color: var(--muted); margin-top: 2px; }
+.warn-card .warn-ft { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+.warn-card .warn-ft button { font-size: var(--fs-sm); padding: 2px 10px; }

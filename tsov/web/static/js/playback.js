@@ -6,6 +6,7 @@ import { t } from './i18n.js';
 import { api } from './api.js';
 import { bus } from './events.js';
 import { store, setPlayhead, setPlaying, setLoopOn, setMetronome, toast, setError, setMeter } from './state.js';
+import { showWarnings } from './warnings.js';
 
 let audio = null;        // <audio> wav 试听
 let rafId = 0;
@@ -278,6 +279,7 @@ export async function rerender() {
   try {
     const r = await api.render(store.project);
     toast(t('已渲染：') + r.wav + t('（') + r.duration + 's / ' + r.sr + t('Hz）'));
+    showWarnings(r.warnings || []);   /* P62a：插件静音体检结果 → 警告卡 */
     if (audio) audio.src = api.wavUrl(store.project) + '?v=' + Date.now();
   } catch (e) { setError(e.message); }
 }
@@ -300,6 +302,7 @@ export async function ensureFresh() {
     const r = await api.render(store.project);
     const n = (r.rendered || []).length;
     if (n > 0) toast(t('已重渲 ') + r.rendered.join(t('、')) + t('（') + Math.round(performance.now() - t0) + t('ms）'));
+    showWarnings(r.warnings || []);   /* P62a：松手即听重渲后同步静音警告面 */
     a.src = api.wavUrl(store.project) + '?v=' + Date.now();
     if (wasPlaying) {
       a.addEventListener('loadedmetadata', () => {

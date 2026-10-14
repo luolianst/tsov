@@ -12,7 +12,11 @@ async function req(path, opts) {
     throw new Error(t('网络错误：') + (e && e.message ? e.message : e));
   }
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
+  if (!res.ok) {
+    const err = new Error(body.error || ('HTTP ' + res.status));
+    if (Array.isArray(body.warnings)) err.warnings = body.warnings;   /* P62a：结构化警告（如静音拦截） */
+    throw err;
+  }
   return body;
 }
 

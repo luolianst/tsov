@@ -33,6 +33,9 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
     @app.exception_handler(HTTPException)
     async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONResponse:
         # 契约统一：错误返回 {"error": "<中文描述>"}（docs/05 §三）
+        # P62a（10-14）增补：detail 为 dict 时原样透传（结构化错误，如 instrument_silent + warnings）
+        if isinstance(exc.detail, dict):
+            return JSONResponse(exc.detail, status_code=exc.status_code)
         return JSONResponse({"error": str(exc.detail)}, status_code=exc.status_code)
 
     @app.exception_handler(Exception)
