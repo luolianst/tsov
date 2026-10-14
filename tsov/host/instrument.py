@@ -3,7 +3,7 @@
 标准兼容清单：
 - SF2/SF3：pyfluidsynth（`SF2Source`，实时流式渲染，非文件 midi2audio）
 - SFZ：内置最小采样器（`SFZSource`，子集解析 + 线性插值变调；完整语义可走 sfizz VST3）
-- VST3：pedalboard 底座（`VST3Source`，乐器插件 MIDI 渲染一次成型；popsicle 备胎未用）
+- VST3：DawDreamer 底座（`VST3Source`，批L L1-1 换底；bundle 目录或内层二进制均可；离线一次成型渲染）
 - GM program：复用 `tsov/midi/export.GM_PROGRAMS`；MIDI 1.0 音符事件（start/end/pitch/velocity）直接消费
 
 接口契约：`render(notes, samplerate, n_frames) -> mono float32 [-1,1]`。
@@ -21,6 +21,7 @@ import numpy as np
 
 from ..core.notes import Note
 from ..midi.export import DRUM_BANK, GM_PROGRAMS, is_drum_track, program_number  # noqa: F401  约定即文档
+from .vst_worker import VST_BLOCK, apply_params, events_from_notes, finish_audio, get_worker
 
 
 class SoundSource(abc.ABC):
@@ -165,47 +166,127 @@ class SF2Source(SoundSource):
         self._synth.delete()
 
 
-class VST3Source(SoundSource):
-    """VST3 音源（pedalboard 底座，ADR-0013 里程碑二实现）。
+_PRESET_KINDS = ("vstpreset", "fxp", "state")
 
-    - 加载：`plugin_path` 指向 .vst3；**Windows 包（bundle 目录）形式需给到内层二进制**
-      `xxx.vst3/Contents/x86_64-win/xxx.vst3`（实测 pedalboard 0.9.25：bundle 路径扫描失败、内层成功）
-    - 渲染：乐器插件走 `process(midi_messages=[([bytes], t_sec)…], sample_rate, duration)` 一次成型；
-      输出立体声 → mono。音色由插件 preset/参数控制（`program` 字段忽略，program 形如 "vst3:<path>"）
+
+def _normalize_preset(preset: dict | None, base_dir) -> dict | None:
+    """预设引用规范化：校验 kind/path，相对路径按工程根（base_dir）解析为绝对。
+
+    （worker 侧 cwd 不保证 = 调用方 cwd，故统一在构造期定型为绝对路径。）
+    """
+    if not preset:
+        return None
+    kind = str(preset.get("kind") or "")
+    path = str(preset.get("path") or "").strip()
+    if kind not in _PRESET_KINDS or not path:
+        raise RuntimeError(f"预设引用非法：{preset!r}（需 kind∈{_PRESET_KINDS} + path）")
+    p = Path(path)
+    if not p.is_absolute():
+        base = Path(base_dir) if base_dir else Path.cwd()
+        p = (base / p).resolve()
+    return {"kind": kind, "path": str(p)}
+
+
+class VST3Source(SoundSource):
+    """VST3 音源（DawDreamer 底座——批L L1-1 换底 / L1-2 走常驻 worker，ADR-0025）。
+
+    - 底座模式：默认经**常驻 worker 子进程**加载/渲染（崩溃隔离；生命周期见 `vst_worker.py`，
+      `tsov web` 服务退出时收尾）。`TSOV_VST_INPROC=1` 时退回进程内直载（排障/应急，不隔离）
+    - 加载：`plugin_path` 指向 .vst3 **bundle 目录**或**内层二进制**均可（dawdreamer 0.9.0 实测）
+    - 乐器判定：VST3 乐器无音频输入通道（实测 Dexed 0/2、TAL-Chorus 2/2）——有输入通道即拒绝
+    - 渲染：`add_midi_note`（秒单位）灌事件 → 离线一次成型；输出立体声 → mono；延迟补偿后归位
+    - 多遍确定性：渲染前 `clear_midi` + 重灌事件（回确定起点）；起音残渣/收敛微尘实测口径见
+      `output/v02-batchL-verify/`（起音窗内 ≤1e-4；窗外 ≤1e-6，典型为 0）
+    - 参数/预设（批L L1-3/L1-4）：`params` = Instrument 参数 diff（{名/下标: 归一 0..1}，严格校验、
+      失配报错）；`preset` = 预设引用（vstpreset/fxp/state）——渲染前「载预设 → 应用 diff → clear_midi」
+      回确定起点（worker 侧每遍重设；进程内直载在载入后一次性应用）
     """
 
     name = "vst3"
 
-    def __init__(self, plugin_path: str, program: str = "", **params):
-        import pedalboard  # 懒加载：没装 pedalboard 时其他音源不受影响
-
+    def __init__(self, plugin_path: str, program: str = "", params: dict | None = None,
+                 preset: dict | None = None, base_dir=None, **kwargs):
         self.plugin_path = str(plugin_path)
-        self._plugin = pedalboard.load_plugin(self.plugin_path)
-        if not getattr(self._plugin, "is_instrument", False):
-            raise RuntimeError(f"VST3Source 需要乐器插件（is_instrument=False）：{plugin_path}")
-        self._params = dict(params)
+        self._samplerate = int(kwargs.pop("samplerate", 44100) or 44100)
+        self._params = {str(k): float(v) for k, v in (params or {}).items()}  # 参数 diff（归一 0..1）
+        self._preset = _normalize_preset(preset, base_dir)  # 预设引用（路径已定型为绝对）
+        self._engine = self._proc = self._daw = None
+        self._param_names = None
+        self._latency = 0
+        self._worker = get_worker()  # None = 进程内直载（TSOV_VST_INPROC=1）
+        if self._worker is not None:
+            self._worker.load(self.plugin_path, sr=self._samplerate)  # 失败 → RuntimeError
+            return
+        import dawdreamer as daw  # 懒加载：没装 dawdreamer 时其他音源不受影响
+
+        self._daw = daw
+        self._load(self._samplerate)
+
+    # ---- 进程内直载（应急路径；同规则的另一实现见 vst_worker._ChildState）----
+
+    def _load(self, samplerate: int) -> None:
+        """建引擎 + 载插件 + 乐器校验 + 应用构造参数（失败抛 RuntimeError，不静默）。"""
+        engine = self._daw.RenderEngine(int(samplerate), VST_BLOCK)
+        try:
+            proc = engine.make_plugin_processor("instrument", self.plugin_path)
+        except Exception as exc:
+            raise RuntimeError(f"VST3 加载失败：{self.plugin_path}（{exc}）") from exc
+        n_in = int(proc.get_num_input_channels())
+        if n_in > 0:
+            raise RuntimeError(
+                f"VST3Source 需要乐器插件（检测到 {n_in} 个音频输入通道）：{self.plugin_path}"
+            )
+        self._engine, self._proc = engine, proc
+        self._samplerate = int(samplerate)
+        self._latency = int(proc.get_latency_samples())
+        if self._preset:  # 预设 = 基座（先载），参数 diff 叠加其后
+            try:
+                self._apply_preset_inproc(proc)
+            except Exception as exc:
+                raise RuntimeError(f"预设加载失败：{self._preset['path']!r}（{exc}）") from exc
+        try:
+            self._param_names = apply_params(proc, self._params, self._param_names, strict=True)
+        except ValueError as exc:
+            raise RuntimeError(f"VST3 参数失配：{self.plugin_path}（{exc}）") from exc
+
+    def _apply_preset_inproc(self, proc) -> None:
+        kind, path = self._preset["kind"], self._preset["path"]
+        if kind == "vstpreset":
+            proc.load_vst3_preset(path)
+        elif kind == "fxp":
+            proc.load_preset(path)
+        else:
+            proc.load_state(path)
 
     def render(self, notes: Iterable[Note], samplerate: int, n_frames: int) -> np.ndarray:
-        notes = list(notes)
-        midi: list[tuple] = []
-        for n in notes:
-            vel = int(round(127.0 * min(1.0, max(0.0, float(n.velocity)))))
-            vel = max(1, min(127, vel))
-            t_on = max(0.0, float(n.start))
-            t_off = max(t_on + 0.01, float(n.end))
-            midi.append(([0x90, int(n.pitch_midi), vel], t_on))
-            midi.append(([0x80, int(n.pitch_midi), 0], t_off))
-        midi.sort(key=lambda m: m[1])
-        duration = max(0.05, n_frames / float(samplerate))
-        out = self._plugin.process(
-            midi_messages=midi, sample_rate=float(samplerate), duration=float(duration)
-        )
-        audio = np.asarray(out, dtype=np.float32)
-        if audio.ndim == 2:  # pedalboard 输出 (channels, frames)
-            audio = audio.mean(axis=0)
-        if audio.shape[0] < n_frames:
-            audio = np.pad(audio, (0, n_frames - audio.shape[0]))
-        return audio[:n_frames]
+        samplerate = int(samplerate)
+        if self._worker is not None:
+            return self._worker.render(
+                self.plugin_path, events_from_notes(notes), samplerate, n_frames,
+                params=self._params, preset=self._preset,
+            )
+        if self._engine is None or samplerate != self._samplerate:
+            self._load(samplerate)  # 采样率变化 → 重建引擎（插件重载）
+        proc = self._proc
+        proc.clear_midi()  # 上一遍渲染的音符不残留（多遍/交叉重渲确定性）
+        for pitch, vel, t_on, dur in events_from_notes(notes):
+            proc.add_midi_note(int(pitch), int(vel), float(t_on), float(dur))
+        duration = max(0.05, (n_frames + self._latency) / float(samplerate))
+        try:
+            self._engine.load_graph([(proc, [])])
+            self._engine.render(duration)
+            audio = self._engine.get_audio()
+        except Exception as exc:
+            raise RuntimeError(f"VST3 渲染失败：{self.plugin_path}（{exc}）") from exc
+        return finish_audio(audio, n_frames, self._latency)
+
+    def close(self) -> None:
+        """释放：worker 模式空操作（插件常驻 worker 缓存，生命周期归 worker 管理）；
+        进程内模式丢弃引擎/插件引用（GC 回收）。"""
+        if self._worker is not None:
+            return
+        self._engine = None
+        self._proc = None
 
 
 class SFZSource(SoundSource):
@@ -354,7 +435,7 @@ def _pick_region(regions: list[dict], pitch: int, velocity: float) -> dict | Non
 def make_source(program: str, soundfont: str | None = None, **params) -> SoundSource:
     """按 Instrument.program 构造音源（工厂）。
 
-    program 形如 "vst3:<path>" / "sfz:<path>" 时走对应音源（pedalboard / 内置采样器）；
+    program 形如 "vst3:<path>" / "sfz:<path>" 时走对应音源（DawDreamer / 内置采样器）；
     其余按 SF2（fluidsynth）处理。
     """
     if program.startswith("vst3:"):

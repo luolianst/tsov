@@ -1,4 +1,4 @@
-"""音源适配器测试（ADR-0013 里程碑二）：VST3Source（pedalboard）/ SFZSource（内置最小采样器）。
+"""音源适配器测试（ADR-0013 里程碑二）：VST3Source（DawDreamer，批L 换底）/ SFZSource（内置最小采样器）。
 
 约定：不用 pytest tmp_path（已知坑 81）——手动 output/<uuid> 目录 + teardown rmtree。
 VST3 用例依赖 vendor/vst3/Dexed.vst3（不入库；缺失自动 skip）。
@@ -18,14 +18,15 @@ from tsov.core.notes import Note
 from tsov.host.instrument import SF2Source, SFZSource, VST3Source, _parse_sfz, make_source
 
 from unit._cleanup import rmtree_force
+from unit._vst_helpers import assert_onset_stable
 
 _DEXED = Path("vendor/vst3/Dexed.vst3/Contents/x86_64-win/Dexed.vst3")
 try:
-    import pedalboard  # noqa: F401
+    import dawdreamer  # noqa: F401
 
-    _HAS_PEDALBOARD = True
+    _HAS_DAWDREAMER = True
 except ImportError:  # pragma: no cover
-    _HAS_PEDALBOARD = False
+    _HAS_DAWDREAMER = False
 
 
 def _note(start, end, pitch, vel=0.8):
@@ -147,27 +148,54 @@ def test_sf2_drums_use_percussion_bank():
 
 
 # ---------------------------------------------------------------------------
-# VST3（pedalboard 底座）
+# VST3（DawDreamer 底座——批L L1-1 换底）
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(not _HAS_PEDALBOARD or not _DEXED.is_file(), reason="pedalboard 或 vendor/vst3/Dexed 缺失")
+@pytest.mark.skipif(not _HAS_DAWDREAMER or not _DEXED.is_file(), reason="dawdreamer 或 vendor/vst3/Dexed 缺失")
 def test_vst3_source_renders_instrument():
     """真 VST3 乐器（Dexed）：加载 → MIDI 渲染 → 非静音；音符前接近静音。"""
     src = VST3Source(str(_DEXED))
-    sr = 44100
-    notes = [_note(0.1, 0.6, 60), _note(0.2, 0.7, 64)]
-    out = src.render(notes, sr, int(sr * 0.9))
-    assert out.shape == (int(sr * 0.9),)
-    peak = float(np.abs(out).max())
-    assert peak > 0.005, "VST3 应出声"
-    pre = float(np.abs(out[: int(sr * 0.05)]).max())
-    assert pre < peak, "第一个音符前应比峰值安静"
+    try:
+        sr = 44100
+        notes = [_note(0.1, 0.6, 60), _note(0.2, 0.7, 64)]
+        out = src.render(notes, sr, int(sr * 0.9))
+        assert out.shape == (int(sr * 0.9),)
+        peak = float(np.abs(out).max())
+        assert peak > 0.005, "VST3 应出声"
+        pre = float(np.abs(out[: int(sr * 0.05)]).max())
+        assert pre < peak, "第一个音符前应比峰值安静"
+    finally:
+        src.close()
+
+
+@pytest.mark.skipif(not _HAS_DAWDREAMER or not _DEXED.is_file(), reason="dawdreamer 或 vendor/vst3/Dexed 缺失")
+def test_vst3_source_rerender_deterministic_no_leak():
+    """多遍/交叉重渲一致性（批L L1-1 / V3 合同）：A→B→A。
+
+    实测口径（详见 output/v02-batchL-verify/）：起音窗内允许 ≤1e-4 微差
+    （dawdreamer 0.9.0 偶发 -90dBFS 级起音残渣）；起音窗外允许 ≤1e-6
+    （-129dBFS 级「收敛微尘」，典型为 0）——真故障量级远高于此。
+    """
+
+    src = VST3Source(str(_DEXED))
+    try:
+        sr = 44100
+        n = int(sr * 0.6)
+        a = [_note(0.0, 0.5, 60)]
+        b = [_note(0.0, 0.5, 67)]
+        out1 = src.render(a, sr, n)
+        src.render(b, sr, n)  # 中间插入不同音符：不得外泄到下一遍
+        out2 = src.render(a, sr, n)
+        assert float(np.abs(out1).max()) > 0.005, "应出声"
+        assert_onset_stable(out1, out2, onsets=[0.0, 0.5], sr=sr)
+    finally:
+        src.close()
 
 
 def test_make_source_dispatch():
     """工厂分发：vst3:/sfz: 前缀 → 对应音源；其余 → SF2（缺 soundfont 报错）。"""
-    if _HAS_PEDALBOARD and _DEXED.is_file():
+    if _HAS_DAWDREAMER and _DEXED.is_file():
         src = make_source(f"vst3:{_DEXED}")
         assert isinstance(src, VST3Source)
         src.close()

@@ -1,7 +1,8 @@
 """tsov 作曲/工程工具集（M-V6：双任务工具链）——
 
 voice_to_score / detect_key / create_track / write_notes / duplicate_bars /
-set_track_mix / apply_effect / apply_pattern / analyze_levels / export_audio
+set_track_mix / apply_effect / apply_pattern / analyze_levels / export_audio /
+list_instrument_params / set_instrument_param / load_instrument_preset（批L VST3 参数/预设）
 
 约定：
 - 全部沿用 edit_score 的落盘约定：默认写 `<score 同目录>/agent-edited-score.json`
@@ -577,6 +578,154 @@ def tool_read_text(args: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# 批L L1-3：VST3 参数 / 预设（plugin_maps + 命令层）
+# ---------------------------------------------------------------------------
+
+
+def _resolve_vst3_plugin(args: dict, score: Score | None = None) -> str:
+    """解析 VST3 插件路径：plugin 直给；或 score_path / name(工程名) + track 指轨。"""
+    direct = args.get("plugin")
+    if direct:
+        p = str(direct).strip()
+        return p[len("vst3:"):] if p.startswith("vst3:") else p
+    if score is None:
+        if args.get("score_path"):
+            score = _load(args["score_path"])
+        elif args.get("name"):
+            root = Path(__file__).resolve().parents[2]
+            sj = root / "output" / str(args["name"]) / "score.json"
+            if not sj.is_file():
+                raise FileNotFoundError(f"工程不存在：{args['name']!r}（{sj}）")
+            score = _load(str(sj))
+        else:
+            raise ValueError("需要 plugin（VST3 路径）或 score_path/name + track")
+    ti = _resolve_track(score, args.get("track"))
+    prog = str(score.tracks[ti].instrument.program or "")
+    if not prog.startswith("vst3:"):
+        raise ValueError(f"该轨不是 vst3: 音源（track[{ti}] {score.tracks[ti].name!r} program={prog!r}）")
+    return prog[len("vst3:"):]
+
+
+def tool_list_instrument_params(args: dict) -> str:
+    """列 VST3 插件参数：策展层（中文别名/建议值）优先；query 检索全量机器表；有工程上下文时附当前 diff。"""
+    from ..host import plugin_maps, vst_worker
+
+    score = None
+    if args.get("score_path"):
+        score = _load(args["score_path"])
+    elif args.get("name") and not args.get("plugin"):
+        root = Path(__file__).resolve().parents[2]
+        sj = root / "output" / str(args["name"]) / "score.json"
+        if not sj.is_file():
+            raise FileNotFoundError(f"工程不存在：{args['name']!r}")
+        score = _load(str(sj))
+    plugin = _resolve_vst3_plugin(args, score=score)
+
+    query = str(args.get("query") or "").strip()
+    curated_only = bool(args.get("curated_only"))
+    limit = max(1, int(args.get("limit") or 40))
+
+    m = plugin_maps.load_map(plugin)
+    if m is None:
+        w = vst_worker.get_worker()
+        if w is None:
+            raise RuntimeError("未生成参数表且 worker 不可用（TSOV_VST_INPROC=1）"
+                               "——先跑 `tsov vst3-map <插件路径>` 固化参数表")
+        entries = w.list_params(plugin).get("params") or []
+        source = "现查（未固化——建议 `tsov vst3-map` 生成参数表）"
+    else:
+        entries = m.get("params") or []
+        source = f"presets/v3-maps/{plugin_maps.slug_of(plugin)}.json"
+
+    curated = [e for e in entries if plugin_maps.is_curated(e)]
+    if query:
+        q = query.lower()
+        sel = [e for e in entries
+               if q in str(e.get("name", "")).lower() or q in str(e.get("alias_zh") or "").lower()]
+        scope = f"检索 {query!r}"
+    elif curated_only or curated:
+        sel = curated
+        scope = "策展层"
+    else:
+        sel = entries[:limit]
+        scope = "机器层前段"
+
+    diff: dict = {}
+    if score is not None:
+        ti = _resolve_track(score, args.get("track"))
+        diff = dict(score.tracks[ti].instrument.params or {})
+
+    lines = [f"插件 {Path(plugin).name or plugin}：共 {len(entries)} 参数（策展 {len(curated)}）"
+             f"｜范围：{scope}｜表源：{source}"]
+    for e in sel[:limit]:
+        bits = [f"[{e.get('index')}] {e.get('name')}"]
+        if e.get("alias_zh"):
+            bits.append(f"（{e['alias_zh']}）")
+        if e.get("default_text"):
+            bits.append(f"默认 {e['default_text']}")
+        if e.get("suggested") is not None:
+            bits.append(f"建议 {e['suggested']}")
+        if e.get("notes"):
+            bits.append(f"注：{e['notes']}")
+        cur = diff.get(str(e.get("name")))
+        if cur is not None:
+            bits.append(f"当前 {cur}")
+        lines.append("  " + " ｜ ".join(bits))
+    if len(sel) > limit:
+        lines.append(f"  …… 共 {len(sel)} 条命中，显示前 {limit}（用 limit/query 收窄）")
+    if not query and curated:
+        lines.append("提示：全量检索用 query=…（子串匹配参数名/中文别名）；只看策展用 curated_only=true")
+    return "\n".join(lines)
+
+
+def tool_set_instrument_param(args: dict) -> str:
+    """设/清 VST3 参数 diff（归一 0..1；不给 value=清除该参数回默认）——经命令层落定。"""
+    from ..host.command import EditBatch
+
+    score = _load(args["score_path"])
+    param = args.get("param")
+    if param in (None, ""):
+        raise ValueError("需要 param（参数名 / 中文别名 / 下标——可先 list_instrument_params 核对）")
+    ti = _resolve_track(score, args.get("track", 0))
+    value: dict = {"name": param}
+    if args.get("value") is not None:
+        value["value"] = args["value"]
+    batch = EditBatch(label="set_instrument_param")
+    batch.add("set_instrument_param", track=ti, value=value)
+    new_score, result = batch.apply(score)
+    if not result.ok:
+        raise ValueError("；".join(result.errors))
+    out = _save(new_score, _out_path(args, args["score_path"]))
+    tr = new_score.tracks[ti]
+    action = f"→ {value['value']}" if "value" in value else "已清除（回默认）"
+    return (f"track[{ti}] {tr.name}：参数 {param} {action} ｜ 当前 diff："
+            f"{tr.instrument.params or '（空）'} ｜ 写回：{out}")
+
+
+def tool_load_instrument_preset(args: dict) -> str:
+    """挂/清 VST3 预设引用（kind=vstpreset/fxp/state；相对路径=工程内，绝对=只读引用）。"""
+    from ..host.command import EditBatch
+
+    score = _load(args["score_path"])
+    ti = _resolve_track(score, args.get("track", 0))
+    path = args.get("path") or args.get("preset_path")
+    value = None
+    if path:
+        value = {"kind": str(args.get("kind") or "state"), "path": str(path)}
+    batch = EditBatch(label="load_instrument_preset")
+    batch.add("load_instrument_preset", track=ti, value=value)
+    new_score, result = batch.apply(score)
+    if not result.ok:
+        raise ValueError("；".join(result.errors))
+    out = _save(new_score, _out_path(args, args["score_path"]))
+    tr = new_score.tracks[ti]
+    if value is None:
+        return f"track[{ti}] {tr.name}：预设引用已清除 ｜ 写回：{out}"
+    return (f"track[{ti}] {tr.name}：预设 {value['kind']} ← {value['path']}"
+            f"（相对路径=工程内；渲染时加载失败会报错）｜ 写回：{out}")
+
+
+# ---------------------------------------------------------------------------
 # 注册
 # ---------------------------------------------------------------------------
 
@@ -738,3 +887,46 @@ def register_compose_tools(registry: ToolRegistry) -> None:
             "limit": {"type": "integer", "description": "可选：读取行数（默认 200）"},
         }, "required": ["path"]},
         handler=tool_read_text))
+
+    # ---- 批L L1-3：VST3 参数 / 预设 ----
+
+    registry.register(ToolSpec(
+        name="list_instrument_params",
+        description=("列 VST3 插件参数（策展层优先：中文别名/建议值；query=子串检索全量机器表；"
+                     "有工程上下文时附该轨当前参数 diff）。plugin 可直给路径，或用 score_path/name + track 指轨"),
+        parameters={"type": "object", "properties": {
+            "plugin": {"type": "string", "description": "VST3 路径（bundle 或内层二进制；可带 vst3: 前缀）"},
+            "score_path": {"type": "string", "description": "或：score json 路径 + track"},
+            "name": {"type": "string", "description": "或：工程名（MCP 场景）+ track"},
+            "track": {"description": "轨索引或轨名（配合 score_path/name；缺省 0）"},
+            "query": {"type": "string", "description": "子串检索参数名/中文别名（可选）"},
+            "curated_only": {"type": "boolean", "description": "只看策展层（可选）"},
+            "limit": {"type": "integer", "description": "条数上限（默认 40）"},
+        }, "required": []},
+        handler=tool_list_instrument_params))
+
+    registry.register(ToolSpec(
+        name="set_instrument_param",
+        description=("设/清 VST3 音源轨一条参数 diff（归一 0..1；不给 value=清除该参数回默认）。"
+                     "param 可给名称/中文别名/下标（先 list_instrument_params 核对）——经命令层落定"),
+        parameters={"type": "object", "properties": {
+            "score_path": {"type": "string"},
+            "track": {"description": "轨索引或轨名（缺省 0）"},
+            "param": {"type": "string", "description": "参数名 / 中文别名 / 下标"},
+            "value": {"type": "number", "description": "归一化值 0..1（省略=清除）"},
+            "output": {"type": "string"},
+        }, "required": ["score_path", "param"]},
+        handler=tool_set_instrument_param))
+
+    registry.register(ToolSpec(
+        name="load_instrument_preset",
+        description=("挂/清 VST3 音源轨预设引用（kind=vstpreset/fxp/state；path 相对=工程内、绝对=只读引用；"
+                     "不指定 path=清除）。预设为基座、参数 diff 叠其上——经命令层落定"),
+        parameters={"type": "object", "properties": {
+            "score_path": {"type": "string"},
+            "track": {"description": "轨索引或轨名（缺省 0）"},
+            "kind": {"type": "string", "enum": ["vstpreset", "fxp", "state"]},
+            "path": {"type": "string", "description": "预设文件路径（省略=清除引用）"},
+            "output": {"type": "string"},
+        }, "required": ["score_path"]},
+        handler=tool_load_instrument_preset))

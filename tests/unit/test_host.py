@@ -92,7 +92,7 @@ def test_mix_graph_applies_instrument_volume():
 
 def test_instrument_sources_missing_paths_raise():
     """里程碑二后 VST3/SFZ 不再桩（见 test_host_sources.py）；但路径非法仍须明确报错，不静默。"""
-    with pytest.raises(ImportError):        # pedalboard 加载失败
+    with pytest.raises(RuntimeError):       # dawdreamer 加载失败（批L L1-1 换底后为 RuntimeError）
         VST3Source("some-vst3.dll")
     with pytest.raises(RuntimeError):       # 文件不存在
         SFZSource("some.sfz")

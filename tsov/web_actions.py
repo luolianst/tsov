@@ -41,16 +41,21 @@ TOOL_LABELS: dict[str, str] = {
     "export_audio": "导出音频",
     "export_midi": "导出 MIDI",
     "read_text": "读文件",
+    "list_instrument_params": "查插件参数",
+    "set_instrument_param": "设插件参数",
+    "load_instrument_preset": "载入预设",
 }
 
 READ_TOOLS: frozenset[str] = frozenset({
     "load_score", "list_dir", "detect_key", "read_text", "use_skill", "understand",
+    "list_instrument_params",
 })
 
 # 会写 score（产生新 JSON 落盘）的工具——动作级撤销的适用范围
 SCORE_WRITING_TOOLS: frozenset[str] = frozenset({
     "edit_score", "set_tempo", "voice_to_score", "create_track", "write_notes",
     "duplicate_bars", "set_track_mix", "remove_track", "rename_track", "apply_effect", "apply_pattern",
+    "set_instrument_param", "load_instrument_preset",
 })
 
 

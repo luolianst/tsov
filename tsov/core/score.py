@@ -7,6 +7,10 @@ v0.2 批C2 增补（additive + 缺省旧数据同构）：
   None=未管理（旧数据同构）/ []=已管理且清空 / 列表=显式道（求值范围以此为准）。
 - combine 口：道条目预留 combine="absolute" 缺省字段（他档不实现）。
 - Score.folders（文件夹层 v1：音量乘子 + mute/solo + automation，VCA 式不动路由）——见同设计件 §3.4。
+
+批L L1-3/L1-4 增补（additive + 缺省旧数据同构）：
+- Instrument.params（VST3 参数 diff，{参数名: 归一 0..1}；SF2/SFZ 轨忽略）
+- Instrument.preset（VST3 预设引用 {"kind": "vstpreset|fxp|state", "path": …}；相对路径=工程内）
 """
 
 from __future__ import annotations
@@ -104,6 +108,9 @@ class Instrument:
     program: str = ""  # 音色/预设标识
     volume: float = 1.0
     effects: list[Effect] = field(default_factory=list)  # 效果器链（第一版可为空）
+    # ---- 批L L1-3/L1-4（additive；SF2/SFZ 轨忽略）----
+    params: dict = field(default_factory=dict)  # VST3 参数 diff：{参数名: 归一 0..1}（预设之上叠加）
+    preset: dict | None = None  # VST3 预设引用：{"kind": "vstpreset|fxp|state", "path": "工程内相对路径或绝对路径"}
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -115,6 +122,8 @@ class Instrument:
             program=data["program"],
             volume=data["volume"],
             effects=[Effect.from_dict(e) for e in data["effects"]],
+            params=dict(data.get("params") or {}),
+            preset=dict(data["preset"]) if data.get("preset") else None,
         )
 
 

@@ -81,10 +81,18 @@ class HostSession:
                     resolved = []
                 source = AudioClipSource(clips=resolved, samplerate=samplerate)
             else:
+                extra = {}
+                if str(track.instrument.program or "").startswith("vst3:"):
+                    extra = {  # 批L L1-3/L1-4：VST3 参数 diff / 预设引用（其余音源无此概念）
+                        "params": dict(getattr(track.instrument, "params", {}) or {}),
+                        "preset": getattr(track.instrument, "preset", None),
+                        "base_dir": base_dir,
+                    }
                 source = make_source(
                     track.instrument.program,
                     soundfont=soundfont,
                     samplerate=samplerate,
+                    **extra,
                 )
             tracks.append(HostTrack(track=track, source=source))
         return cls(score=score, tracks=tracks, samplerate=samplerate)

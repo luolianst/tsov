@@ -6,19 +6,28 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from ..host import vst_worker
 from . import config
 from .routes import ROUTE_MODULES
 from .state import WebState
 
 
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """批L L1-2：插件 worker 生命周期挂服务侧（懒启动；服务退出时收尾）。"""
+    yield
+    vst_worker.shutdown_global()
+
+
 def create_app(output_dir: str | Path = "output") -> FastAPI:
-    app = FastAPI(title="the shape of voice — 可视化宿主", version=config.WEB_VERSION)
+    app = FastAPI(title="the shape of voice — 可视化宿主", version=config.WEB_VERSION, lifespan=_lifespan)
     app.state.tsov = WebState(output_dir)
 
     @app.exception_handler(HTTPException)

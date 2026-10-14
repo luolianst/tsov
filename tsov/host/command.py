@@ -9,6 +9,8 @@
 - M-V8 小修包增补（2026-09-21）：scale_time（全谱时间等比缩放＝变速重排，Q47；音符/书签/三层 automation）
   / set_tempo_remap（改 BPM + 按 旧/新 缩放，单命令原子＝「跟速重排」默认入口）
   / remove_track / rename_track——工具与 UI 同一动作路径（工具经 EditBatch）
+- 批L L1-3 增补（2026-10-14）：set_instrument_param（VST3 参数 diff；预设之上叠加）
+  / load_instrument_preset（VST3 预设引用 vstpreset/fxp/state）——仅 vst3: 音源轨，其余拒绝
 - M-V8 E2 增补（2026-09-21）：add_audio_track（追加音频轨；file=工程 audio/ 内相对路径）
   / set_audio_track（音频轨改 offset/file——只作用于 kind=="audio"）——音频轨一等公民第一刀
 - M-V8 E5 增补（2026-09-23）：split_note（剪刀：at 处切分）/ merge_notes（胶水：与后邻同音高合并，gap≤max_gap）
@@ -201,6 +203,11 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
     # M-V8 E4 段2：改既有效果参数（部分合并；调参建议落地）
     if c.op == "set_effect_params":
         return _apply_set_effect_params(score, track, c)
+    # 批L L1-3：VST3 参数/预设（Instrument 增补字段；SF2/SFZ 轨拒绝）
+    if c.op == "set_instrument_param":
+        return _apply_set_instrument_param(track, c)
+    if c.op == "load_instrument_preset":
+        return _apply_load_instrument_preset(track, c)
 
     if c.op == "add":
         v = c.value
@@ -529,6 +536,75 @@ def _apply_set_instrument(track, c: EditCommand) -> str | None:
         if program not in GM_PROGRAMS:
             return f"未知音色名 {program!r}（GM 名 / vst3:<路径> / sfz:<路径>，或空串=默认）"
     track.instrument.program = program
+    return None
+
+
+# ---- 批L L1-3：VST3 参数 / 预设（仅 vst3: 音源轨）----
+
+_PRESET_KINDS = ("vstpreset", "fxp", "state")
+
+
+def _vst3_plugin_path(track) -> str | None:
+    """轨的 VST3 插件路径；非 vst3: 音源 → None。"""
+    prog = str(getattr(track.instrument, "program", "") or "")
+    return prog[len("vst3:"):] if prog.startswith("vst3:") else None
+
+
+def _apply_set_instrument_param(track, c: EditCommand) -> str | None:
+    """value = {"name": 参数名/中文别名/下标, "value"?: 归一 0..1}；不给 value=清除该参数（回默认）。
+
+    校验：仅 VST3 轨；值域 [0,1]；**有参数表**（presets/v3-maps/<slug>.json）时名称须能解析
+    （防拼写失配；无表则透传，渲染期由严格校验兜底）。
+    """
+    plugin = _vst3_plugin_path(track)
+    if plugin is None:
+        return f"set_instrument_param 仅适用于 vst3: 音源轨（当前 program={track.instrument.program!r}）"
+    v = c.value
+    if not isinstance(v, dict) or v.get("name") in (None, ""):
+        return "set_instrument_param value 需 {name, value?}"
+    from .plugin_maps import resolve_param_name
+
+    canonical, err = resolve_param_name(plugin, str(v["name"]))
+    if err:
+        return f"set_instrument_param {err}"
+    key = canonical if canonical is not None else str(v["name"]).strip()
+    params = dict(track.instrument.params or {})
+    if v.get("value") is not None:
+        try:
+            val = float(v["value"])
+        except (TypeError, ValueError):
+            return f"参数值非法：{v['value']!r}"
+        if not (0.0 <= val <= 1.0):
+            return f"参数值需归一化 0..1：{val}"
+        params[key] = round(val, 6)
+    else:
+        params.pop(key, None)
+    track.instrument.params = params
+    return None
+
+
+def _apply_load_instrument_preset(track, c: EditCommand) -> str | None:
+    """value = {"kind": "vstpreset"|"fxp"|"state", "path": str}；空/None = 清除引用。
+
+    预设 = 基座（载入后参数 diff 叠加其上）；相对路径按工程根解析、绝对路径为只读系统引用。
+    文件存在性/可载性在渲染时判定（失败报错要响——「失配可检测」）。
+    """
+    plugin = _vst3_plugin_path(track)
+    if plugin is None:
+        return f"load_instrument_preset 仅适用于 vst3: 音源轨（当前 program={track.instrument.program!r}）"
+    v = c.value
+    if v in (None, {}, ""):
+        track.instrument.preset = None
+        return None
+    if not isinstance(v, dict):
+        return "load_instrument_preset value 需 {kind, path}"
+    kind = str(v.get("kind") or "").strip()
+    path = str(v.get("path") or "").strip()
+    if kind not in _PRESET_KINDS:
+        return f"未知预设类型 {kind!r}（{' / '.join(_PRESET_KINDS)}）"
+    if not path:
+        return "预设需要 path（相对=工程内；绝对=只读引用）"
+    track.instrument.preset = {"kind": kind, "path": path}
     return None
 
 

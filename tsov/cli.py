@@ -291,7 +291,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--web-guard", choices=["warn", "strict", "off"], default="warn", help="Web 壳共存守卫（默认 warn）")
     p.set_defaults(func=_cmd_mcp)
 
+    p = sub.add_parser("vst3-map", help="反查 VST3 插件全量参数表 → presets/v3-maps/<slug>.json（批L；保留策展字段）")
+    p.add_argument("plugin", help="VST3 路径（bundle 目录或内层二进制）")
+    p.add_argument("--out-dir", default=None, help="输出目录（默认 presets/v3-maps/）")
+    p.set_defaults(func=_cmd_vst3_map)
+
     return parser
+
+
+def _cmd_vst3_map(args: argparse.Namespace) -> int:
+    from .host.plugin_maps import generate_map
+
+    path = generate_map(args.plugin, out_dir=args.out_dir)
+    print(f"参数表已生成：{path}")
+    return 0
 
 
 def _cmd_mcp(args: argparse.Namespace) -> int:
