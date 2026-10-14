@@ -391,6 +391,10 @@ class VstWorker:
                *, params: dict | None = None, preset: dict | None = None) -> np.ndarray:
         """渲染一个插件（events 用 ``events_from_notes`` 生成）→ mono float32。"""
         apath = str(Path(path).resolve())
+        if preset and preset.get("path"):
+            pp = Path(str(preset["path"]))
+            if not pp.is_absolute():
+                preset = {**preset, "path": str(pp.resolve())}
         if apath not in self._loaded:
             self.load(apath, sr=sr)
         out = _SCRATCH / f"render-{os.getpid()}-{time.time_ns()}.npy"
@@ -488,23 +492,25 @@ class _ChildState:
         ent = self._plugins.get(path)
         if ent is not None:
             return ent
-        assert self._engine is not None
         self._seq += 1
         try:
-            proc = self._engine.make_plugin_processor(f"p{self._seq}", path)
+            proc = self._fresh_processor(path)
         except Exception as exc:
             raise RuntimeError(f"VST3 加载失败：{path}（{exc}）") from exc
-        n_in = int(proc.get_num_input_channels())
-        if n_in > 0:
-            raise RuntimeError(f"VST3Source 需要乐器插件（检测到 {n_in} 个音频输入通道）：{path}")
+        # 同 instrument.py：输入通道数不作拒绝依据（Surge XT 2/2 合成器反例）
         ent = {
             "proc": proc,
             "latency": int(proc.get_latency_samples()),
             "names": None,
-            "preset_key": None,
+            "applied_key": None,
         }
         self._plugins[path] = ent
         return ent
+
+    def _fresh_processor(self, path: str):
+        """新建一个插件实例（fresh 默认状态；回确定起点用）。"""
+        self._seq += 1
+        return self._engine.make_plugin_processor(f"p{self._seq}", path)
 
     def _apply_preset(self, proc, spec: dict) -> None:
         kind = str(spec.get("kind") or "")
@@ -574,19 +580,26 @@ class _ChildState:
         sr = int(msg["sr"])
         n = int(msg["n"])
         self._ensure_engine(sr)
-        ent = self._plugin(path)
-        proc = ent["proc"]
-        # 回确定起点：预设（spec 变化才重载，L1-4 完善）→ 参数全量重设 → 清 MIDI
         spec = msg.get("preset")
-        if spec:
-            key = json.dumps(spec, sort_keys=True, ensure_ascii=False)
-            if key != ent["preset_key"]:
+        params = msg.get("params") or {}
+        # 回确定起点（批L 语义）：**预设/参数组合变化 → 重建实例**（fresh 默认）→ 载预设 → 应用 diff。
+        # 组合不变则复用（多遍重渲快）；组合消失（回到无预设/无参数）也会重建 → 不带前次残留。
+        key = json.dumps([spec, sorted((str(k), v) for k, v in params.items())],
+                         sort_keys=True, ensure_ascii=False)
+        ent = self._plugin(path)
+        if ent.get("applied_key") != key:
+            proc = ent["proc"] = self._fresh_processor(path)
+            ent["names"] = None
+            ent["applied_key"] = None  # 先失效：中途失败（坏预设/坏参数）不留下"已应用"标记
+            ent["latency"] = int(proc.get_latency_samples())
+            if spec:
                 try:
                     self._apply_preset(proc, spec)
                 except Exception as exc:
                     raise RuntimeError(f"预设加载失败：{spec.get('path')!r}（{exc}）") from exc
-                ent["preset_key"] = key
-        ent["names"] = apply_params(proc, msg.get("params") or {}, ent["names"], strict=True)
+            ent["names"] = apply_params(proc, params, ent["names"], strict=True)
+            ent["applied_key"] = key
+        proc = ent["proc"]
         proc.clear_midi()
         for e in msg.get("events") or []:
             pitch, vel, t_on, dur = e

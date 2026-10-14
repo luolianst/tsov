@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import re
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -30,10 +31,10 @@ _CURATED_FIELDS = ("alias_zh", "group", "suggested", "notes")
 
 
 def slug_of(plugin_path: str) -> str:
-    """插件路径 → 表 slug（bundle 目录 / 内层二进制统一取末端 `*.vst3` 名小写）。"""
+    """插件路径 → 表 slug（bundle 目录 / 内层二进制统一取末端 `*.vst3` 名小写，空白折成 `-`）。"""
     name = Path(str(plugin_path)).name
     stem = name[:-5] if name.lower().endswith(".vst3") else name
-    return (stem or "plugin").lower()
+    return re.sub(r"\s+", "-", (stem or "plugin").lower())
 
 
 def map_path(plugin_path: str, out_dir: Path | str | None = None) -> Path:

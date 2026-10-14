@@ -193,7 +193,9 @@ class VST3Source(SoundSource):
     - 底座模式：默认经**常驻 worker 子进程**加载/渲染（崩溃隔离；生命周期见 `vst_worker.py`，
       `tsov web` 服务退出时收尾）。`TSOV_VST_INPROC=1` 时退回进程内直载（排障/应急，不隔离）
     - 加载：`plugin_path` 指向 .vst3 **bundle 目录**或**内层二进制**均可（dawdreamer 0.9.0 实测）
-    - 乐器判定：VST3 乐器无音频输入通道（实测 Dexed 0/2、TAL-Chorus 2/2）——有输入通道即拒绝
+    - 乐器判定：**不以输入通道数为据**（实测 Dexed 0/2、sfizz/Vital 0/2，但 Surge XT 是 2/2 合成器——
+      与 TAL-Chorus 效果器 2/2 无法按通道区分）——一律放行；效果器误接表现为渲染全零，
+      排障见 worker `status`（in/out 通道）与渲染 peak
     - 渲染：`add_midi_note`（秒单位）灌事件 → 离线一次成型；输出立体声 → mono；延迟补偿后归位
     - 多遍确定性：渲染前 `clear_midi` + 重灌事件（回确定起点）；起音残渣/收敛微尘实测口径见
       `output/v02-batchL-verify/`（起音窗内 ≤1e-4；窗外 ≤1e-6，典型为 0）
@@ -231,11 +233,8 @@ class VST3Source(SoundSource):
             proc = engine.make_plugin_processor("instrument", self.plugin_path)
         except Exception as exc:
             raise RuntimeError(f"VST3 加载失败：{self.plugin_path}（{exc}）") from exc
-        n_in = int(proc.get_num_input_channels())
-        if n_in > 0:
-            raise RuntimeError(
-                f"VST3Source 需要乐器插件（检测到 {n_in} 个音频输入通道）：{self.plugin_path}"
-            )
+        # 输入通道数不可作乐器判定依据（Surge XT 2/2 是合成器；TAL-Chorus 2/2 是效果器）——
+        # 一律放行；效果器误接表现为渲染全零，见 worker status（in/out）与渲染 peak
         self._engine, self._proc = engine, proc
         self._samplerate = int(samplerate)
         self._latency = int(proc.get_latency_samples())

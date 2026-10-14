@@ -192,6 +192,25 @@ def test_worker_render_params_effective_and_strict_mismatch():
 
 
 @_NEED_VST
+def test_worker_resets_baseline_between_specs():
+    """批L：预设/参数组合变化（含回到空组合）→ worker 重建实例回确定起点，不带前次残留。"""
+    from tsov.host import vst_worker
+
+    ev = vst_worker.events_from_notes([_note(0.2, 0.5, 60)])
+    w = vst_worker.VstWorker()
+    w2 = vst_worker.VstWorker()
+    try:
+        a_param = w.render(str(_DEXED), ev, _SR, _N, params={"0": 0.1})
+        a_plain_after = w.render(str(_DEXED), ev, _SR, _N)   # 空组合 → 必须回默认
+        a_plain_fresh = w2.render(str(_DEXED), ev, _SR, _N)  # 全新 worker 的默认
+        assert_onset_stable(a_plain_after, a_plain_fresh, onsets=[0.2], sr=_SR)
+        assert float(np.abs(a_param - a_plain_after).max()) > 0.005  # 参数确实改变过声音
+    finally:
+        w.shutdown()
+        w2.shutdown()
+
+
+@_NEED_VST
 def test_preset_state_roundtrip_and_mismatch(monkeypatch):
     from tsov.host import vst_worker
     from tsov.host.instrument import VST3Source
