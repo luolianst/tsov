@@ -102,6 +102,8 @@ _LEVEL_TAG.update({n: "[重操作]" for n in HEAVY_REGISTRY_TOOLS})
 
 # 写工具工程化：剥掉文件路径参数（score_path/output/path），换工程名 name
 _STRIP_PROPS = ("score_path", "output", "path")
+# 例外：语义参数不可剥——load_instrument_preset 的 path = 预设文件（Q5：相对=工程内）
+_KEEP_PROPS = {"load_instrument_preset": ("path",)}
 
 
 def _dump(obj) -> str:
@@ -121,12 +123,29 @@ def _write_schema(spec) -> dict:
     """写工具 MCP schema：注册表 schema 去掉文件路径参数、加 name（其余原样）。"""
     params = copy.deepcopy(spec.parameters or {})
     props = params.setdefault("properties", {})
-    for k in _STRIP_PROPS:
+    strip = [k for k in _STRIP_PROPS if k not in _KEEP_PROPS.get(spec.name, ())]
+    for k in strip:
         props.pop(k, None)
-    req = [r for r in (params.get("required") or []) if r not in _STRIP_PROPS]
+    req = [r for r in (params.get("required") or []) if r not in strip]
     props["name"] = _NAME_PROP
     params["required"] = ["name", *req]
     return params
+
+
+def _read_args_for_store(store, spec, args: dict) -> dict:
+    """读工具 name→score_path 收口：工程名经 ProjectStore 解析。
+
+    handler 内部的 name 解析硬编码仓库根（output/<name>），与 store 的 --root
+    不一致时会误报「工程不存在」（验收 V1 A1b 缺陷根因）——在服务层统一换算。
+    """
+    if not args.get("name") or args.get("score_path"):
+        return args
+    props = (spec.parameters or {}).get("properties", {})
+    if "score_path" not in props:
+        return args
+    out = dict(args)
+    out["score_path"] = str(store.project_root(str(args["name"])) / "score.json")
+    return out
 
 
 def build_server(store: ProjectStore) -> Server:
@@ -225,7 +244,8 @@ def build_server(store: ProjectStore) -> Server:
                     json.dumps(proj.score.to_dict(), ensure_ascii=False), encoding="utf-8"
                 )
                 hargs = {**args, "score_path": str(work_in), "output": str(work_out)}
-                hargs.pop("path", None)
+                if "path" not in _KEEP_PROPS.get(name, ()):
+                    hargs.pop("path", None)
                 spec.handler(hargs)
                 outp = work_out if work_out.is_file() else work_in
                 if not outp.is_file():
@@ -283,7 +303,9 @@ def build_server(store: ProjectStore) -> Server:
             elif name in HEAVY_REGISTRY_TOOLS and name in enabled:
                 text = _call_heavy(name, args)
             elif name in READ_REGISTRY_TOOLS:
-                out = registry.get(name).handler(args)
+                out = registry.get(name).handler(
+                    _read_args_for_store(store, registry.get(name), args)
+                )
                 text = out if isinstance(out, str) else _dump(out)
             else:
                 raise McpError(f"工具不可用：{name}（未注册——写/重操作需 --allow-write；见契约 §2）")

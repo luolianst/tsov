@@ -425,3 +425,62 @@ def test_vst3_track_freeze_cache_semantics():
         assert Path(rep["mix"]).is_file()
     finally:
         rmtree_force(d)
+
+
+# ---------------------------------------------------------------------------
+# MCP 面缺陷回归（验收 V1 发现：A1b name 解析失配 / A3 预设 path 被剥）
+# ---------------------------------------------------------------------------
+
+
+@_NEED_MAP
+def test_mcp_preset_path_kept_and_read_name_store_scoped():
+    """load_instrument_preset 的 path 不许被工程化剥掉（剥掉=静默清空预设）；
+    读工具 name 解析须走 ProjectStore（store root ≠ 仓库根时不失配）。"""
+    from mcp import ClientSession
+    from mcp.shared.memory import create_client_server_memory_streams
+
+    from tsov.mcp.server import build_server
+    from tsov.mcp.sessions import ProjectStore
+
+    ws = _tmpdir("vstmcpfix")
+    try:
+        root = ws / "output" / "vp"
+        root.mkdir(parents=True)
+        (root / "score.json").write_text(
+            json.dumps(_score().to_dict(), ensure_ascii=False), encoding="utf-8")
+        store = ProjectStore(ws, allow_write=True)  # root ≠ 仓库根：A1b 回归场景
+
+        async def case():
+            server = build_server(store)
+            async with create_client_server_memory_streams() as (cs, ss):
+                task = asyncio.create_task(
+                    server.run(ss[0], ss[1], server.create_initialization_options()))
+                try:
+                    async with ClientSession(cs[0], cs[1]) as session:
+                        await session.initialize()
+                        tools = (await session.list_tools()).tools
+                        schema = next(t for t in tools
+                                      if t.name == "load_instrument_preset").input_schema
+                        assert "path" in schema["properties"], "MCP schema 不该剥掉预设 path"
+                        r = await session.call_tool(
+                            "load_instrument_preset",
+                            {"name": "vp", "kind": "state", "path": "assets/presets/x.state"})
+                        assert r.is_error is False, r.content[0].text if r.content else ""
+                        return await session.call_tool(
+                            "list_instrument_params", {"name": "vp", "curated_only": True})
+                finally:
+                    task.cancel()
+                    try:
+                        await task
+                    except BaseException:  # noqa: BLE001 收尾吞取消噪声
+                        pass
+
+        r2 = asyncio.run(case())
+        assert r2.is_error is False, r2.content[0].text if r2.content else ""
+        assert "滤波截止" in r2.content[0].text  # name 经 store 解析（不再误报工程不存在）
+        saved = json.loads((root / "score.json").read_text(encoding="utf-8"))
+        assert saved["tracks"][0]["instrument"]["preset"] == {
+            "kind": "state", "path": "assets/presets/x.state"}, \
+            "path 被剥 = 静默清空预设（V1 A3 缺陷回归）"
+    finally:
+        rmtree_force(ws)
