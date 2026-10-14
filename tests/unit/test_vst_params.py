@@ -364,3 +364,64 @@ def test_mcp_write_tool_end_to_end():
         assert saved["tracks"][0]["instrument"]["params"] == {"Cutoff": 0.3}
     finally:
         rmtree_force(ws)
+
+
+@_NEED_VST
+def test_vst3_track_freeze_cache_semantics():
+    """L1-6：VST3 轨 freeze——首渲入库；重复渲染命中且逐位一致；改 params → 失效重渲；导出有产物。"""
+    from tsov.host import HostEngine
+    from tsov.host.cache import StemStore
+    from tsov.host.mix import render_buses
+    from tsov.render.fluidsynth_backend import default_soundfont
+
+    state = Path("output/v02-batchL-verify/sfizz-vpo-alto-flute.state")
+    if not state.is_file():
+        pytest.skip("缺 sfizz 长笛 state（先跑 gate_sweep 生成）")
+    if not Path("D:/VST3/sfizz.vst3").is_dir():
+        pytest.skip("缺 D:/VST3/sfizz.vst3")
+    if not default_soundfont():
+        pytest.skip("缺 SoundFont（HostEngine 依赖）")
+    d = _tmpdir("vstfreeze")
+    try:
+        score = Score(title="t", tempo=100.0, tracks=[Track(
+            name="flute",
+            instrument=Instrument(program="vst3:D:/VST3/sfizz.vst3",
+                                  preset={"kind": "state", "path": str(state.resolve())}),
+            notes=[_note(0.2, 1.0, 69)])])
+        e = HostEngine()
+        store = StemStore(d)
+
+        s1 = e.load(score)
+        try:
+            st1 = {}
+            a1 = render_buses(s1, samplerate=e.samplerate, cache=store, stats=st1)
+        finally:
+            s1.close()
+        assert st1.get("rendered") == ["flute"] and not st1.get("cached")
+
+        s2 = e.load(score)
+        try:
+            st2 = {}
+            a2 = render_buses(s2, samplerate=e.samplerate, cache=store, stats=st2)
+        finally:
+            s2.close()
+        assert st2.get("rendered", []) == [] and st2.get("cached") == ["flute"]
+        assert np.array_equal(a1, a2)  # 缓存拼装 == 首渲
+
+        score.tracks[0].instrument.params = {"0": 0.3}   # 改参 → 必须失效
+        s3 = e.load(score)
+        try:
+            st3 = {}
+            e.render(s3, cache=store, stats=st3)
+        finally:
+            s3.close()
+        assert st3.get("rendered", []) == ["flute"], "改参后仍命中缓存 = 陈旧音色回放"
+
+        s4 = e.load(score)
+        try:
+            rep = e.export(s4, d / "exports", midi=False, cache=store)
+        finally:
+            s4.close()
+        assert Path(rep["mix"]).is_file()
+    finally:
+        rmtree_force(d)

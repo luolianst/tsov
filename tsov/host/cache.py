@@ -42,7 +42,11 @@ CODE_FP = _code_fingerprint()   # 模块加载时计算一次
 
 
 def track_key(track, samplerate: int) -> str:
-    """轨道内容指纹（ADR-0018）：只含影响「音源+效果」输出的字段。"""
+    """轨道内容指纹（ADR-0018）：只含影响「音源+效果」输出的字段。
+
+    批L L1-6 增补：**VST3 音源的 `params` / `preset` 入键**——改参/换预设必须失效重渲，
+    否则 freeze 缓存会静默回放旧音色。
+    """
     inst = track.instrument
     payload = {
         "v": CACHE_VERSION,
@@ -50,6 +54,8 @@ def track_key(track, samplerate: int) -> str:
         "sr": int(samplerate),
         "backend": str(inst.backend),
         "program": str(inst.program),
+        "params": {str(k): v for k, v in dict(inst.params or {}).items()},
+        "preset": (dict(inst.preset) if inst.preset else None),
         "effects": [e.to_dict() if hasattr(e, "to_dict") else dict(e) for e in (inst.effects or [])],
         "notes": [
             [round(float(n.start), 6), round(float(n.end), 6), int(n.pitch_midi), round(float(n.velocity), 6)]
