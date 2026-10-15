@@ -448,7 +448,13 @@ class VstWorker:
             raise VstWorkerError(f"已有插件编辑器打开中：{self._editor_open}（单窗口——先关闭它）")
         if apath not in self._loaded:
             self.load(apath, sr=sr)
+        # C2（P62b-6）：置位前比对代际——「打开瞬败/秒关」时 editor_closed 可能在 ack 前已被
+        # 读线程处理（彼时 _editor_open 尚为 None，清点路径不匹配）；若期间代际已 +1，不得置位
+        # （否则状态永久「打开中」、后续开窗被单窗锁拒，需 worker/服务重启自愈）。
+        epoch_before = self._editor_epochs.get(apath, 0)
         res = self._request("open_editor", timeout=LOAD_TIMEOUT, path=apath, sr=int(sr))
+        if self._editor_epochs.get(apath, 0) != epoch_before:
+            raise VstWorkerError("编辑器已关闭（打开瞬败/秒关）——请重试")
         self._editor_open = apath
         return res
 
@@ -563,6 +569,8 @@ class _ChildState:
         self._editors_lock = threading.Lock()
         self._editor_path: str | None = None   # P62b：打开中的编辑器插件路径（worker 级单窗口）
         self._io_lock = threading.Lock()       # P62b-5b：引擎操作互斥（跨线程并发防护）
+        self._names_cache: dict[str, dict[str, int]] = {}   # P62b-6（C3）：参数名→索引（path 级
+                                                          # 预缓存——弹窗期禁读参数表，见 _render）
         self._pump_fn = None                   # 主线程等锁期间的 Win32 消息泵（_serve 注入）
 
     def _run_io(self, fn, *a, **kw):
@@ -651,11 +659,13 @@ class _ChildState:
         self._ensure_engine(sr)
         ent = self._plugin(path)
         proc = ent["proc"]
+        desc = proc.get_parameters_description()
+        self._names_cache[path] = {d["name"]: int(d["index"]) for d in desc}   # P62b-6（C3）预缓存
         return {
             "latency": ent["latency"],
             "in": int(proc.get_num_input_channels()),
             "out": int(proc.get_num_output_channels()),
-            "params": len(proc.get_parameters_description()),
+            "params": len(desc),
         }
 
     def _params(self, path: str, sr: int) -> dict:
@@ -674,6 +684,7 @@ class _ChildState:
                 "discrete": bool(d.get("isDiscrete") or d.get("isBoolean")),
                 "labels": labels or None,
             })
+        self._names_cache[path] = {p["name"]: p["index"] for p in out}   # P62b-6（C3）预缓存
         return {"count": len(out), "params": out}
 
     def _open_editor(self, msg: dict) -> dict:
@@ -725,29 +736,48 @@ class _ChildState:
         ent = self._plugin(path)
         with self._editors_lock:
             ep = self._editor_path
+        # P62b-6（C3）：弹窗期（ep 非空 → 主线程在模态泵）**禁用依赖消息线程协作的插件调用**。
+        # py-spy 实测定格（output/v02-p62b6-verify/c3-hang-diag.log）：弹窗期
+        # `get_parameters_description()`（参数表预取）必死锁且不可恢复（WM_CLOSE 亦无解）；
+        # `set_parameter`（names 已缓存）安全（0.01s，diag_modal_setparam.log）。故 names 一律走
+        # path 级预缓存（正常 load/params/渲染时填充）；弹窗期缺缓存 → 明确拒绝，不许挂死。
+        modal = ep is not None
+        names_hint = ent["names"] if ent.get("names") is not None else self._names_cache.get(path)
         if ent.get("applied_key") != key:
             if ep == path:
                 # P62b-5b（c+）：开窗实例 = 用户正在调的状态权威——**就地应用、绝不重建**
                 #（重建会把窗口绑到死实例上，GUI 调整全丢）。「组合消失回干净态」语义
                 # 在开窗期不适用：以 GUI 实际状态为准（关窗后同组合重渲沿用实例 → 保住解锁态）。
+                if spec and modal:
+                    raise RuntimeError("插件界面打开中不支持加载预设（模态期插件调用有死锁风险）——请先关闭窗口")
                 if spec:
                     try:
                         self._apply_preset(ent["proc"], spec)
                     except Exception as exc:
                         raise RuntimeError(f"预设加载失败：{spec.get('path')!r}（{exc}）") from exc
-                ent["names"] = apply_params(ent["proc"], params, ent["names"], strict=True)
+                if params and names_hint is None and modal:
+                    raise RuntimeError("插件界面打开中且参数表未缓存——请先关闭窗口后重试（弹窗期不可读取参数表）")
+                ent["names"] = apply_params(ent["proc"], params, names_hint, strict=True)
+                if ent["names"] is not None:
+                    self._names_cache[path] = ent["names"]
                 ent["applied_key"] = key
             else:
                 proc = ent["proc"] = self._fresh_processor(path)
                 ent["names"] = None
                 ent["applied_key"] = None  # 先失效：中途失败（坏预设/坏参数）不留下"已应用"标记
                 ent["latency"] = int(proc.get_latency_samples())
+                if spec and modal:
+                    raise RuntimeError("插件界面打开中不支持加载预设（模态期插件调用有死锁风险）——请先关闭窗口")
                 if spec:
                     try:
                         self._apply_preset(proc, spec)
                     except Exception as exc:
                         raise RuntimeError(f"预设加载失败：{spec.get('path')!r}（{exc}）") from exc
-                ent["names"] = apply_params(proc, params, ent["names"], strict=True)
+                if params and names_hint is None and modal:
+                    raise RuntimeError("插件界面打开中且参数表未缓存——请先关闭窗口后重试（弹窗期不可读取参数表）")
+                ent["names"] = apply_params(proc, params, names_hint, strict=True)
+                if ent["names"] is not None:
+                    self._names_cache[path] = ent["names"]
                 ent["applied_key"] = key
         proc = ent["proc"]
         proc.clear_midi()

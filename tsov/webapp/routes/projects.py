@@ -125,6 +125,11 @@ def register(app: FastAPI) -> None:
 
     @app.post("/api/projects/{name}/batch")
     def apply_batch(name: str, body: BatchIn) -> dict:
+        """命令层批编辑。**拒绝语义契约（W9·P62b-6）**：全部命令被拒 = HTTP 200 +
+        `applied:0` + errors（**不做 4xx reject**）——消费方一律按 `applied` / `changed`
+        判定，勿以 catch 判失败（C1 实锤坑：旧 catch 为死代码）。
+        副作用型 op（如 open_instrument_editor）成功但谱面无变化 → `applied>0` 且
+        `changed:false`：不落盘 / 不记快照 / 不广播（C4 同门槛）。"""
         proj = st().get_project(name)
         batch = EditBatch(label=body.label)
         for i, c in enumerate(body.commands):
@@ -137,13 +142,14 @@ def register(app: FastAPI) -> None:
         if result["applied"] == 0:
             # 全部命令被拒 → 工程不动；契约 §五：applied=0 + errors 清单仍在响应体里
             return result
-        st().bus.publish(name, "diff_applied", {**result["diff"], "commit": result["commit"], "seq": result.get("seq")})
-        st().bus.publish(name, "state_updated", project_state(proj))
-        try:
-            _retention_tick(st(), name)   # M-V7 D2：写操作触发留存检查（定时档惰性）
-        except Exception:  # noqa: BLE001 留存钩子失败不影响主流程
-            pass
-        result["saved_at"] = saved_at_of(proj)   # M-V8 E6 段2：保存徽章直读（不等 SSE）
+        if result.get("changed", True):
+            st().bus.publish(name, "diff_applied", {**result["diff"], "commit": result["commit"], "seq": result.get("seq")})
+            st().bus.publish(name, "state_updated", project_state(proj))
+            try:
+                _retention_tick(st(), name)   # M-V7 D2：写操作触发留存检查（定时档惰性）
+            except Exception:  # noqa: BLE001 留存钩子失败不影响主流程
+                pass
+            result["saved_at"] = saved_at_of(proj)   # M-V8 E6 段2：保存徽章直读（不等 SSE）
         return result
 
     @app.post("/api/projects/{name}/undo")

@@ -106,6 +106,7 @@ def test_child_editor_flow(outdir, monkeypatch):
 
     ent = st._plugins[a]
     proc0 = ent["proc"]
+    ent["names"] = {"cutoff": 0}     # P62b-6（C3）：模拟 names 已缓存——弹窗期禁参数表预取（防死锁）
     m = _rmsg(a, outdir / "a2.npy"); m["params"] = {"cutoff": 0.5}
     st._render(m)                                             # 开窗期参数变更 = 就地应用
     assert ent["proc"] is proc0, "开窗实例被重建（窗口会绑到死实例上）"
@@ -136,6 +137,18 @@ def test_child_editor_error_still_closes(outdir, monkeypatch):
     kinds = [e.get("event") for e in events]
     assert "editor_error" in kinds and "editor_closed" in kinds
     assert st.handle("status", {})["editor"] is None
+
+
+def test_child_modal_param_fetch_blocked(outdir):
+    """P62b-6（C3）：弹窗期 names 未缓存 + 带参渲染 → 明确拒绝（不许走 get_parameters_description 死锁路）。"""
+    gate = threading.Event()
+    st = _state(_FakeEngine(gate))
+    a = "C:/fake/A.vst3"
+    st.handle("open_editor", {"path": a, "sr": 44100})
+    m = _rmsg(a, outdir / "blk.npy")
+    m["params"] = {"cutoff": 0.5}
+    with pytest.raises(RuntimeError, match="参数表未缓存"):
+        st._render(m)
 
 
 def test_client_editor_lock_and_close_events():
@@ -253,3 +266,33 @@ def test_tool_open_instrument_editor_handler(monkeypatch, tmp_path):
     p.write_text(json.dumps(s.to_dict(), ensure_ascii=False), encoding="utf-8")
     msg = tool_open_instrument_editor({"score_path": str(p), "track": 0})
     assert "已打开插件界面" in msg and calls and calls[0] == r"D:\VST3\MT-PowerDrumKit.vst3"
+
+
+def test_client_open_editor_close_race_no_stale_lock(outdir, monkeypatch):
+    """C2（P62b-6）：打开瞬败/秒关——editor_closed 先于 ack 处理时不得残留「打开中」态。
+
+    判别性：修复前该路径会在 ack 返回后无条件置位 `_editor_open`（close 事件已错过清点），
+    状态永久「打开中」：editor-status 恒 open、后续开窗被单窗锁拒（需 worker/服务重启自愈）。
+    """
+    w = vst_worker.VstWorker()
+    ap = str(Path("C:/fake/A.vst3"))
+    w._loaded[ap] = {}
+    seen: dict = {}
+
+    def fake_request(cmd, timeout=None, **payload):
+        seen["cmd"] = cmd
+        w._on_editor_closed(payload["path"])   # 模拟：关窗事件在 ack 前已被读线程处理
+        return {"opened": True, "path": payload["path"]}
+
+    monkeypatch.setattr(w, "_request", fake_request)
+    with pytest.raises(vst_worker.VstWorkerError):
+        w.open_editor(ap)
+    assert seen.get("cmd") == "open_editor"
+    assert w.editor_open_path is None, "关窗竞态后残留「打开中」——后续开窗将被单窗锁拒（需重启自愈）"
+
+    def fake_request_ok(cmd, timeout=None, **payload):
+        return {"opened": True, "path": payload["path"]}
+
+    monkeypatch.setattr(w, "_request", fake_request_ok)
+    w.open_editor(ap)                       # 不残留锁：再次开窗不被「已有编辑器打开中」拒
+    assert w.editor_open_path == ap

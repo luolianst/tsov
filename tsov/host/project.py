@@ -219,9 +219,23 @@ class Project:
                 "diff": {"added": [], "removed": [], "changed": [], "summary": "无改动", "total": 0},
                 "commit": None,
                 "seq": None,
+                "changed": False,
             }
 
         pre_dict = self.score.to_dict()
+        # C4（P62b-6）：实质变更门——命令已执行（applied>0）但谱面 dict 无变化（副作用型 op，
+        # 如 open_instrument_editor）→ 不落盘 / 不记快照（与 agent 工具路径副作用对齐；
+        # web 路由同门槛：changed=False 不广播）。响应额外带 changed 标志。
+        if new_score.to_dict() == pre_dict:
+            return {
+                "ok": result.ok,
+                "applied": result.applied,
+                "errors": result.errors,
+                "diff": {"added": [], "removed": [], "changed": [], "summary": "无实质变更", "total": 0},
+                "commit": None,
+                "seq": None,
+                "changed": False,
+            }
         old_notes = self.score.tracks[0].notes if self.score.tracks else []
         new_notes = new_score.tracks[0].notes if new_score.tracks else []
         note_diff = diff_notes(old_notes, new_notes)
@@ -249,6 +263,7 @@ class Project:
             "diff": note_diff.to_dict(),
             "commit": None,
             "seq": seq,
+            "changed": True,
         }
 
     @property

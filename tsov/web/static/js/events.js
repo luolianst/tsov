@@ -34,6 +34,11 @@ const SSE_TYPES = [
   'tune_updated',
   /* M-V8 E4 段3：配器批次（generate/apply/discard 通道触发） */
   'arrange_updated',
+  /* P62b-6（W11）：补齐三处漂移——发布面有、白名单漏登（前端静默收不到）；
+     自动化检查见 tests/unit/test_sse_whitelist.py（发布 ⊆ 白名单，不一致即测试红）。 */
+  'chain_log',      /* chain/runner.py 日志行（routes/chain.py 文档声称在列，此前静默失联） */
+  'action_undone',  /* retention 撤销——chat.js / steps.js 有活跃监听（此前静默失联） */
+  'favorite',       /* agent_session 自动/定时收藏（此前发布无转发） */
 ];
 
 let current = null;      // 当前 EventSource
