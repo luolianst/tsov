@@ -61,11 +61,17 @@ let watchTimer = 0;
 
 async function openEditorFor(ws) {
   const w = ws.find((x) => typeof x.track === 'number');
-  if (!w || !store.project) return;
+  if (!w) return;
+  await openPluginEditor(w.track);
+}
+
+/* P62b-5a（c+）：常驻开窗入口（警告卡与轨道面板共用这一个动作路径） */
+export async function openPluginEditor(trackIndex) {
+  if (typeof trackIndex !== 'number' || !store.project) return;
   startEditorWatch();   /* 先起监视——防「打开即失败关窗」的瞬时事件被漏掉 */
   try {
     await api.postBatch(store.project, t('打开插件界面'),
-      [{ op: 'open_instrument_editor', track: w.track }], null);
+      [{ op: 'open_instrument_editor', track: trackIndex }], null);
     toast(t('插件界面已打开 —— 完成界面操作后关闭窗口，将自动重渲'));
   } catch (e) {
     clearInterval(watchTimer);

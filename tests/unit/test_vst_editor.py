@@ -1,4 +1,4 @@
-"""P62b 插件编辑器过桥单测（2026-10-14）：worker 命令流 / 单窗口锁 / 渲染互斥(Q3) / 关窗事件 / 命令层 op。
+"""P62b 插件编辑器过桥单测（2026-10-14）：worker 命令流 / 单窗口锁 / 弹窗期并行渲染(P62b-5b) / 关窗事件 / 命令层 op。
 
 全部用假 daw / 假 worker——不在测试中开真实 GUI 窗口（真机过桥流程走验收脚本）。
 """
@@ -83,9 +83,11 @@ def _rmsg(path: str, out: Path) -> dict:
 
 
 def test_child_editor_flow(outdir, monkeypatch):
-    """打开 ack → 单窗口锁 → Q3 拒渲（该实例）/其他实例放行 → 主线程泵关窗 → 事件 → 恢复可渲。"""
+    """打开 ack → 单窗口锁 → P62b-5b 弹窗期照渲（同实例就地应用/其他实例并发）→ 泵关窗 → 事件 → 恢复。"""
     events: list[dict] = []
     monkeypatch.setattr(vst_worker, "_emit", lambda obj: events.append(obj))
+    monkeypatch.setattr(vst_worker, "apply_params",
+                        lambda proc, params, names, strict=True: names)
     gate = threading.Event()
     st = _state(_FakeEngine(gate))
     a, b = "C:/fake/A.vst3", "C:/fake/B.vst3"
@@ -97,18 +99,29 @@ def test_child_editor_flow(outdir, monkeypatch):
     with pytest.raises(RuntimeError):
         st.handle("open_editor", {"path": b, "sr": 44100})   # 单窗口锁
 
-    with pytest.raises(RuntimeError):
-        st._render(_rmsg(a, outdir / "a.npy"))               # Q3：编辑中拒渲（泵占主循环→一律拒）
-    with pytest.raises(RuntimeError):
-        st._render(_rmsg(b, outdir / "b.npy"))               # 其他实例同样拒（同进程主循环被占）
+    ra = st._render(_rmsg(a, outdir / "a.npy"))               # P62b-5b：弹窗期同实例照渲
+    assert ra["frames"] == 441 and ra["peak"] > 0
+    rb = st._render(_rmsg(b, outdir / "b.npy"))               # 其他实例照渲（弹窗期并发）
+    assert rb["frames"] == 441 and rb["peak"] > 0
+
+    ent = st._plugins[a]
+    proc0 = ent["proc"]
+    m = _rmsg(a, outdir / "a2.npy"); m["params"] = {"cutoff": 0.5}
+    st._render(m)                                             # 开窗期参数变更 = 就地应用
+    assert ent["proc"] is proc0, "开窗实例被重建（窗口会绑到死实例上）"
+    assert ent["applied_key"] is not None
 
     gate.set()                                # 假窗放行（= 用户关窗）
     st._editor_pump(a)                        # 主循环在主线程的这个调用（同步返回）
     assert any(e.get("event") == "editor_closed" for e in events)
     assert st.handle("status", {})["editor"] is None
 
-    ra = st._render(_rmsg(a, outdir / "a2.npy"))             # 关窗后恢复可渲
-    assert ra["frames"] == 441 and ra["peak"] > 0
+    m2 = _rmsg(a, outdir / "a3.npy"); m2["params"] = {"cutoff": 0.5}
+    ra2 = st._render(m2)                                      # 关窗后同组合重渲——沿用实例
+    assert ra2["frames"] == 441 and ra2["peak"] > 0
+    assert ent["proc"] is proc0, "同组合重渲被重建（解锁/GUI 态会丢）"
+    st._render(_rmsg(a, outdir / "a4.npy"))                   # 组合变化（清空）→ 批L 重建语义恢复
+    assert ent["proc"] is not proc0
 
 
 def test_child_editor_error_still_closes(outdir, monkeypatch):
@@ -125,17 +138,12 @@ def test_child_editor_error_still_closes(outdir, monkeypatch):
     assert st.handle("status", {})["editor"] is None
 
 
-def test_client_editor_state_and_render_fastfail():
-    """客户端：同实例渲染快速失败（不拉进程）/ 单窗口开第二窗被拒 / 关窗事件清状态（不匹配保留）。"""
+def test_client_editor_lock_and_close_events():
+    """客户端：单窗口开第二窗被拒（不拉进程）/ 关窗事件清状态（不匹配保留）。"""
     w = vst_worker.VstWorker()
     ap = str(Path("C:/fake/A.vst3"))
     assert w.editor_open_path is None
     w._editor_open = ap
-    with pytest.raises(vst_worker.VstWorkerError):
-        w.render(ap, [], 44100, 441)
-    with pytest.raises(vst_worker.VstWorkerError):
-        w.render(str(Path("C:/fake/B.vst3")), [], 44100, 441)   # 其他实例同样拒（主循环被泵占）
-    assert w.pid is None, "快速失败不应拉起 worker 子进程"
     with pytest.raises(vst_worker.VstWorkerError):
         w.open_editor(ap)      # 单窗口：已有窗口（未启 worker 即拒）
     assert w.pid is None
@@ -143,6 +151,24 @@ def test_client_editor_state_and_render_fastfail():
     assert w.editor_open_path == ap
     w._on_editor_closed(ap)
     assert w.editor_open_path is None
+
+
+def test_client_render_passes_while_editor_open(monkeypatch):
+    """P62b-5b：弹窗期渲染请求不再秒拒——照常发出（并发渲染，拒渲在子进程已撤）。"""
+    w = vst_worker.VstWorker()
+    ap = str(Path("C:/fake/A.vst3"))
+    w._editor_open = ap
+    w._loaded[ap] = {}
+    seen: dict = {}
+
+    def fake_request(cmd, timeout=None, **payload):
+        seen[cmd] = payload
+        np.save(payload["out"], np.zeros(441, dtype=np.float32))
+        return {"file": payload["out"], "frames": 441, "peak": 0.0}
+
+    monkeypatch.setattr(w, "_request", fake_request)
+    arr = w.render(ap, [], 44100, 441)          # 不抛（旧 Q3 秒拒已撤）
+    assert arr.shape[0] == 441 and "render" in seen
 
 
 def test_module_helpers(monkeypatch):

@@ -408,13 +408,6 @@ class VstWorker:
                *, params: dict | None = None, preset: dict | None = None) -> np.ndarray:
         """渲染一个插件（events 用 ``events_from_notes`` 生成）→ mono float32。"""
         apath = str(Path(path).resolve())
-        if self._editor_open is not None:
-            # P62b（Q3）：编辑器打开中（用户交互中）——worker 主循环被窗口泵占住，
-            # 任何渲染都会排队憋死 → 一律秒拒（该实例与其他实例同理）；关窗后重试。
-            if self._editor_open == apath:
-                raise VstWorkerError("插件编辑器打开中（用户交互中）——关闭窗口后重试渲染")
-            raise VstWorkerError(
-                f"有插件编辑器打开中（{Path(self._editor_open).name}，用户交互中）——关闭窗口后重试渲染")
         if preset and preset.get("path"):
             pp = Path(str(preset["path"]))
             if not pp.is_absolute():
@@ -569,6 +562,22 @@ class _ChildState:
         self._seq = 0
         self._editors_lock = threading.Lock()
         self._editor_path: str | None = None   # P62b：打开中的编辑器插件路径（worker 级单窗口）
+        self._io_lock = threading.Lock()       # P62b-5b：引擎操作互斥（跨线程并发防护）
+        self._pump_fn = None                   # 主线程等锁期间的 Win32 消息泵（_serve 注入）
+
+    def _run_io(self, fn, *a, **kw):
+        """引擎互斥（load / params / render / open_editor 建实例）——主线程等锁期间继续泵消息。"""
+        while not self._io_lock.acquire(timeout=0.02):
+            if self._pump_fn is not None and threading.current_thread() is threading.main_thread():
+                self._pump_fn()
+        try:
+            return fn(*a, **kw)
+        finally:
+            self._io_lock.release()
+
+    def editor_open_any(self) -> bool:
+        with self._editors_lock:
+            return self._editor_path is not None
 
     def _ensure_engine(self, sr: int) -> None:
         if self._engine is None or self._sr != int(sr):
@@ -616,20 +625,21 @@ class _ChildState:
 
     def handle(self, cmd: str, msg: dict) -> dict:
         if cmd == "load":
-            return self._load(str(msg["path"]), int(msg.get("sr") or 44100))
+            return self._run_io(self._load, str(msg["path"]), int(msg.get("sr") or 44100))
         if cmd == "render":
-            return self._render(msg)
+            return self._run_io(self._render, msg)
         if cmd == "params":
-            return self._params(str(msg["path"]), int(msg.get("sr") or 44100))
+            return self._run_io(self._params, str(msg["path"]), int(msg.get("sr") or 44100))
         if cmd == "open_editor":
-            return self._open_editor(msg)
+            return self._run_io(self._open_editor, msg)
         if cmd == "status":
             return {
                 "protocol": PROTOCOL,
                 "pid": os.getpid(),
                 "engine_sr": self._sr,
                 "editor": self._editor_path,
-                "plugins": [{"path": p, "latency": e["latency"]} for p, e in self._plugins.items()],
+                "plugins": [{"path": p, "latency": e["latency"]}
+                            for p, e in list(self._plugins.items())],   # 快照：渲染线程并发插入防护
             }
         if cmd == "debug_sleep":  # 超时保护测试专用
             secs = float(msg.get("secs", 1.0))
@@ -687,7 +697,9 @@ class _ChildState:
         """P62b：在主线程阻塞弹窗（``openWindowAndWait`` 语义——返回即关窗），随后发事件。"""
         err: str | None = None
         try:
-            ent = self._plugin(path)
+            ent = self._plugins.get(path)   # 只读缓存（建实例在 _open_editor 已完成，带锁）
+            if ent is None:
+                raise RuntimeError(f"插件未加载：{path}")
             ent["proc"].open_editor()   # 主线程；阻塞到用户关窗
         except Exception as exc:  # noqa: BLE001 窗口异常不许杀 worker
             err = f"{type(exc).__name__}: {exc}"
@@ -703,11 +715,6 @@ class _ChildState:
         path = str(msg["path"])
         sr = int(msg["sr"])
         n = int(msg["n"])
-        with self._editors_lock:
-            if self._editor_path is not None:
-                # P62b（Q3）：编辑器打开中（窗口泵占住主循环）——一律拒绝（关窗后重试）
-                raise RuntimeError(
-                    f"插件编辑器打开中（{self._editor_path}，用户交互中）——关窗后重试渲染")
         self._ensure_engine(sr)
         spec = msg.get("preset")
         params = msg.get("params") or {}
@@ -716,18 +723,32 @@ class _ChildState:
         key = json.dumps([spec, sorted((str(k), v) for k, v in params.items())],
                          sort_keys=True, ensure_ascii=False)
         ent = self._plugin(path)
+        with self._editors_lock:
+            ep = self._editor_path
         if ent.get("applied_key") != key:
-            proc = ent["proc"] = self._fresh_processor(path)
-            ent["names"] = None
-            ent["applied_key"] = None  # 先失效：中途失败（坏预设/坏参数）不留下"已应用"标记
-            ent["latency"] = int(proc.get_latency_samples())
-            if spec:
-                try:
-                    self._apply_preset(proc, spec)
-                except Exception as exc:
-                    raise RuntimeError(f"预设加载失败：{spec.get('path')!r}（{exc}）") from exc
-            ent["names"] = apply_params(proc, params, ent["names"], strict=True)
-            ent["applied_key"] = key
+            if ep == path:
+                # P62b-5b（c+）：开窗实例 = 用户正在调的状态权威——**就地应用、绝不重建**
+                #（重建会把窗口绑到死实例上，GUI 调整全丢）。「组合消失回干净态」语义
+                # 在开窗期不适用：以 GUI 实际状态为准（关窗后同组合重渲沿用实例 → 保住解锁态）。
+                if spec:
+                    try:
+                        self._apply_preset(ent["proc"], spec)
+                    except Exception as exc:
+                        raise RuntimeError(f"预设加载失败：{spec.get('path')!r}（{exc}）") from exc
+                ent["names"] = apply_params(ent["proc"], params, ent["names"], strict=True)
+                ent["applied_key"] = key
+            else:
+                proc = ent["proc"] = self._fresh_processor(path)
+                ent["names"] = None
+                ent["applied_key"] = None  # 先失效：中途失败（坏预设/坏参数）不留下"已应用"标记
+                ent["latency"] = int(proc.get_latency_samples())
+                if spec:
+                    try:
+                        self._apply_preset(proc, spec)
+                    except Exception as exc:
+                        raise RuntimeError(f"预设加载失败：{spec.get('path')!r}（{exc}）") from exc
+                ent["names"] = apply_params(proc, params, ent["names"], strict=True)
+                ent["applied_key"] = key
         proc = ent["proc"]
         proc.clear_midi()
         for e in msg.get("events") or []:
@@ -746,8 +767,34 @@ class _ChildState:
 
 
 def _serve() -> int:
-    """子进程主循环（NDJSON 请求串行处理；stdin EOF → 退出不留孤儿）。"""
+    """子进程：**主线程 = JUCE 线程**（load / params / open_editor / 泵窗），
+    **读取线程 = 渲染线程**（render / status 就地执行）——弹窗期并行渲染（P62b-5b）。
+
+    dawdreamer 判定（PluginProcessor.cpp）：``MessageManager::getInstance()->
+    isThisTheMessageThread()``——JUCE 消息线程 = **首次触碰 JUCE GUI 的线程**，
+    而插件加载（make_plugin_processor → loadPlugin）会创建 MessageManager。故首个
+    实例创建必须发生在主线程（load 路由保证），此后渲染线程可与泵窗并发 render
+    （dawdreamer 加载带静态互斥 + 释放 GIL；探针 G 实证泵窗/渲染并发可行）。
+    **主线程闲时兼任 Win32 消息泵**（JUCE 异步回调/定时器依赖消息派发——弹窗期由
+    openWindowAndWait 的模态循环负责，平时由 PeekMessage/DispatchMessage 喂；否则
+    渲染线程的 make_plugin_processor 会因异步无人收尸而死锁——py-spy 实证）。
+    stdin EOF → 哨兵唤醒主线程退出，不留孤儿。"""
     import dawdreamer as daw  # 子进程专属导入：父进程零 dawdreamer / LLVM 负担
+
+    try:
+        import ctypes
+        import ctypes.wintypes as _wt
+        _PM_REMOVE = 0x0001
+        _u32 = ctypes.windll.user32
+
+        def _pump_win32() -> None:
+            m = _wt.MSG()
+            while _u32.PeekMessageW(ctypes.byref(m), None, 0, 0, _PM_REMOVE):
+                _u32.TranslateMessage(ctypes.byref(m))
+                _u32.DispatchMessageW(ctypes.byref(m))
+    except Exception:  # noqa: BLE001 非 Windows / 无 user32：退回纯队列循环
+        def _pump_win32() -> None:
+            pass
 
     try:
         sys.stdin.reconfigure(encoding="utf-8", errors="replace")   # type: ignore[union-attr]
@@ -757,23 +804,64 @@ def _serve() -> int:
     _emit({"event": "ready", "pid": os.getpid(), "protocol": PROTOCOL,
            "dawdreamer": getattr(daw, "__version__", "?")})
     st = _ChildState(daw)
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
+    st._pump_fn = _pump_win32   # 主线程等引擎锁期间继续泵消息
+    main_q: queue.Queue = queue.Queue()
+    _SENTINEL: object = object()
+
+    def _reader() -> None:
         try:
-            msg = json.loads(line)
-        except ValueError:
+            for line in sys.stdin:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(msg, dict):
+                    continue
+                rid = msg.get("id")
+                cmd = str(msg.get("cmd") or "")
+                if cmd == "shutdown":
+                    _emit({"id": rid, "ok": True, "result": {"done": True}})
+                    break
+                if cmd == "status":
+                    # 查询在读取线程就地执行（轻量快照）
+                    try:
+                        result = st.handle(cmd, msg)
+                    except Exception as exc:  # noqa: BLE001
+                        _emit({"id": rid, "ok": False, "error": f"{type(exc).__name__}: {exc}"})
+                        continue
+                    _emit({"id": rid, "ok": True, "result": result})
+                    continue
+                if cmd == "render" and st.editor_open_any():
+                    # P62b-5b：弹窗期渲染走读取线程——模态循环在泵（探针 G 同拓扑，实证可行）。
+                    # 关窗后渲染回主线程（= JUCE 消息线程，旧设计语义；读取线程闲时渲 load_graph 会死锁）。
+                    try:
+                        _emit({"id": rid, "event": "stage", "stage": cmd})  # 进度行（Q4）
+                        result = st.handle(cmd, msg)
+                    except Exception as exc:  # noqa: BLE001 单命令隔离：坏命令不杀 worker
+                        _emit({"id": rid, "ok": False, "error": f"{type(exc).__name__}: {exc}"})
+                        continue
+                    _emit({"id": rid, "ok": True, "result": result})
+                    continue
+                main_q.put(msg)   # load / params / open_editor / 关窗后 render / debug_sleep → JUCE 线程
+        finally:
+            main_q.put(_SENTINEL)   # stdin EOF / shutdown：唤醒主线程收尾退出
+
+    threading.Thread(target=_reader, daemon=True).start()
+    while True:
+        _pump_win32()                      # 闲时泵消息（JUCE 异步回调/定时器收尸）
+        try:
+            msg = main_q.get(timeout=0.02)   # 20ms 轮询：兼顾消息泵与命令响应
+        except queue.Empty:
             continue
-        if not isinstance(msg, dict):
-            continue
+        if msg is _SENTINEL:
+            break
         rid = msg.get("id")
         cmd = str(msg.get("cmd") or "")
-        if cmd == "shutdown":
-            _emit({"id": rid, "ok": True, "result": {"done": True}})
-            break
         try:
-            if cmd in ("load", "render"):
+            if cmd == "load":
                 _emit({"id": rid, "event": "stage", "stage": cmd})  # 进度行（Q4）
             result = st.handle(cmd, msg)
         except Exception as exc:  # noqa: BLE001 单命令隔离：坏命令不杀 worker
@@ -781,7 +869,7 @@ def _serve() -> int:
             continue
         _emit({"id": rid, "ok": True, "result": result})
         if cmd == "open_editor":
-            # P62b：ack 已发 → 主线程阻塞弹窗（dawdreamer 硬要求消息主线程；返回=关窗）→ 事件。
+            # ack 已发 → 主线程（= JUCE 消息线程）阻塞泵窗（返回=关窗）→ 事件。
             st._editor_pump(str(result.get("path") or ""))
     return 0
 

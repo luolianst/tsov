@@ -7,6 +7,7 @@ import { api } from './api.js';
 import { store, setError, refTag } from './state.js';
 import { themeName, trackColors } from './theme.js';
 import { initChain, enterChain } from './chain.js';
+import { openPluginEditor } from './warnings.js';
 
 let dockEl = null, chanPane = null, fxPane = null, srcPane = null, mixPane = null, hintEl = null;
 let recPane = null;
@@ -393,6 +394,16 @@ function renderChan() {
   }
   srcSel.onchange = () => post(t('音源 ') + (srcSel.value || t('默认')), [{ op: 'set_instrument', track: cur.index, value: { program: srcSel.value } }]);
   srcCell.appendChild(srcLb); srcCell.appendChild(srcSel);
+
+  /* P62b-5a（c+）：vst3 音源轨常驻「打开插件界面」入口（DAW FX 窗口等价物；开窗期可渲可调） */
+  if (String(inst.program || '').startsWith('vst3:')) {
+    const bEd = document.createElement('button');
+    bEd.id = 'btn-open-plugin';
+    bEd.textContent = t('打开插件界面');
+    bEd.title = t('打开该轨的插件界面；完成交互后关窗自动重渲');
+    bEd.onclick = () => openPluginEditor(cur.index);
+    srcCell.appendChild(bEd);
+  }
 
   /* 音量 / 声像 */
   const mkRange = (label, min, max, val, fmt, op) => {
