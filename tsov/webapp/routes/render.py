@@ -161,3 +161,13 @@ def register(app: FastAPI) -> None:
         finally:
             session.close()
         return report
+
+    # ---------------- P62b：插件编辑器状态（前端轮询用） ----------------
+
+    @app.get("/api/projects/{name}/instrument/editor-status")
+    def instrument_editor_status(name: str) -> dict:
+        """插件编辑器窗口状态（worker 级；轻量、不拉起 worker）。"""
+        st().get_project(name)   # 工程存在性校验（与其余端点 404 语义一致）
+        from ...host.vst_worker import editor_status
+
+        return editor_status()

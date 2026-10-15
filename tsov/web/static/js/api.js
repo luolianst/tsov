@@ -62,6 +62,8 @@ export const api = {
   getLog: (name) => req('/api/projects/' + encodeURIComponent(name) + '/log'),
   getSummary: (name) => req('/api/projects/' + encodeURIComponent(name) + '/summary'),
   render: (name, out) => post('/api/projects/' + encodeURIComponent(name) + '/render', { out: out || null }),
+  /* P62b：插件编辑器状态（前端轮询；关窗后自动重渲） */
+  editorStatus: (name) => req('/api/projects/' + encodeURIComponent(name) + '/instrument/editor-status'),
   play: (name, body) => post('/api/projects/' + encodeURIComponent(name) + '/play', body || {}),
   /* M-V8 E1：停止宿主播放（打断 sounddevice；试听/宿主共用停止按钮） */
   playStop: (name) => post('/api/projects/' + encodeURIComponent(name) + '/play/stop', {}),

@@ -735,6 +735,24 @@ def tool_load_instrument_preset(args: dict) -> str:
             f"（相对路径=工程内；渲染时加载失败会报错）｜ 写回：{out}")
 
 
+def tool_open_instrument_editor(args: dict) -> str:
+    """打开 VST3 音源轨的插件编辑器窗口（P62b 过桥）——关窗后重渲即可恢复出声。"""
+    from ..host.command import EditBatch
+
+    score = _load(args["score_path"])
+    ti = _resolve_track(score, args.get("track", 0))
+    batch = EditBatch(label="open_instrument_editor")
+    batch.add("open_instrument_editor", track=ti)
+    _new_score, result = batch.apply(score)
+    if not result.ok:
+        raise ValueError("；".join(result.errors))
+    tr = score.tracks[ti]
+    plugin = str(tr.instrument.program)
+    pname = Path(plugin[len("vst3:"):]).stem if plugin.startswith("vst3:") else plugin
+    return (f"已打开插件界面：track[{ti}] {tr.name}（{pname}）——请在窗口内完成交互"
+            f"（如点击界面内按钮）；关闭窗口后重新渲染即可恢复出声。")
+
+
 # ---------------------------------------------------------------------------
 # 注册
 # ---------------------------------------------------------------------------
@@ -940,3 +958,13 @@ def register_compose_tools(registry: ToolRegistry) -> None:
             "output": {"type": "string"},
         }, "required": ["score_path"]},
         handler=tool_load_instrument_preset))
+
+    registry.register(ToolSpec(
+        name="open_instrument_editor",
+        description=("打开 vst3: 音源轨的插件编辑器窗口（催捐/授权/界面唤醒类插件的「过桥」入口）——"
+                     "用户在窗口内完成交互后关闭窗口，重新渲染即可恢复出声；worker 级单窗口"),
+        parameters={"type": "object", "properties": {
+            "score_path": {"type": "string"},
+            "track": {"description": "轨索引或轨名（缺省 0）"},
+        }, "required": ["score_path"]},
+        handler=tool_open_instrument_editor))

@@ -11,6 +11,8 @@
   / remove_track / rename_track——工具与 UI 同一动作路径（工具经 EditBatch）
 - 批L L1-3 增补（2026-10-14）：set_instrument_param（VST3 参数 diff；预设之上叠加）
   / load_instrument_preset（VST3 预设引用 vstpreset/fxp/state）——仅 vst3: 音源轨，其余拒绝
+- v0.2 P62b 增补（2026-10-14）：open_instrument_editor（打开 vst3: 音源轨的插件编辑器窗口——
+  催捐/授权/界面唤醒类插件的「过桥」入口；worker 级单窗口；不写谱）
 - M-V8 E2 增补（2026-09-21）：add_audio_track（追加音频轨；file=工程 audio/ 内相对路径）
   / set_audio_track（音频轨改 offset/file——只作用于 kind=="audio"）——音频轨一等公民第一刀
 - M-V8 E5 增补（2026-09-23）：split_note（剪刀：at 处切分）/ merge_notes（胶水：与后邻同音高合并，gap≤max_gap）
@@ -208,6 +210,9 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
         return _apply_set_instrument_param(track, c)
     if c.op == "load_instrument_preset":
         return _apply_load_instrument_preset(track, c)
+    # P62b：插件编辑器过桥（vst3: 轨；副作用=弹窗——不写谱）
+    if c.op == "open_instrument_editor":
+        return _apply_open_instrument_editor(score, c)
 
     if c.op == "add":
         v = c.value
@@ -605,6 +610,27 @@ def _apply_load_instrument_preset(track, c: EditCommand) -> str | None:
     if not path:
         return "预设需要 path（相对=工程内；绝对=只读引用）"
     track.instrument.preset = {"kind": kind, "path": path}
+    return None
+
+
+def _apply_open_instrument_editor(score: Score, c: EditCommand) -> str | None:
+    """P62b：打开 vst3: 音源轨的插件编辑器窗口（过桥；不写谱——副作用在 worker 侧）。
+
+    worker 单窗口锁 / 非 vst3 轨 / worker 不可用 → 错误文本（命令层批语义）。
+    """
+    ti = int(c.track or 0)
+    if not (0 <= ti < len(score.tracks)):
+        return f"open_instrument_editor：轨下标越界：{c.track}"
+    prog = str(getattr(score.tracks[ti].instrument, "program", "") or "")
+    if not prog.startswith("vst3:"):
+        return f"open_instrument_editor 仅适用于 vst3: 音源轨（track[{ti}] program={prog!r}）"
+    from . import vst_worker
+
+    v = c.value if isinstance(c.value, dict) else {}
+    try:
+        vst_worker.open_editor(prog[len("vst3:"):], sr=int(v.get("sr") or 44100))
+    except Exception as exc:  # noqa: BLE001 —— worker 侧错误 → 校验错误（同批语义）
+        return f"open_instrument_editor：{exc}"
     return None
 
 

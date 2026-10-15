@@ -44,6 +44,7 @@ TOOL_LABELS: dict[str, str] = {
     "list_instrument_params": "查插件参数",
     "set_instrument_param": "设插件参数",
     "load_instrument_preset": "载入预设",
+    "open_instrument_editor": "打开插件界面",
 }
 
 READ_TOOLS: frozenset[str] = frozenset({

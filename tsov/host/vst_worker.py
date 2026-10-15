@@ -146,6 +146,8 @@ class VstWorker:
         self._worker_pid: int | None = None  # 子进程真身 pid（venv python.exe 是壳，见 _force_kill）
         self.worker_info: dict = {}            # ready 上报（pid/protocol/dawdreamer；诊断与参数表落款用）
         self._loaded: dict[str, dict] = {}     # 请求侧记账（绝对路径 → load 结果；崩溃后清空）
+        self._editor_open: str | None = None   # P62b：编辑器窗口打开中的插件路径（关窗事件清除）
+        self._editor_epochs: dict[str, int] = {}  # P62b：插件「编辑器代际」（关窗 +1——解锁可能改变渲染输出）
         self._noise: list[str] = []            # 子进程 stdout 非协议行 / 事件（诊断）
         self._log_path = _SCRATCH / "worker.log"
 
@@ -163,6 +165,7 @@ class VstWorker:
         self.worker_info = {}
         self._pending.clear()
         self._loaded.clear()
+        self._editor_open = None    # P62b：新进程无编辑器
         env = dict(os.environ)
         env["PYTHONPATH"] = str(_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
         env["PYTHONIOENCODING"] = "utf-8"
@@ -326,6 +329,12 @@ class VstWorker:
                                         "dawdreamer": msg.get("dawdreamer")}
                     self._ready.set()
                     continue
+                if msg.get("event") == "editor_closed":
+                    self._on_editor_closed(str(msg.get("plugin") or ""))
+                    continue
+                if msg.get("event") == "editor_error":
+                    self._noise = (self._noise + [f"[editor_error] {msg.get('plugin')}: {msg.get('error')}"])[-50:]
+                    continue
                 self._noise = (self._noise + [f"{msg}"])[-50:]  # 进度行等 → 诊断缓冲
         except Exception as exc:  # noqa: BLE001
             self._noise = (self._noise + [f"reader 异常: {exc!r}"])[-50:]
@@ -333,6 +342,14 @@ class VstWorker:
             if self._proc is proc:     # 只有仍属当前进程的 reader 才改全局状态
                 self._dead_reason = f"worker 进程已退出（code={proc.poll()}）"
                 self._crash_pending()
+
+    def _on_editor_closed(self, plugin: str) -> None:
+        """P62b：worker 关窗事件 → 清编辑器状态 + 插件代际 +1（解锁可能改变渲染输出→失效 stem 缓存）。"""
+        self._noise = (self._noise + [f"[editor_closed] {plugin} (epoch={self._editor_epochs.get(plugin, 0) + 1})"])[-50:]
+        if plugin:
+            self._editor_epochs[plugin] = self._editor_epochs.get(plugin, 0) + 1
+        if not plugin or plugin == self._editor_open:
+            self._editor_open = None
 
     def _request(self, cmd: str, timeout: float | None = None, **payload) -> dict:
         with self._lock:
@@ -391,6 +408,13 @@ class VstWorker:
                *, params: dict | None = None, preset: dict | None = None) -> np.ndarray:
         """渲染一个插件（events 用 ``events_from_notes`` 生成）→ mono float32。"""
         apath = str(Path(path).resolve())
+        if self._editor_open is not None:
+            # P62b（Q3）：编辑器打开中（用户交互中）——worker 主循环被窗口泵占住，
+            # 任何渲染都会排队憋死 → 一律秒拒（该实例与其他实例同理）；关窗后重试。
+            if self._editor_open == apath:
+                raise VstWorkerError("插件编辑器打开中（用户交互中）——关闭窗口后重试渲染")
+            raise VstWorkerError(
+                f"有插件编辑器打开中（{Path(self._editor_open).name}，用户交互中）——关闭窗口后重试渲染")
         if preset and preset.get("path"):
             pp = Path(str(preset["path"]))
             if not pp.is_absolute():
@@ -421,6 +445,33 @@ class VstWorker:
         st.update({"manager_pid": os.getpid(), "launcher_pid": self.pid,
                    "worker_pid": self._worker_pid, "restarts": self.restarts})
         return st
+
+    # ---------------- P62b：插件编辑器过桥 ----------------
+
+    def open_editor(self, path: str, sr: int = 44100) -> dict:
+        """打开插件编辑器窗口（worker 级单窗口；立即返回；关窗由事件清状态）。"""
+        apath = str(Path(path).resolve())
+        if self._editor_open is not None:
+            raise VstWorkerError(f"已有插件编辑器打开中：{self._editor_open}（单窗口——先关闭它）")
+        if apath not in self._loaded:
+            self.load(apath, sr=sr)
+        res = self._request("open_editor", timeout=LOAD_TIMEOUT, path=apath, sr=int(sr))
+        self._editor_open = apath
+        return res
+
+    @property
+    def editor_open_path(self) -> str | None:
+        """编辑器打开中的插件路径（worker 级；None=无）。"""
+        return self._editor_open
+
+    def wait_editor_closed(self, timeout: float = 600.0, poll: float = 0.25) -> bool:
+        """阻塞等到编辑器窗口关闭（供脚本/验收；超时返回 False）。"""
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < timeout:
+            if self._editor_open is None:
+                return True
+            time.sleep(poll)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -462,14 +513,49 @@ def shutdown_global() -> None:
 atexit.register(shutdown_global)
 
 
+def open_editor(plugin_path: str, sr: int = 44100) -> dict:
+    """打开插件编辑器窗口（P62b 过桥入口）——需常驻 worker；关窗后重渲恢复出声。"""
+    w = get_worker()
+    if w is None:
+        raise VstWorkerError("插件编辑器需要常驻 worker（当前 TSOV_VST_INPROC=1，不可用）")
+    return w.open_editor(plugin_path, sr=sr)
+
+
+def editor_status() -> dict:
+    """编辑器状态（轻量、**不拉起 worker**——前端轮询/诊断用）。"""
+    w = _GLOBAL
+    if w is None:
+        return {"open": False, "path": None, "worker_pid": None}
+    return {"open": w._editor_open is not None, "path": w._editor_open,
+            "worker_pid": w.worker_pid}
+
+
+def plugin_epoch(plugin_path: str) -> int:
+    """插件「编辑器代际」（P62b）：关窗一次 +1——供 stem 缓存键失效（解锁改变输出）。
+
+    轻量、**不拉起 worker**；无 worker / 未记录 → 0。
+    """
+    w = _GLOBAL
+    if w is None:
+        return 0
+    try:
+        apath = str(Path(plugin_path).resolve())
+    except (OSError, ValueError):
+        apath = str(plugin_path)
+    return int(w._editor_epochs.get(apath, 0))
+
+
 # ---------------------------------------------------------------------------
 # 子进程侧（python -m tsov.host.vst_worker --serve）
 # ---------------------------------------------------------------------------
 
 
 def _emit(obj: dict) -> None:
-    sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
-    sys.stdout.flush()
+    try:
+        sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
+        sys.stdout.flush()
+    except (OSError, ValueError):
+        pass   # 父管道已断（父进程亡）——静默；主循环随后由 EOF 自然退出
 
 
 class _ChildState:
@@ -481,6 +567,8 @@ class _ChildState:
         self._sr: int | None = None
         self._plugins: dict[str, dict] = {}
         self._seq = 0
+        self._editors_lock = threading.Lock()
+        self._editor_path: str | None = None   # P62b：打开中的编辑器插件路径（worker 级单窗口）
 
     def _ensure_engine(self, sr: int) -> None:
         if self._engine is None or self._sr != int(sr):
@@ -533,11 +621,14 @@ class _ChildState:
             return self._render(msg)
         if cmd == "params":
             return self._params(str(msg["path"]), int(msg.get("sr") or 44100))
+        if cmd == "open_editor":
+            return self._open_editor(msg)
         if cmd == "status":
             return {
                 "protocol": PROTOCOL,
                 "pid": os.getpid(),
                 "engine_sr": self._sr,
+                "editor": self._editor_path,
                 "plugins": [{"path": p, "latency": e["latency"]} for p, e in self._plugins.items()],
             }
         if cmd == "debug_sleep":  # 超时保护测试专用
@@ -575,10 +666,48 @@ class _ChildState:
             })
         return {"count": len(out), "params": out}
 
+    def _open_editor(self, msg: dict) -> dict:
+        """P62b：校验 + 占位（ack 后由 **_主循环** 在主线程调 ``proc.open_editor()``）。
+
+        源码依据（dawdreamer PluginProcessor.cpp）：窗口只能在 **消息主线程** 弹——
+        helper 线程调用会直接抛 "Plugin UI windows can only be shown from the main thread"。
+        故此处只做校验/占位；真正的阻塞弹出见 ``_editor_pump``。
+        """
+        path = str(msg["path"])
+        sr = int(msg.get("sr") or 44100)
+        self._ensure_engine(sr)
+        self._plugin(path)   # 预热/加载（加载失败在 ack 前抛出，主循环返回错误响应）
+        with self._editors_lock:
+            if self._editor_path is not None:
+                raise RuntimeError(f"已有插件编辑器打开中：{self._editor_path}（单窗口）")
+            self._editor_path = path
+        return {"opened": True, "path": path}
+
+    def _editor_pump(self, path: str) -> None:
+        """P62b：在主线程阻塞弹窗（``openWindowAndWait`` 语义——返回即关窗），随后发事件。"""
+        err: str | None = None
+        try:
+            ent = self._plugin(path)
+            ent["proc"].open_editor()   # 主线程；阻塞到用户关窗
+        except Exception as exc:  # noqa: BLE001 窗口异常不许杀 worker
+            err = f"{type(exc).__name__}: {exc}"
+        finally:
+            with self._editors_lock:
+                if self._editor_path == path:
+                    self._editor_path = None
+            if err:
+                _emit({"event": "editor_error", "plugin": path, "error": err})
+            _emit({"event": "editor_closed", "plugin": path})
+
     def _render(self, msg: dict) -> dict:
         path = str(msg["path"])
         sr = int(msg["sr"])
         n = int(msg["n"])
+        with self._editors_lock:
+            if self._editor_path is not None:
+                # P62b（Q3）：编辑器打开中（窗口泵占住主循环）——一律拒绝（关窗后重试）
+                raise RuntimeError(
+                    f"插件编辑器打开中（{self._editor_path}，用户交互中）——关窗后重试渲染")
         self._ensure_engine(sr)
         spec = msg.get("preset")
         params = msg.get("params") or {}
@@ -651,6 +780,9 @@ def _serve() -> int:
             _emit({"id": rid, "ok": False, "error": f"{type(exc).__name__}: {exc}"})
             continue
         _emit({"id": rid, "ok": True, "result": result})
+        if cmd == "open_editor":
+            # P62b：ack 已发 → 主线程阻塞弹窗（dawdreamer 硬要求消息主线程；返回=关窗）→ 事件。
+            st._editor_pump(str(result.get("path") or ""))
     return 0
 
 

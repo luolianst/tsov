@@ -82,3 +82,13 @@ def test_pre_export_check_zero_cost_without_vst3():
     p.score = score
     p.root = Path(".")
     assert _pre_export_silence_check(None, p) == []
+
+
+def test_editor_status_endpoint(env):
+    """P62b：编辑器状态端点（工程存在 + worker 未起 → open=False）。"""
+    root = env["dir"]
+    _mk_project(root, "p62-ed", _score_json(""))
+    r = env["client"].get("/api/projects/p62-ed/instrument/editor-status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body.get("open") is False and body.get("path") is None

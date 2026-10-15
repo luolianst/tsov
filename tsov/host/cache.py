@@ -41,11 +41,28 @@ def _code_fingerprint() -> str:
 CODE_FP = _code_fingerprint()   # 模块加载时计算一次
 
 
+def _vst_plugin_epoch(program: str) -> int:
+    """P62b：vst3 轨 → 插件的「编辑器代际」（解锁可能改变渲染输出 → 缓存键失效）。
+
+    轻量（不拉起 worker）；非 vst3 / 无 worker → 0。
+    """
+    if not program.startswith("vst3:"):
+        return 0
+    try:
+        from .vst_worker import plugin_epoch
+
+        return int(plugin_epoch(program[len("vst3:"):]))
+    except Exception:  # noqa: BLE001 —— 缓存键永不因诊断面异常而炸
+        return 0
+
+
 def track_key(track, samplerate: int) -> str:
     """轨道内容指纹（ADR-0018）：只含影响「音源+效果」输出的字段。
 
     批L L1-6 增补：**VST3 音源的 `params` / `preset` 入键**——改参/换预设必须失效重渲，
     否则 freeze 缓存会静默回放旧音色。
+    P62b 增补：**插件编辑器代际（instance）入键**——过桥解锁（关窗）后必须失效重渲，
+    否则会命中断桥前的静默 stem（假静音）。
     """
     inst = track.instrument
     payload = {
@@ -54,6 +71,7 @@ def track_key(track, samplerate: int) -> str:
         "sr": int(samplerate),
         "backend": str(inst.backend),
         "program": str(inst.program),
+        "instance": _vst_plugin_epoch(str(inst.program)),
         "params": {str(k): v for k, v in dict(inst.params or {}).items()},
         "preset": (dict(inst.preset) if inst.preset else None),
         "effects": [e.to_dict() if hasattr(e, "to_dict") else dict(e) for e in (inst.effects or [])],

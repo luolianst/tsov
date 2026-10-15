@@ -23,6 +23,7 @@ NEW_TOOLS = {
     "set_track_mix", "remove_track", "rename_track", "apply_effect", "apply_pattern",
     "analyze_levels", "export_audio", "export_midi",
     "read_text",
+    "open_instrument_editor",   # P62b：插件编辑器过桥
 }
 
 

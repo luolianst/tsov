@@ -1,7 +1,9 @@
 /* warnings.js —— P62a（10-14）：插件静音警告卡（渲染响应 / 导出拦截共用）。
    段2（P62b）接线：「打开插件界面」按钮 → open_instrument_editor 命令 + 关窗自动重渲。 */
 import { t } from './i18n.js';
-import { store } from './state.js';
+import { store, toast } from './state.js';
+import { api } from './api.js';
+import { bus } from './events.js';
 
 let el = null;
 
@@ -43,8 +45,8 @@ function render() {
   const bOpen = document.createElement('button');
   bOpen.id = 'warn-open';
   bOpen.textContent = t('打开插件界面');
-  bOpen.disabled = true;   /* P62b 接线 */
-  bOpen.title = t('段2（P62b）接线后可用');
+  bOpen.disabled = !ws.some((w) => typeof w.track === 'number');
+  bOpen.title = t('打开该轨的插件界面；完成交互后关窗自动重渲');
   const bClose = document.createElement('button');
   bClose.id = 'warn-close';
   bClose.textContent = t('忽略');
@@ -53,11 +55,46 @@ function render() {
   el.appendChild(ft);
 }
 
+/* ---- P62b：打开插件界面 + 关窗自动重渲 ---- */
+
+let watchTimer = 0;
+
+async function openEditorFor(ws) {
+  const w = ws.find((x) => typeof x.track === 'number');
+  if (!w || !store.project) return;
+  startEditorWatch();   /* 先起监视——防「打开即失败关窗」的瞬时事件被漏掉 */
+  try {
+    await api.postBatch(store.project, t('打开插件界面'),
+      [{ op: 'open_instrument_editor', track: w.track }], null);
+    toast(t('插件界面已打开 —— 完成界面操作后关闭窗口，将自动重渲'));
+  } catch (e) {
+    clearInterval(watchTimer);
+    toast(t('打开插件界面失败：') + e.message);
+  }
+}
+
+function startEditorWatch() {
+  clearInterval(watchTimer);
+  const t0 = Date.now();
+  watchTimer = setInterval(async () => {
+    if (!store.project || Date.now() - t0 > 15 * 60 * 1000) { clearInterval(watchTimer); return; }
+    try {
+      const r = await api.editorStatus(store.project);
+      if (!r.open) {
+        clearInterval(watchTimer);
+        bus.dispatch('editor_closed', {});   /* playback.js 监听 → 自动重渲 */
+      }
+    } catch (e) { /* 静默重试（服务重启等瞬时） */ }
+  }, 1500);
+}
+
 export function initWarnings(root) {
   el = root;
   if (!el) return;
   el.addEventListener('click', (e) => {
-    if (e.target && e.target.id === 'warn-close') clearWarnings();
+    const id = e.target && e.target.id;
+    if (id === 'warn-close') clearWarnings();
+    if (id === 'warn-open') openEditorFor(store.warnings || []);
   });
   render();
 }

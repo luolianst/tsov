@@ -329,6 +329,7 @@ export function init(opts) {
     setMetronome(!store.metronome);
     toast(store.metronome ? t('节拍器开') : t('节拍器关'));
   });
+  bus.on('editor_closed', () => { rerender(); });   /* P62b：插件界面关闭 → 自动重渲 */
   bus.on('markers', () => {
     if (loopBtn) loopBtn.classList.toggle('on', store.loopOn);
     if (metroBtn) metroBtn.classList.toggle('on', store.metronome);
