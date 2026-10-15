@@ -1078,4 +1078,5 @@ export const EN = {
   '打开该轨的插件界面；完成交互后关窗自动重渲': 'Open this track\'s plugin editor; close it after the interaction to auto re-render',
   '插件界面已打开 —— 完成界面操作后关闭窗口，将自动重渲': 'Plugin editor opened — close the window after the interaction to auto re-render',
   '打开插件界面失败：': 'Failed to open plugin editor: ',
+  '已有插件界面打开中 —— 请先完成该窗口的操作并关闭（一次只能开一个）': 'A plugin editor is already open — finish and close it first (one at a time)',
 };

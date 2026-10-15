@@ -59,6 +59,15 @@ function render() {
 
 let watchTimer = 0;
 
+/* 评审轮 C1 修复（2026-10-15）：① 监视表以「打开请求是否已落定」为门控——
+   加载期（重插件冷加载 >1.5s）服务端 editor-status 仍报 open=false，旧实现据此
+   误判「已关」：多一次空重渲 + 清表后真关窗不再自动重渲。落定后才允许把
+   open=false 判为关窗（仍覆盖「打开即关」的瞬时场景）。② 命令层拒绝不 reject
+   （/batch 对 applied=0 返 HTTP 200）——旧 catch 为死代码；改用 applied 判定，
+   被拒时按服务端实况分流：有窗（单窗锁）→ 保留监视并改提示；无窗 → 停表报错，
+   防一次空重渲。
+   证据：output/v02-p62b-c1-2026-10-15/（慢加载仿真 正/负双跑）。 */
+
 async function openEditorFor(ws) {
   const w = ws.find((x) => typeof x.track === 'number');
   if (!w) return;
@@ -68,26 +77,46 @@ async function openEditorFor(ws) {
 /* P62b-5a（c+）：常驻开窗入口（警告卡与轨道面板共用这一个动作路径） */
 export async function openPluginEditor(trackIndex) {
   if (typeof trackIndex !== 'number' || !store.project) return;
-  startEditorWatch();   /* 先起监视——防「打开即失败关窗」的瞬时事件被漏掉 */
+  let settled = false;   /* 本次打开请求已落定（成功/失败都算） */
+  startEditorWatch(() => settled);
+  let ok = false;
+  let errMsg = '';
   try {
-    await api.postBatch(store.project, t('打开插件界面'),
+    const r = await api.postBatch(store.project, t('打开插件界面'),
       [{ op: 'open_instrument_editor', track: trackIndex }], null);
-    toast(t('插件界面已打开 —— 完成界面操作后关闭窗口，将自动重渲'));
+    ok = !!(r && r.applied > 0);   /* 命令层拒绝 = HTTP 200 + applied:0（不 reject） */
+    if (!ok && r && Array.isArray(r.errors) && r.errors.length) errMsg = String(r.errors[0]);
   } catch (e) {
-    clearInterval(watchTimer);
-    toast(t('打开插件界面失败：') + e.message);
+    errMsg = (e && e.message) || String(e);
   }
+  settled = true;
+  if (ok) {
+    toast(t('插件界面已打开 —— 完成界面操作后关闭窗口，将自动重渲'));
+    return;
+  }
+  /* 未开成：按服务端实况分流——有窗（单窗锁拒）→ 保留监视；无窗 → 停表报错 */
+  let open = false;
+  try { open = !!(await api.editorStatus(store.project)).open; } catch (e) { /* 查不到按失败处理 */ }
+  if (open) {
+    toast(t('已有插件界面打开中 —— 请先完成该窗口的操作并关闭（一次只能开一个）'));
+    return;
+  }
+  stopEditorWatch();
+  toast(t('打开插件界面失败：') + errMsg);
 }
 
-function startEditorWatch() {
-  clearInterval(watchTimer);
+function stopEditorWatch() { clearInterval(watchTimer); watchTimer = 0; }
+
+function startEditorWatch(isSettled) {
+  stopEditorWatch();
   const t0 = Date.now();
   watchTimer = setInterval(async () => {
-    if (!store.project || Date.now() - t0 > 15 * 60 * 1000) { clearInterval(watchTimer); return; }
+    if (!store.project || Date.now() - t0 > 15 * 60 * 1000) { stopEditorWatch(); return; }
     try {
       const r = await api.editorStatus(store.project);
+      if (!isSettled()) return;   /* C1：落定前 open=false 是「加载中」正常态，不得判关窗 */
       if (!r.open) {
-        clearInterval(watchTimer);
+        stopEditorWatch();
         bus.dispatch('editor_closed', {});   /* playback.js 监听 → 自动重渲 */
       }
     } catch (e) { /* 静默重试（服务重启等瞬时） */ }
