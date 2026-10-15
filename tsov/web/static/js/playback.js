@@ -6,7 +6,7 @@ import { t } from './i18n.js';
 import { api } from './api.js';
 import { bus } from './events.js';
 import { store, setPlayhead, setPlaying, setLoopOn, setMetronome, toast, setError, setMeter } from './state.js';
-import { showWarnings } from './warnings.js';
+import { isEditorWatchActive, showWarnings } from './warnings.js';
 
 let audio = null;        // <audio> wav 试听
 let rafId = 0;
@@ -212,6 +212,14 @@ export function rewind() {
 
 export async function playWav() {
   if (!store.project) { setError(t('先打开一个工程')); return; }
+  /* P62b-6（Ⓐ）：播放前提示（不阻断）——① 插件界面打开中（试听的是关窗前的旧渲染）；
+     ② 已知静音警告未处理（复显警告卡 + 提示）。 */
+  if (isEditorWatchActive()) {
+    toast(t('插件界面打开中——关闭窗口将自动重渲，重渲后即可试听最新声音'));
+  } else if (store.warnings && store.warnings.length) {
+    showWarnings(store.warnings);
+    toast(t('试听可能无声：存在未处理的插件静音警告（见卡片）'));
+  }
   ensureMeter();                    // E5：在用户手势内建 AudioContext（autoplay 政策友好）
   const a = ensureAudio();
   const gen = ++playGen;            // E1：本次起播代际（stop/新起播会作废）
@@ -274,14 +282,18 @@ export async function playHost() {
   }
 }
 
-export async function rerender() {
-  if (!store.project) return;
+export async function rerender(opts = {}) {
+  if (!store.project) return false;
   try {
     const r = await api.render(store.project);
     toast(t('已渲染：') + r.wav + t('（') + r.duration + 's / ' + r.sr + t('Hz）'));
     showWarnings(r.warnings || []);   /* P62a：插件静音体检结果 → 警告卡 */
     if (audio) audio.src = api.wavUrl(store.project) + '?v=' + Date.now();
-  } catch (e) { setError(e.message); }
+    if (opts && opts.autoPlay === true) {
+      await playWav();                /* P62b-6（Ⓑ）：关窗自动重渲后自动试听 */
+    }
+    return true;
+  } catch (e) { setError(e.message); return false; }
 }
 
 /* M-V7 D1（ADR-0018）：松手即听——手势落盘后自动重拼混音（缓存命中为亚秒级），播放中位置保持续播 */
@@ -329,7 +341,7 @@ export function init(opts) {
     setMetronome(!store.metronome);
     toast(store.metronome ? t('节拍器开') : t('节拍器关'));
   });
-  bus.on('editor_closed', () => { rerender(); });   /* P62b：插件界面关闭 → 自动重渲 */
+  bus.on('editor_closed', () => { rerender({ autoPlay: true }); });   /* P62b：插件界面关闭 → 自动重渲；P62b-6（Ⓑ）：成功后自动试听 */
   bus.on('markers', () => {
     if (loopBtn) loopBtn.classList.toggle('on', store.loopOn);
     if (metroBtn) metroBtn.classList.toggle('on', store.metronome);

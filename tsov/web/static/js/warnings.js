@@ -91,7 +91,7 @@ export async function openPluginEditor(trackIndex) {
   }
   settled = true;
   if (ok) {
-    toast(t('插件界面已打开 —— 完成界面操作后关闭窗口，将自动重渲'));
+    toast(t('插件界面已打开 —— 完成界面内操作（如点 START / 解锁）后关闭窗口：自动重渲后即可试听最新声音'));
     return;
   }
   /* 未开成：按服务端实况分流——有窗（单窗锁拒）→ 保留监视；无窗 → 停表报错 */
@@ -106,6 +106,9 @@ export async function openPluginEditor(trackIndex) {
 }
 
 function stopEditorWatch() { clearInterval(watchTimer); watchTimer = 0; }
+
+/* P62b-6（Ⓐ）：编辑器监视是否活跃（playback.js 播放提示用）。 */
+export function isEditorWatchActive() { return watchTimer !== 0; }
 
 function startEditorWatch(isSettled) {
   stopEditorWatch();

@@ -1076,7 +1076,9 @@ export const EN = {
   '强制导出（跳过插件静音拦截）': 'Force export (skip plugin silence gate)',
   /* P62b（10-14）：插件界面过桥 / 关窗自动重渲 */
   '打开该轨的插件界面；完成交互后关窗自动重渲': 'Open this track\'s plugin editor; close it after the interaction to auto re-render',
-  '插件界面已打开 —— 完成界面操作后关闭窗口，将自动重渲': 'Plugin editor opened — close the window after the interaction to auto re-render',
+  '插件界面已打开 —— 完成界面内操作（如点 START / 解锁）后关闭窗口：自动重渲后即可试听最新声音': 'Plugin editor opened — finish in-window actions (e.g. START / unlock), then close the window; playback updates after auto re-render',
+  '插件界面打开中——关闭窗口将自动重渲，重渲后即可试听最新声音': 'Plugin editor is open — close the window to auto re-render; playback updates right after',
+  '试听可能无声：存在未处理的插件静音警告（见卡片）': 'Playback may be silent — unhandled plugin silence warning(s) are active (see the card)',
   '打开插件界面失败：': 'Failed to open plugin editor: ',
   '已有插件界面打开中 —— 请先完成该窗口的操作并关闭（一次只能开一个）': 'A plugin editor is already open — finish and close it first (one at a time)',
 };
