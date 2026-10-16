@@ -405,10 +405,11 @@ def tool_analyze_levels(args: dict) -> str:
     from ..host import HostEngine
     from ..host.mix import render_buses
 
-    score = _load(args["score_path"])
-    win = float(args.get("window_sec", 4.0))
     engine = HostEngine()
-    session = engine.load(score)
+    session = engine.load_score(args["score_path"])  # base_dir=score 所在目录（工程根）——
+    # 工程内相对路径（音频轨文件 / VST3 preset）须按工程根解析；裸 load(score) 会落到 CWD（假 File-not-found）
+    score = session.score
+    win = float(args.get("window_sec", 4.0))
     any_solo = any(bool(getattr(t, "solo", False)) for t in score.tracks)
     solo_names = [f"track[{i}] {t.name}" for i, t in enumerate(score.tracks) if bool(getattr(t, "solo", False))]
     try:

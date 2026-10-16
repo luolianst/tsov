@@ -258,6 +258,27 @@ def test_analyze_levels_exclusion_messages(tmp_path):
     assert "mute 静音" in line0b
 
 
+def test_analyze_levels_passes_score_dir_as_base_dir(tmp_path, monkeypatch):
+    """回归（2026-10-16）：analyze_levels 须以 score 所在目录为 base_dir。
+
+    历史 bug：裸 `engine.load(score)`（无 base_dir）→ 工程内相对路径（音频轨文件 / VST3 preset）
+    按 CWD 解析（MCP 面 CWD = 仓库根）→ 假 File-not-found；修 = `engine.load_score(score_path)`。
+    """
+    from tsov.host import HostEngine
+
+    sp = _save_score(tmp_path / "score.json", _base([_melody()]))
+    captured: dict = {}
+
+    def fake_load(self, score, base_dir=None):
+        captured["base_dir"] = base_dir
+        raise RuntimeError("STOP-AT-LOAD")
+
+    monkeypatch.setattr(HostEngine, "load", fake_load)
+    with pytest.raises(RuntimeError, match="STOP-AT-LOAD"):
+        tc.tool_analyze_levels({"score_path": str(sp)})
+    assert captured["base_dir"] == sp.parent
+
+
 @pytest.mark.skipif(not SF2.exists() or not shutil.which("ffmpeg"), reason="缺 SoundFont 或 ffmpeg")
 def test_export_audio_mp3(tmp_path):
     sp = _save_score(tmp_path / "score.json", _base([_melody()]))
