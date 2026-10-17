@@ -6,8 +6,16 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <string>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace
 {
@@ -279,20 +287,46 @@ int runPluginEditor(const juce::String& pluginPath,
     window.setVisible(true);
     window.toFront(true);
 
-    juce::MessageManager::getInstance()->runDispatchLoopUntil((int) std::lround(durationSeconds * 1000.0));
+    int64_t frames = 0;
+    int callbacks = 0;
+    int xruns = 0;
+    int latency = 0;
+    float peak = 0.0f;
+    juce::String pluginName;
+    juce::String deviceName;
+    double actualRate = 0.0;
+    int actualBlock = 0;
 
-    const auto frames = engine.framesRendered();
-    const auto callbacks = engine.callbackCount();
-    const auto xruns = engine.xrunCount();
-    const auto latency = engine.outputLatencySamples();
-    const auto peak = engine.pluginPeak();
-    const auto pluginName = engine.pluginName();
-    const auto deviceName = engine.deviceName();
-    const auto actualRate = engine.sampleRate();
-    const auto actualBlock = engine.blockSize();
-    engine.close();
-    window.setVisible(false);
-    window.clearContentComponent();
+    // Tear the editor/plugin down while the message loop is still running:
+    // Kontakt 8's destructor needs the message thread; doing it after
+    // stopDispatchLoop() hangs the process (P78).
+    juce::Timer::callAfterDelay((int) std::lround(durationSeconds * 1000.0), [&]
+    {
+        window.setVisible(false);
+        window.clearContentComponent();
+
+        frames = engine.framesRendered();
+        callbacks = engine.callbackCount();
+        xruns = engine.xrunCount();
+        latency = engine.outputLatencySamples();
+        peak = engine.pluginPeak();
+        pluginName = engine.pluginName();
+        deviceName = engine.deviceName();
+        actualRate = engine.sampleRate();
+        actualBlock = engine.blockSize();
+
+        engine.close();
+        engine.setPlugin(nullptr);
+        juce::MessageManager::getInstance()->stopDispatchLoop();
+    });
+
+    juce::MessageManager::getInstance()->runDispatchLoop();
+
+    if (window.getContentComponent() != nullptr)
+    {
+        window.setVisible(false);
+        window.clearContentComponent();
+    }
 
     line("mode=plugin-editor");
     line("plugin=" + pluginName);
@@ -305,6 +339,15 @@ int runPluginEditor(const juce::String& pluginPath,
     line("output_latency_samples=" + juce::String(latency));
     line("plugin_peak=" + juce::String(peak, 6));
     line("editor=ok");
+    std::cout.flush();
+    // Kontakt 8 blocks in ExitProcess/DLL detach after the editor closes.
+    // The device and plugin are already released above; terminate the process
+    // without running DLL detach so --plugin-editor can be scripted (P78).
+#if defined(_WIN32)
+    ::TerminateProcess(::GetCurrentProcess(), 0);
+#else
+    std::_Exit(0);
+#endif
     return 0;
 }
 
