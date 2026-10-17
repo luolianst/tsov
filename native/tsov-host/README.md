@@ -32,6 +32,7 @@ native/tsov-host/build/bin/Release/tsov-host.exe --mix-test "vendor/vst3/Dexed.v
 native/tsov-host/build/bin/Release/tsov-host.exe --plugin-editor "C:/Program Files/Common Files/VST3/SSDSampler5.vst3" --device "GP-50" --device-type "Exclusive" --duration 120 --note 36 --state "output/ssd5-free.state"
 native/tsov-host/build/bin/Release/tsov-host.exe --plugin-live "C:/Program Files/Common Files/VST3/SSDSampler5.vst3" --device "GP-50" --device-type "Exclusive" --duration 3 --note 36 --state "output/ssd5-free.state"
 native/tsov-host/build/bin/Release/tsov-host.exe --plugin-live "C:/Program Files/Common Files/VST3/Kontakt 8.vst3" --device "GP-50" --device-type "Exclusive" --duration 3 --note 60 --state "output/kontakt-factory.state"
+native/tsov-host/build/bin/Release/tsov-host.exe --mix-manifest "output/mix-kontakt-ssd5-surge.json" --device "GP-50" --device-type "Exclusive" --duration 3
 native/tsov-host/build/bin/Release/tsov-host.exe --version
 ```
 
@@ -40,6 +41,7 @@ native/tsov-host/build/bin/Release/tsov-host.exe --version
 ## 多轨与监听
 
 - `MixEngine` 已支持 N 轨 VST3、每轨 gain/pan/mute、采样级 MIDI 事件、master 总线；`--mix-test` 用同一插件起多实例验证。
+- `--mix-manifest <tracks.json>`：每轨独立 `plugin` / `state` / `gain` / `pan` / `note`；实测 Kontakt + SSD5 两轨、再加 Surge XT 三轨均 **0 xrun**，各轨 peak 独立。
 - 监听/录音输入请用 **Windows Audio（共享）**：GP-50 在 Exclusive 下「输入+输出」同时开会周期性 xrun（实测 10s 24 次）；共享模式 10s 仅 1 次。纯播放仍用 Exclusive。
 - 输入峰值见 `input_peak`；无输入信号时为 0 属正常。
 

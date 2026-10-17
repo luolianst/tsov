@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -22,6 +23,91 @@ namespace
 void line(const juce::String& text)
 {
     std::cout << text << std::endl;
+}
+
+struct MixTrackSpec
+{
+    juce::String name;
+    juce::String plugin;
+    juce::String state;
+    double gain = 0.55;
+    double pan = 0.0;
+    int note = 60;
+};
+
+juce::File resolveMixPath(const juce::File& base, const juce::String& path, bool fileOnly)
+{
+    if (path.isEmpty())
+        return {};
+    juce::File direct(path);
+    const auto exists = fileOnly ? direct.existsAsFile() : direct.exists();
+    if (juce::File::isAbsolutePath(path) || exists)
+        return direct;
+    auto relative = base.getChildFile(path);
+    if (fileOnly ? relative.existsAsFile() : relative.exists())
+        return relative;
+    return direct;
+}
+
+bool loadMixManifest(const juce::File& file,
+                     std::vector<MixTrackSpec>& specs,
+                     juce::String& error)
+{
+    if (! file.existsAsFile())
+    {
+        error = "manifest not found: " + file.getFullPathName();
+        return false;
+    }
+
+    const auto parsed = juce::JSON::parse(file.loadFileAsString());
+    auto* array = parsed.getArray();
+    if (array == nullptr)
+    {
+        error = "manifest must be a JSON array";
+        return false;
+    }
+
+    const auto base = file.getParentDirectory();
+    int index = 0;
+    for (const auto& item : *array)
+    {
+        auto* object = item.getDynamicObject();
+        if (object == nullptr)
+        {
+            error = "manifest item " + juce::String(index) + " is not an object";
+            return false;
+        }
+
+        MixTrackSpec spec;
+        spec.plugin = resolveMixPath(base, object->getProperty("plugin").toString(), false).getFullPathName();
+        if (spec.plugin.isEmpty())
+        {
+            error = "manifest item " + juce::String(index) + " has no plugin";
+            return false;
+        }
+        spec.name = object->getProperty("name").toString();
+        if (spec.name.isEmpty())
+            spec.name = "track-" + juce::String(index + 1);
+        spec.state = resolveMixPath(base, object->getProperty("state").toString(), true).getFullPathName();
+        if (object->hasProperty("gain"))
+            spec.gain = (double) object->getProperty("gain");
+        if (object->hasProperty("pan"))
+            spec.pan = (double) object->getProperty("pan");
+        if (object->hasProperty("note"))
+            spec.note = (int) object->getProperty("note");
+        spec.gain = juce::jlimit(0.0, 2.0, spec.gain);
+        spec.pan = juce::jlimit(-1.0, 1.0, spec.pan);
+        spec.note = juce::jlimit(0, 127, spec.note);
+        specs.push_back(std::move(spec));
+        ++index;
+    }
+
+    if (specs.empty())
+    {
+        error = "manifest has no tracks";
+        return false;
+    }
+    return true;
 }
 
 juce::String juceVersion()
@@ -69,6 +155,7 @@ void printUsage()
     line("  tsov-host --plugin-live <path.vst3> [--device <name|null>] [--duration <sec>] [--note <midi>] [--state <file>]");
     line("  tsov-host --plugin-editor <path.vst3> [--device <name>] [--duration <sec>] [--note <midi>] [--state <file>]");
     line("  tsov-host --mix-test <path.vst3> [--tracks <n>] [--mix-gain <g>] [--device <name|null>] [--monitor] [--record <out.wav>]");
+    line("  tsov-host --mix-manifest <tracks.json> [--device <name|null>] [--duration <sec>]");
     line("  tsov-host --version");
     line("  tsov-host --help");
 }
@@ -392,6 +479,7 @@ int runMixEngine(bool nullDevice,
                  const juce::String& deviceSubstring,
                  const juce::String& deviceTypeSubstring,
                  const juce::String& pluginPath,
+                 const juce::String& manifestPath,
                  double durationSeconds,
                  double sampleRate,
                  int blockSize,
@@ -412,23 +500,58 @@ int runMixEngine(bool nullDevice,
     config.monitorInput = monitorInput;
 
     const auto trackCount = juce::jlimit(1, 16, requestedTracks);
-    for (int i = 0; i < trackCount; ++i)
+
+    std::vector<MixTrackSpec> specs;
+    if (manifestPath.isNotEmpty())
+    {
+        juce::String manifestError;
+        if (! loadMixManifest(juce::File(manifestPath), specs, manifestError))
+        {
+            std::cerr << "manifest load failed: " << manifestError << std::endl;
+            return 6;
+        }
+        if (specs.size() > 16)
+        {
+            std::cerr << "manifest has too many tracks (max 16)" << std::endl;
+            return 6;
+        }
+    }
+    else
+    {
+        for (int i = 0; i < trackCount; ++i)
+        {
+            MixTrackSpec spec;
+            spec.name = "track-" + juce::String(i + 1);
+            spec.plugin = pluginPath;
+            spec.gain = juce::jlimit(0.0, 2.0, trackGain);
+            spec.pan = i == 0 ? -0.35 : (i == 1 ? 0.35 : 0.0);
+            spec.note = 60 + i * 4;
+            specs.push_back(std::move(spec));
+        }
+    }
+
+    for (size_t i = 0; i < specs.size(); ++i)
     {
         juce::String pluginError;
-        auto instance = tsov::PluginHost::create(pluginPath, sampleRate, blockSize, pluginError);
+        auto instance = tsov::PluginHost::create(specs[i].plugin, sampleRate, blockSize, pluginError);
         if (instance == nullptr)
         {
             std::cerr << "track " << i << " plugin load failed: " << pluginError << std::endl;
             return 4;
         }
-        const auto name = "track-" + juce::String(i + 1);
-        const auto pan = i == 0 ? -0.35f : (i == 1 ? 0.35f : 0.0f);
-        if (engine.addTrack(std::move(instance), name, (float) juce::jlimit(0.0, 2.0, trackGain), pan, i * 4, true) < 0)
+        if (specs[i].state.isNotEmpty())
+        {
+            juce::String stateError;
+            if (! tsov::PluginHost::loadState(*instance, juce::File(specs[i].state), stateError))
+                std::cerr << "track " << i << " state load failed: " << stateError << std::endl;
+        }
+        if (engine.addTrack(std::move(instance), specs[i].name, (float) specs[i].gain, (float) specs[i].pan, specs[i].note - 60, true) < 0)
         {
             std::cerr << "addTrack failed at " << i << std::endl;
             return 5;
         }
     }
+    const auto actualTrackCount = (int) specs.size();
     engine.play();
 
     if (nullDevice)
@@ -491,7 +614,7 @@ int runMixEngine(bool nullDevice,
     line("device_type=" + typeName);
     line("sample_rate=" + juce::String(actualRate));
     line("block_size=" + juce::String(actualBlock));
-    line("tracks=" + juce::String(trackCount));
+    line("tracks=" + juce::String(actualTrackCount));
     line("frames=" + juce::String((juce::int64) frames));
     line("callbacks=" + juce::String(callbacks));
     line("xruns=" + juce::String(xruns));
@@ -506,8 +629,11 @@ int runMixEngine(bool nullDevice,
         line("record_dropouts=" + juce::String(recordDropouts));
         line("record_bytes=" + juce::String((juce::int64) recordBytes));
     }
-    for (int i = 0; i < trackCount; ++i)
+    for (int i = 0; i < actualTrackCount; ++i)
+    {
+        line("track[" + juce::String(i) + "].name=" + engine.trackInfo(i).name);
         line("track[" + juce::String(i) + "].peak=" + juce::String(engine.trackPeak(i), 6));
+    }
     line("mix=ok");
     return 0;
 }
@@ -524,6 +650,7 @@ int main(int argc, char** argv)
     juce::String pluginLivePath;
     juce::String pluginEditorPath;
     juce::String mixTestPath;
+    juce::String mixManifestPath;
     juce::String recordPath;
     juce::String statePath;
     int mixTracks = 2;
@@ -555,6 +682,7 @@ int main(int argc, char** argv)
             pluginEditorPath = juce::String(argv[++i]);
         else if (arg == "--mix-test" && i + 1 < argc)
             mixTestPath = juce::String(argv[++i]);
+        else if (arg == "--mix-manifest" && i + 1 < argc) mixManifestPath = juce::String(argv[++i]);
         else if (arg == "--record" && i + 1 < argc) recordPath = juce::String(argv[++i]);
         else if (arg == "--state" && i + 1 < argc) statePath = juce::String(argv[++i]);
         else if (arg == "--tracks" && i + 1 < argc) mixTracks = std::stoi(argv[++i]);
@@ -607,8 +735,8 @@ int main(int argc, char** argv)
         return testPlugin(pluginTestPath, sampleRate, blockSize);
     if (pluginEditorPath.isNotEmpty())
         return runPluginEditor(pluginEditorPath, deviceSubstring, deviceTypeSubstring, duration, sampleRate, blockSize, testNote, statePath);
-    if (mixTestPath.isNotEmpty())
-        return runMixEngine(nullDevice, deviceSubstring, deviceTypeSubstring, mixTestPath, duration, sampleRate, blockSize, mixTracks, monitorInput, recordPath, mixGain);
+    if (mixTestPath.isNotEmpty() || mixManifestPath.isNotEmpty())
+        return runMixEngine(nullDevice, deviceSubstring, deviceTypeSubstring, mixTestPath, mixManifestPath, duration, sampleRate, blockSize, mixTracks, monitorInput, recordPath, mixGain);
     if (run)
         return runEngine(nullDevice, deviceSubstring, deviceTypeSubstring, pluginLivePath, duration, toneHz, gain, sampleRate, blockSize, testNote, statePath);
 
