@@ -1,4 +1,5 @@
 #include "AudioEngine.h"
+#include "MixEngine.h"
 #include "PluginHost.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -59,6 +60,7 @@ void printUsage()
     line("  tsov-host --plugin-test <path.vst3> [--sample-rate <Hz>] [--block-size <frames>]");
     line("  tsov-host --plugin-live <path.vst3> [--device <name|null>] [--duration <sec>]");
     line("  tsov-host --plugin-editor <path.vst3> [--device <name>] [--duration <sec>]");
+    line("  tsov-host --mix-test <path.vst3> [--tracks <n>] [--mix-gain <g>] [--device <name|null>] [--monitor] [--record <out.wav>]");
     line("  tsov-host --version");
     line("  tsov-host --help");
 }
@@ -305,6 +307,130 @@ int runPluginEditor(const juce::String& pluginPath,
     line("editor=ok");
     return 0;
 }
+
+int runMixEngine(bool nullDevice,
+                 const juce::String& deviceSubstring,
+                 const juce::String& deviceTypeSubstring,
+                 const juce::String& pluginPath,
+                 double durationSeconds,
+                 double sampleRate,
+                 int blockSize,
+                 int requestedTracks,
+                 bool monitorInput,
+                 const juce::String& recordPath,
+                 double trackGain)
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+
+    tsov::MixEngine engine;
+    tsov::MixEngine::Config config;
+    config.deviceSubstring = deviceSubstring;
+    config.deviceTypeSubstring = deviceTypeSubstring;
+    config.sampleRate = sampleRate;
+    config.blockSize = blockSize;
+    config.inputChannels = (monitorInput || recordPath.isNotEmpty()) ? 2 : 0;
+    config.monitorInput = monitorInput;
+
+    const auto trackCount = juce::jlimit(1, 16, requestedTracks);
+    for (int i = 0; i < trackCount; ++i)
+    {
+        juce::String pluginError;
+        auto instance = tsov::PluginHost::create(pluginPath, sampleRate, blockSize, pluginError);
+        if (instance == nullptr)
+        {
+            std::cerr << "track " << i << " plugin load failed: " << pluginError << std::endl;
+            return 4;
+        }
+        const auto name = "track-" + juce::String(i + 1);
+        const auto pan = i == 0 ? -0.35f : (i == 1 ? 0.35f : 0.0f);
+        if (engine.addTrack(std::move(instance), name, (float) juce::jlimit(0.0, 2.0, trackGain), pan, i * 4, true) < 0)
+        {
+            std::cerr << "addTrack failed at " << i << std::endl;
+            return 5;
+        }
+    }
+    engine.play();
+
+    if (nullDevice)
+    {
+        const auto blocks = (int) std::lround(durationSeconds * sampleRate / blockSize);
+        engine.runNull(blocks);
+        line("mode=mix-null");
+        line("tracks=" + juce::String(engine.trackCount()));
+        line("frames=" + juce::String((juce::int64) engine.framesRendered()));
+        line("callbacks=" + juce::String(engine.callbackCount()));
+        line("master_peak=" + juce::String(engine.masterPeak(), 6));
+        for (int i = 0; i < engine.trackCount(); ++i)
+        {
+            const auto info = engine.trackInfo(i);
+            line("track[" + juce::String(i) + "].name=" + info.name);
+            line("track[" + juce::String(i) + "].notes=" + juce::String(info.noteCount));
+            line("track[" + juce::String(i) + "].peak=" + juce::String(engine.trackPeak(i), 6));
+        }
+        line("mix=ok");
+        return 0;
+    }
+
+    juce::String error;
+    if (! engine.open(config, error))
+    {
+        std::cerr << "open failed: " << error << std::endl;
+        return 3;
+    }
+    if (error.isNotEmpty())
+        std::cerr << "warning: " << error << std::endl;
+
+    juce::String recordError;
+    if (recordPath.isNotEmpty())
+    {
+        if (! engine.startRecording(juce::File(recordPath), 2, recordError))
+            std::cerr << "record start failed: " << recordError << std::endl;
+    }
+
+    const auto actualRate = engine.sampleRate();
+    const auto actualBlock = engine.blockSize();
+    const auto name = engine.deviceName();
+    const auto typeName = engine.deviceTypeName();
+    const auto latency = engine.outputLatencySamples();
+    juce::Thread::sleep((int) std::lround(durationSeconds * 1000.0));
+
+    const auto frames = engine.framesRendered();
+    const auto callbacks = engine.callbackCount();
+    const auto xruns = engine.xrunCount();
+    const auto masterPeak = engine.masterPeak();
+    const auto inputPeak = engine.inputPeak();
+    const auto playhead = engine.playheadSamples();
+    const auto recordedFrames = engine.recordedFrames();
+    const auto recordDropouts = engine.recordingDropouts();
+    engine.stopRecording();
+    engine.close();
+    const auto recordBytes = recordPath.isNotEmpty() ? juce::File(recordPath).getSize() : (juce::int64) 0;
+
+    line("mode=mix");
+    line("device=" + name);
+    line("device_type=" + typeName);
+    line("sample_rate=" + juce::String(actualRate));
+    line("block_size=" + juce::String(actualBlock));
+    line("tracks=" + juce::String(trackCount));
+    line("frames=" + juce::String((juce::int64) frames));
+    line("callbacks=" + juce::String(callbacks));
+    line("xruns=" + juce::String(xruns));
+    line("output_latency_samples=" + juce::String(latency));
+    line("playhead_samples=" + juce::String((juce::int64) playhead));
+    line("input_peak=" + juce::String(inputPeak, 6));
+    line("master_peak=" + juce::String(masterPeak, 6));
+    if (recordPath.isNotEmpty())
+    {
+        line("record_path=" + recordPath);
+        line("record_frames=" + juce::String((juce::int64) recordedFrames));
+        line("record_dropouts=" + juce::String(recordDropouts));
+        line("record_bytes=" + juce::String((juce::int64) recordBytes));
+    }
+    for (int i = 0; i < trackCount; ++i)
+        line("track[" + juce::String(i) + "].peak=" + juce::String(engine.trackPeak(i), 6));
+    line("mix=ok");
+    return 0;
+}
 } // namespace
 
 int main(int argc, char** argv)
@@ -317,6 +443,11 @@ int main(int argc, char** argv)
     juce::String pluginTestPath;
     juce::String pluginLivePath;
     juce::String pluginEditorPath;
+    juce::String mixTestPath;
+    juce::String recordPath;
+    int mixTracks = 2;
+    double mixGain = 0.55;
+    bool monitorInput = false;
     juce::String deviceSubstring;
     juce::String deviceTypeSubstring;
     double duration = 2.0;
@@ -340,6 +471,12 @@ int main(int argc, char** argv)
         }
         else if (arg == "--plugin-editor" && i + 1 < argc)
             pluginEditorPath = juce::String(argv[++i]);
+        else if (arg == "--mix-test" && i + 1 < argc)
+            mixTestPath = juce::String(argv[++i]);
+        else if (arg == "--record" && i + 1 < argc) recordPath = juce::String(argv[++i]);
+        else if (arg == "--tracks" && i + 1 < argc) mixTracks = std::stoi(argv[++i]);
+        else if (arg == "--mix-gain" && i + 1 < argc) mixGain = std::stod(argv[++i]);
+        else if (arg == "--monitor") monitorInput = true;
         else if (arg == "--device" && i + 1 < argc)
         {
             const std::string value(argv[++i]);
@@ -386,6 +523,8 @@ int main(int argc, char** argv)
         return testPlugin(pluginTestPath, sampleRate, blockSize);
     if (pluginEditorPath.isNotEmpty())
         return runPluginEditor(pluginEditorPath, deviceSubstring, deviceTypeSubstring, duration, sampleRate, blockSize);
+    if (mixTestPath.isNotEmpty())
+        return runMixEngine(nullDevice, deviceSubstring, deviceTypeSubstring, mixTestPath, duration, sampleRate, blockSize, mixTracks, monitorInput, recordPath, mixGain);
     if (run)
         return runEngine(nullDevice, deviceSubstring, deviceTypeSubstring, pluginLivePath, duration, toneHz, gain, sampleRate, blockSize);
 

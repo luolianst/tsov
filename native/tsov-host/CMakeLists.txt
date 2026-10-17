@@ -22,6 +22,7 @@ juce_add_console_app(tsov_host
 target_sources(tsov_host PRIVATE
     Source/Main.cpp
     Source/AudioEngine.cpp
+    Source/MixEngine.cpp
     Source/PluginHost.cpp)
 
 target_compile_definitions(tsov_host PRIVATE

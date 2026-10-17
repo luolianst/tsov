@@ -26,10 +26,19 @@ native/tsov-host/build/bin/Release/tsov-host.exe --scan-vst3
 native/tsov-host/build/bin/Release/tsov-host.exe --plugin-test "vendor/vst3/Dexed.vst3" --sample-rate 48000 --block-size 128
 native/tsov-host/build/bin/Release/tsov-host.exe --plugin-live "vendor/vst3/Dexed.vst3" --device "GP-50" --device-type "Exclusive" --duration 2
 native/tsov-host/build/bin/Release/tsov-host.exe --plugin-editor "vendor/vst3/Dexed.vst3" --device "GP-50" --device-type "Exclusive" --duration 3
+native/tsov-host/build/bin/Release/tsov-host.exe --mix-test "vendor/vst3/Dexed.vst3" --tracks 2 --device "GP-50" --device-type "Exclusive" --duration 2
+native/tsov-host/build/bin/Release/tsov-host.exe --mix-test "vendor/vst3/Dexed.vst3" --tracks 2 --device null --duration 1
+native/tsov-host/build/bin/Release/tsov-host.exe --mix-test "vendor/vst3/Dexed.vst3" --tracks 1 --record "output/host-record.wav" --device "GP-50" --device-type "Windows Audio" --duration 3
 native/tsov-host/build/bin/Release/tsov-host.exe --version
 ```
 
-期望：`juce=8.0.9`、`plugin_formats=1`（VST3）、`selftest=ok`；`--plugin-test` 输出 `plugin_test=ok`；`--plugin-live` / `--plugin-editor` 输出 `run=ok` / `editor=ok`，`xruns=0`（本机 GP-50 实际格式为 44.1k / 132 帧，见下）。
+期望：`juce=8.0.9`、`plugin_formats=1`（VST3）、`selftest=ok`；`--plugin-test` 输出 `plugin_test=ok`；`--plugin-live` / `--plugin-editor` 输出 `run=ok` / `editor=ok`，`xruns=0`（本机 GP-50 实际格式为 44.1k / 132 帧，见下）；`--mix-test --tracks 2` 输出 `mix=ok`、两轨 peak 非零。
+
+## 多轨与监听
+
+- `MixEngine` 已支持 N 轨 VST3、每轨 gain/pan/mute、采样级 MIDI 事件、master 总线；`--mix-test` 用同一插件起多实例验证。
+- 监听/录音输入请用 **Windows Audio（共享）**：GP-50 在 Exclusive 下「输入+输出」同时开会周期性 xrun（实测 10s 24 次）；共享模式 10s 仅 1 次。纯播放仍用 Exclusive。
+- 输入峰值见 `input_peak`；无输入信号时为 0 属正常。
 
 ## 设备格式
 
