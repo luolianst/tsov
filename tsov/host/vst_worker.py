@@ -88,29 +88,72 @@ def finish_audio(audio, n_frames: int, latency: int = 0) -> np.ndarray:
 
 
 def apply_params(proc, params: dict, names: dict | None = None, strict: bool = False) -> dict | None:
-    """把 ``{参数名或下标: 值}`` 归一化（0..1）写入插件。
+    """把 ``{参数键: 值}`` 归一化（0..1）写入插件。
 
+    键形态（批N A4）：唯一名称 / 十进制下标 / ``名称#下标``（重名参数必须用）。
     返回「参数名 → index」映射（调用方可缓存复用）。``strict=True`` 时失配（名字不存在 /
-    下标越界 / 值非法）直接 raise（「失配可检测报错」）；缺省 False 跳过（宽松口径）。
+    下标越界 / 键名不符 / 值非法）直接 raise（「失配可检测报错」）；缺省 False 跳过。
     """
     if not params:
         return names
+    desc = None
+
+    def _desc():
+        nonlocal desc
+        if desc is None:
+            desc = proc.get_parameters_description()
+        return desc
+
     if names is None:
-        names = {d["name"]: int(d["index"]) for d in proc.get_parameters_description()}
+        names = {d["name"]: int(d["index"]) for d in _desc()}
+    dup_cache: set[str] | None = None
+
+    def _dups() -> set[str]:
+        nonlocal dup_cache
+        if dup_cache is None:
+            cnt: dict[str, int] = {}
+            for d in _desc():
+                cnt[d["name"]] = cnt.get(d["name"], 0) + 1
+            dup_cache = {k for k, v in cnt.items() if v > 1}
+        return dup_cache
+
     for key, value in params.items():
         k = str(key)
-        if k.lstrip("-").isdigit():
-            idx = int(k)
-            if not (0 <= idx < len(names)):
+        if "#" in k:
+            # 名称#下标：重名参数的显式寻址
+            base, _, tail = k.rpartition("#")
+            if not tail.lstrip("-").isdigit():
                 if strict:
-                    raise ValueError(f"参数下标越界：{k}（现有 {len(names)} 个参数）")
+                    raise ValueError(f"参数键非法：{k!r}（形如 名称#下标）")
                 continue
+            idx = int(tail)
+            d = _desc()
+            if not (0 <= idx < len(d)):
+                if strict:
+                    raise ValueError(f"参数下标越界：{idx}（现有 {len(d)} 个参数）")
+                continue
+            if base and str(d[idx].get("name")) != base:
+                if strict:
+                    raise ValueError(
+                        f"参数名与下标不匹配：{base!r} ≠ params[{idx}].name={d[idx].get('name')!r}")
+                continue
+        elif k.lstrip("-").isdigit():
+            idx = int(k)
+            # names 因重名会塌缩（len < 真实参数数）——越界时用全量描述复核
+            if not (0 <= idx < len(names)):
+                d = _desc()
+                if not (0 <= idx < len(d)):
+                    if strict:
+                        raise ValueError(f"参数下标越界：{k}（现有 {len(d)} 个参数）")
+                    continue
         else:
             idx = names.get(k)
             if idx is None:
                 if strict:
                     raise ValueError(f"参数不存在：{k!r}（先用 list_instrument_params 检索核对）")
                 continue
+            if strict and k in _dups():
+                raise ValueError(f"参数名重名：{k!r}——请用「{k}#<下标>」或纯下标指定")
         try:
             v = float(value)
         except (TypeError, ValueError):
