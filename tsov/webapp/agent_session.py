@@ -63,12 +63,27 @@ def _adopt_mid_round(proj, project_name: str, bus, preseed: dict | None,
                      post_snap: dict, label: str) -> bool:
     """批B2（P41）逐工具下放：把工作副本中间态同步采用到宿主（返回值 = 是否实际采用）。
 
+    P0 A6：三方合并（轮首预置 / 当前宿主 / agent 结果）——用户轮中手改不被覆盖；
+    同位置冲突 → 放弃本次采用并推提示（轮末仍会再试一次）。
     - ok → 发 diff_applied（累计口径 + live 标志）+ state_updated；journal 经
       _journal_append_apply 与已记工具条目去重（seq 复用，不产生重复条目）
     - 失败静默（轮末兜底仍在；中间态下放绝不阻塞会话）
     """
     try:
-        result = proj.apply_score(Score.from_dict(post_snap), label, source="agent")
+        from ..core.merge import three_way_merge
+
+        cur = proj.score.to_dict()
+        base = preseed if isinstance(preseed, dict) else cur
+        merged, conflicts = three_way_merge(base, cur, post_snap)
+        if conflicts:
+            bus.publish(project_name, "agent_tool", {
+                "tool": "apply_score",
+                "observation": ("跳过中间态采用：检测到与用户手改的冲突（"
+                                + "；".join(conflicts[:3])
+                                + ("…" if len(conflicts) > 3 else "") + "）"),
+            })
+            return False
+        result = proj.apply_score(Score.from_dict(merged), label, source="agent")
         if not result.get("ok"):
             return False
         payload = _cumulative_note_diff(preseed, post_snap) or result.get("diff") or {}
@@ -510,10 +525,10 @@ def _apply_annotation_groups(score, annotations):
     return work, summaries, ""
 
 
-def _run_agent_session(state: WebState, project_name: str, task: str, session_id: str, base_rev: str = "HEAD",
-                       annotations: list[dict] | None = None, selection: dict | None = None,
-                       user_actions: list[str] | None = None, refs: list[dict] | None = None) -> None:
-    """一次对话框 agent 会话（后台线程跑；agent_lock 由调用方获取，本函数 finally 释放）。
+def _run_agent_session_inner(state: WebState, project_name: str, task: str, session_id: str, base_rev: str = "HEAD",
+                             annotations: list[dict] | None = None, selection: dict | None = None,
+                             user_actions: list[str] | None = None, refs: list[dict] | None = None) -> None:
+    """一次对话框 agent 会话（后台线程跑；agent_lock 由外层 _run_agent_session 统一释放）。
 
     base_rev（议题 ④）：编辑目标版本标识，注入 brief；A 路下始终 = 用户当前工作版本（HEAD），
     仅用于让 LLM 明确「我改的是哪个版本」，不改变工程采纳逻辑。
@@ -543,7 +558,6 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
             if ann_error:
                 bus.publish(project_name, "agent_error",
                             {"session_id": session_id, "error": f"人工标注非法（拒绝）：{ann_error}"})
-                state.agent_lock.release()
                 return
             adopted = proj.apply_score(work_score, f"人工标注（{len(annotations)} 条）")
             if adopted["ok"]:
@@ -554,10 +568,9 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
                     + "；".join(ann_summaries[:6])
                     + "\n  这些是用户精确指定的修改：请在结果中保留、不得回退\n"
                 )
-        except Exception as e:  # noqa: BLE001 标注应用异常 → 拒绝消息（不泄漏锁）
+        except Exception as e:  # noqa: BLE001 标注应用异常 → 拒绝消息（锁由外层 finally 释放）
             bus.publish(project_name, "agent_error",
                         {"session_id": session_id, "error": f"人工标注应用失败：{type(e).__name__}: {e}"})
-            state.agent_lock.release()
             return
 
     # 批B P22：预置工作副本 = 本轮起点（当前谱副本；含已应用的人工标注）——原子写。
@@ -721,7 +734,24 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
                 if preseed is not None and edited_dict == preseed:
                     new_score = None
                 else:
-                    new_score = Score.from_dict(edited_dict)
+                    # P0 A6：三方合并——用户轮中手改与 agent 改动各归其位；冲突则不采用
+                    from ..core.merge import three_way_merge
+
+                    cur = proj.score.to_dict()
+                    base = preseed if isinstance(preseed, dict) else cur
+                    merged, conflicts = three_way_merge(base, cur, edited_dict)
+                    if conflicts:
+                        bus.publish(project_name, "agent_tool", {
+                            "session_id": session_id, "tool": "apply_score",
+                            "observation": ("轮末采用跳过：检测到与用户手改的冲突（"
+                                            + "；".join(conflicts[:3])
+                                            + ("…" if len(conflicts) > 3 else "") + "）；手改已保留"),
+                        })
+                        new_score = None
+                    elif merged == cur:
+                        new_score = None
+                    else:
+                        new_score = Score.from_dict(merged)
                 if new_score is not None:
                     result = proj.apply_score(new_score, f"agent：{task[:40]}", source="agent")
                     adopted = result if result["ok"] else None
@@ -776,4 +806,18 @@ def _run_agent_session(state: WebState, project_name: str, task: str, session_id
             _ss.touch_session(session_id, project=project_name)
         except Exception:  # noqa: BLE001
             pass
-        state.agent_lock.release()
+    # 注意：agent_lock 由外层 _run_agent_session 的 finally 释放（本函数只负责业务）
+
+
+def _run_agent_session(state: WebState, project_name: str, task: str, session_id: str, base_rev: str = "HEAD",
+                       annotations: list[dict] | None = None, selection: dict | None = None,
+                       user_actions: list[str] | None = None, refs: list[dict] | None = None) -> None:
+    """agent 会话入口：锁只在这里释放——准备段异常/早退/正常结束都不会漏锁。"""
+    try:
+        _run_agent_session_inner(state, project_name, task, session_id, base_rev,
+                                 annotations, selection, user_actions, refs)
+    finally:
+        try:
+            state.agent_lock.release()
+        except RuntimeError:
+            pass
