@@ -22,7 +22,7 @@ from mcp.server.lowlevel import Server
 from .resources import ResourceHub
 from .sessions import McpError, ProjectStore
 
-_NAME_PROP = {"type": "string", "description": "工程名（output/ 下的目录名）"}
+_PROJECT_PROP = {"type": "string", "description": "工程名（output/ 下的目录名）"}
 
 # 会话层（MCP 自有工具）：(名, 级[ R 常开 / B 需 --allow-write], 描述, schema)
 SESSION_TOOL_DEFS = [
@@ -34,20 +34,20 @@ SESSION_TOOL_DEFS = [
     (
         "open_project", "R",
         "打开工程（校验存在与防穿越），返回与 project_status 相同的摘要。",
-        {"type": "object", "properties": {"name": _NAME_PROP}, "required": ["name"]},
+        {"type": "object", "properties": {"project": _PROJECT_PROP}, "required": ["project"]},
     ),
     (
         "project_status", "R",
         "工程摘要：速度/调号/轨道清单（名/音源/音符数）/音符总数/文件夹。",
-        {"type": "object", "properties": {"name": _NAME_PROP}, "required": ["name"]},
+        {"type": "object", "properties": {"project": _PROJECT_PROP}, "required": ["project"]},
     ),
     (
         "list_history", "R",
         "工程 git 历史（commit 摘要行，最近在前）。",
         {
             "type": "object",
-            "properties": {"name": _NAME_PROP, "limit": {"type": "integer", "description": "条数（默认 20）"}},
-            "required": ["name"],
+            "properties": {"project": _PROJECT_PROP, "limit": {"type": "integer", "description": "条数（默认 20）"}},
+            "required": ["project"],
         },
     ),
     (
@@ -56,30 +56,30 @@ SESSION_TOOL_DEFS = [
         {
             "type": "object",
             "properties": {
-                "name": _NAME_PROP,
+                "project": _PROJECT_PROP,
                 "source": {"type": "string", "description": "源 score JSON 路径（相对 output/ 或仓库内路径）"},
                 "title": {"type": "string", "description": "可选：改写谱面标题"},
             },
-            "required": ["name", "source"],
+            "required": ["project", "source"],
         },
     ),
     (
         "undo", "B",
         "撤销一次编辑（journal 快照窗口游标；零 commit 语义 ADR-0019）。",
-        {"type": "object", "properties": {"name": _NAME_PROP}, "required": ["name"]},
+        {"type": "object", "properties": {"project": _PROJECT_PROP}, "required": ["project"]},
     ),
     (
         "redo", "B",
         "重做下一次快照（游标前移）。",
-        {"type": "object", "properties": {"name": _NAME_PROP}, "required": ["name"]},
+        {"type": "object", "properties": {"project": _PROJECT_PROP}, "required": ["project"]},
     ),
     (
         "rollback", "B",
         "git 回滚到指定版本（默认 HEAD~1；收藏点 = fav/<时间> 标签名）。",
         {
             "type": "object",
-            "properties": {"name": _NAME_PROP, "rev": {"type": "string", "description": "目标 rev（默认 HEAD~1）"}},
-            "required": ["name"],
+            "properties": {"project": _PROJECT_PROP, "rev": {"type": "string", "description": "目标 rev（默认 HEAD~1）"}},
+            "required": ["project"],
         },
     ),
 ]
@@ -127,8 +127,8 @@ def _write_schema(spec) -> dict:
     for k in strip:
         props.pop(k, None)
     req = [r for r in (params.get("required") or []) if r not in strip]
-    props["name"] = _NAME_PROP
-    params["required"] = ["name", *req]
+    props["project"] = _PROJECT_PROP
+    params["required"] = list(dict.fromkeys(["project", *req]))
     return params
 
 
@@ -138,13 +138,14 @@ def _read_args_for_store(store, spec, args: dict) -> dict:
     handler 内部的 name 解析硬编码仓库根（output/<name>），与 store 的 --root
     不一致时会误报「工程不存在」（验收 V1 A1b 缺陷根因）——在服务层统一换算。
     """
-    if not args.get("name") or args.get("score_path"):
+    nm = str(args.get("project") or args.get("name") or "").strip()
+    if not nm or args.get("score_path"):
         return args
     props = (spec.parameters or {}).get("properties", {})
     if "score_path" not in props:
         return args
     out = dict(args)
-    out["score_path"] = str(store.project_root(str(args["name"])) / "score.json")
+    out["score_path"] = str(store.project_root(nm) / "score.json")
     return out
 
 
@@ -188,7 +189,7 @@ def build_server(store: ProjectStore) -> Server:
     def _call_session_tool(name: str, args: dict) -> str:
         if name == "list_projects":
             return _dump(store.list_projects())
-        nm = str((args or {}).get("name") or "")
+        nm = str((args or {}).get("project") or (args or {}).get("name") or "").strip()
 
         if name in ("open_project", "project_status"):
             store.get_project(nm)  # 打开即校验
@@ -209,9 +210,9 @@ def build_server(store: ProjectStore) -> Server:
             )
 
         if name in ("undo", "redo", "rollback"):
-            proj = store.get_project(nm)
             note = store.web_guard_note()
             with store.write_lock(nm):
+                proj = store.get_project(nm)   # 锁内复核（外部改动 → 重载）
                 if name == "undo":
                     ok = bool(proj.undo())
                 elif name == "redo":
@@ -229,14 +230,18 @@ def build_server(store: ProjectStore) -> Server:
     # ---- 写工具（工程名语义 → 命令层落定） ----
 
     def _call_write(name: str, args: dict) -> str:
-        args = dict(args)
-        proj_name = str(args.pop("name", "") or "").strip()
-        if not proj_name:
-            raise McpError(f"{name} 需要 name（工程名）")
-        proj = store.get_project(proj_name)
         spec = registry.get(name)
+        args = dict(args)
+        props = (spec.parameters or {}).get("properties", {})
+        proj_name = str(args.pop("project", "") or "").strip()
+        if not proj_name and "name" not in props:
+            # 旧客户端兼容；rename_track 的 name 是新轨名，绝不当作工程名
+            proj_name = str(args.pop("name", "") or "").strip()
+        if not proj_name:
+            raise McpError(f"{name} 需要 project（工程名）")
         note = store.web_guard_note()
         with store.write_lock(proj_name):
+            proj = store.get_project(proj_name)   # 锁内复核（外部改动 → 重载）
             with tempfile.TemporaryDirectory(prefix="tsov-mcp-") as td:
                 work_in = Path(td) / "in.json"
                 work_out = Path(td) / "out.json"
@@ -247,6 +252,11 @@ def build_server(store: ProjectStore) -> Server:
                 if "path" not in _KEEP_PROPS.get(name, ()):
                     hargs.pop("path", None)
                 spec.handler(hargs)
+                if name == "open_instrument_editor":
+                    # 动作型工具：副作用在 worker 侧，不产谱、不判「新旧谱一致」失败
+                    text = _dump({"project": proj_name, "tool": name, "ok": True,
+                                  "action": "editor", "message": "插件编辑器已打开（无谱面改动）"})
+                    return text + ("\n\n" + note if note else "")
                 outp = work_out if work_out.is_file() else work_in
                 if not outp.is_file():
                     raise McpError(f"{name} 未产出谱文件（handler 契约异常）")
@@ -254,6 +264,8 @@ def build_server(store: ProjectStore) -> Server:
             res = proj.apply_score(
                 new_score, commit_message=f"MCP：{name}（{proj_name}）", source="agent"
             )
+        if not res.get("ok") and int(res.get("applied") or 0) == 0:
+            raise McpError(f"{name} 未写入：" + "；".join(res.get("errors") or ["未知原因"]))
         payload = {
             "project": proj_name,
             "tool": name,

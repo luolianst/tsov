@@ -27,6 +27,7 @@ class ProjectStore:
         self.allow_write = bool(allow_write)
         self.web_guard = web_guard if web_guard in ("warn", "strict", "off") else "warn"
         self._projects: dict[str, Project] = {}
+        self._sig: dict[str, tuple[int, int]] = {}   # 工程名 → score.json (mtime_ns, size)
         self._lock = threading.Lock()
 
     # ---- 名称 → 路径（防穿越） ----
@@ -68,16 +69,25 @@ class ProjectStore:
     # ---- 打开（懒加载单例）/ 摘要 ----
 
     def get_project(self, name: str) -> Project:
+        """取工程对象：缓存命中但 score.json 被外部改过 → 重载（P0 A5：防旧对象覆盖新内容）。"""
         nm = str(name or "").strip()
         root = self.project_root(nm)
         with self._lock:
+            try:
+                st = (root / "score.json").stat()
+                sig = (st.st_mtime_ns, st.st_size)
+            except OSError as e:
+                raise McpError(f"工程不可读：{nm}（{e}）") from e
             proj = self._projects.get(nm)
+            if proj is not None and self._sig.get(nm) != sig:
+                proj = None   # 外部进程改过（Web/另一 MCP）→ 丢弃旧对象
             if proj is None:
                 try:
                     proj = Project.open(root)
                 except Exception as e:  # noqa: BLE001 载入失败 → 可读错误
                     raise McpError(f"工程打开失败：{nm}（{type(e).__name__}: {e}）") from e
                 self._projects[nm] = proj
+                self._sig[nm] = sig
             return proj
 
     def project_status(self, name: str) -> dict:
@@ -134,8 +144,10 @@ class ProjectStore:
         if title:
             score.title = str(title)
         proj = Project.create(nm, score, parent=self.output_dir)
+        st = (proj.root / "score.json").stat()
         with self._lock:
             self._projects[nm] = proj
+            self._sig[nm] = (st.st_mtime_ns, st.st_size)
         try:
             rel_out = src.resolve().relative_to(self.repo_root.resolve()).as_posix()
         except ValueError:
@@ -160,21 +172,37 @@ class ProjectStore:
 
         @contextmanager
         def _hold():
-            if lf.exists():
+            payload = json.dumps({"pid": me, "ts": time.time(), "source": "mcp"},
+                                 ensure_ascii=False).encode("utf-8")
+            acquired = False
+            for _ in range(2):
                 try:
-                    info = json.loads(lf.read_text(encoding="utf-8"))
-                except Exception:  # noqa: BLE001 坏锁文件 → 当陈旧处理
-                    info = {}
-                pid = int(info.get("pid") or 0)
-                if pid and pid != me and _pid_alive(pid):
-                    raise McpError(
-                        f"工程被占用：锁 pid={pid}（source={info.get('source', '?')}，"
-                        f"自 {info.get('ts', '?')}）——稍后重试或待其退出"
-                    )
-            lf.write_text(
-                json.dumps({"pid": me, "ts": time.time(), "source": "mcp"}, ensure_ascii=False),
-                encoding="utf-8",
-            )
+                    fd = os.open(str(lf), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                except FileExistsError:
+                    try:
+                        info = json.loads(lf.read_text(encoding="utf-8"))
+                    except Exception:  # noqa: BLE001 坏锁文件 → 当陈旧处理
+                        info = {}
+                    pid = int(info.get("pid") or 0)
+                    if pid and pid != me and _pid_alive(pid):
+                        raise McpError(
+                            f"工程被占用：锁 pid={pid}（source={info.get('source', '?')}，"
+                            f"自 {info.get('ts', '?')}）——稍后重试或待其退出"
+                        )
+                    try:
+                        lf.unlink()   # 陈旧锁 → 清掉重抢
+                    except OSError:
+                        pass
+                    continue
+                else:
+                    try:
+                        os.write(fd, payload)
+                    finally:
+                        os.close(fd)
+                    acquired = True
+                    break
+            if not acquired:
+                raise McpError("工程写锁竞争：请稍后重试")
             try:
                 yield
             finally:

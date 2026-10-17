@@ -298,9 +298,9 @@ def tool_rename_track(args: dict) -> str:
     score = _load(args["score_path"])
     if args.get("track") is None:
         raise ValueError("track 必填（轨索引或轨名）")
-    new_name = str(args.get("name") or "").strip()
+    new_name = str(args.get("new_name") or args.get("name") or "").strip()
     if not new_name:
-        raise ValueError("需要 name（新轨道名）")
+        raise ValueError("需要 new_name（新轨道名）")
     ti = _resolve_track(score, args.get("track"))
     old_name = score.tracks[ti].name
     batch = EditBatch(label="rename_track")
@@ -842,13 +842,13 @@ def register_compose_tools(registry: ToolRegistry) -> None:
 
     registry.register(ToolSpec(
         name="rename_track",
-        description="重命名轨道（track = 轨索引或轨名；name = 新名）；重名拒绝，该轨书签引用同步更新",
+        description="重命名轨道（track = 轨索引或轨名；new_name = 新名）；重名拒绝，该轨书签引用同步更新",
         parameters={"type": "object", "properties": {
             "score_path": {"type": "string"},
             "track": {"description": "轨索引或轨名（必填）"},
-            "name": {"type": "string", "description": "新轨道名"},
+            "new_name": {"type": "string", "description": "新轨道名"},
             "output": {"type": "string"},
-        }, "required": ["score_path", "track", "name"]},
+        }, "required": ["score_path", "track", "new_name"]},
         handler=tool_rename_track))
 
     registry.register(ToolSpec(

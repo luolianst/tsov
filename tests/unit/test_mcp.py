@@ -283,7 +283,7 @@ def test_mcp_write_flow_undo_redo(monkeypatch):
 
 
 def test_mcp_write_schema_name_addressing(monkeypatch):
-    """写工具 schema：score_path/output 剥掉、name 必填；只读工具 schema 不动。"""
+    """写工具 schema：score_path/output 剥掉、project 必填；rename_track 新名用 new_name。"""
     ws = _ws()
     try:
         store = ProjectStore(ws, allow_write=True)
@@ -293,8 +293,11 @@ def test_mcp_write_schema_name_addressing(monkeypatch):
                 r = await s.list_tools()
                 by = {t.name: t for t in r.tools}
                 w = by["write_notes"].input_schema
-                assert "score_path" not in w["properties"] and "name" in w["properties"]
-                assert w["required"] == ["name", "notes"]
+                assert "score_path" not in w["properties"] and "project" in w["properties"]
+                assert w["required"] == ["project", "notes"]
+                rt = by["rename_track"].input_schema
+                assert "new_name" in rt["properties"] and "name" not in rt["properties"]
+                assert rt["required"] == ["project", "track", "new_name"]
                 # 只读面原样（load_score 保持 score_path 必填）
                 lw = by["load_score"].input_schema
                 assert "score_path" in lw["properties"]
