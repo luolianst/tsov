@@ -110,6 +110,9 @@ def resolve_targets(score, pack=None, *, presets_root=None) -> dict:
     """目标解析 → {source, pack?, title?, mix_notes?, per_track: {i: 绑定}, unmatched}。"""
     tracks = list(getattr(score, "tracks", []) or [])
     if pack:
+        from ..core.paths import safe_component
+
+        pack = safe_component(pack, what="风格包名")
         path = Path(presets_root or DEFAULT_PRESETS_DIR) / f"{pack}.json"
         if not path.is_file():
             raise ValueError(f"风格包不存在：{pack}（找 {path}）")

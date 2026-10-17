@@ -226,6 +226,8 @@ def register(app: FastAPI) -> None:
         body = body or {}
         proj = st().get_project(name)
         with _recorder.lock:
+            if _recorder.project and _recorder.project != name:
+                raise HTTPException(409, f"当前录音属于工程 {_recorder.project!r}——请到该工程停止（防串工程入库）")
             th = _recorder.thread
             if th is None or not th.is_alive():
                 raise HTTPException(409, "当前没有进行中的录音")

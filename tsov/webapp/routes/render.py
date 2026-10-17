@@ -118,6 +118,14 @@ def register(app: FastAPI) -> None:
                 jobs.put_done(name, key, payload)
             return {**payload, "rev": body.rev[:8]}
         out = Path(body.out) if body.out else proj.root / config.RENDER_WAV_NAME
+        if body.out:
+            out = Path(body.out)
+            out = (proj.root / out).resolve() if not out.is_absolute() else out.resolve()
+            root = proj.root.resolve()
+            if out != root and root not in out.parents:
+                raise HTTPException(400, "out 必须位于工程目录内")
+            if out.suffix.lower() != ".wav":
+                raise HTTPException(400, "out 必须是 .wav 文件")
         with jobs.lock(name):
             proj.save()  # score.json 落最新真相（渲染与 git 版本一致）
             key = ("head", str(out), _score_digest(proj.score))

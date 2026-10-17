@@ -285,6 +285,9 @@ class PatternLibrary:
 
 def load_patterns(pack: str, *, root: str | Path | None = None) -> PatternLibrary:
     """按包名装载 <pack>.patterns.json（root 缺省 presets/arrangements/）。"""
+    from ..core.paths import safe_component
+
+    pack = safe_component(pack, what="模式包名")
     base = Path(root) if root is not None else DEFAULT_PATTERN_DIR
     path = base / f"{pack}.patterns.json"
     if not path.is_file():

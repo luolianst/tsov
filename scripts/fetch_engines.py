@@ -48,7 +48,7 @@ import sys
 import tempfile
 import urllib.request
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_DEST = REPO / "vendor"
@@ -243,7 +243,13 @@ def extract_vst3_bundle(zip_path: Path, vst3_root: Path) -> tuple[str, int] | No
             if not n.startswith(prefix + "/") or n.endswith("/"):
                 continue
             rel = n[len(prefix) + 1:]
-            out = dest / rel
+            rel_path = PurePosixPath(rel)
+            if rel_path.is_absolute() or any(part in ("..", "") for part in rel_path.parts):
+                continue   # zip-slip 条目（绝对路径/..）直接跳过
+            out = (dest / rel_path).resolve()
+            dest_resolved = dest.resolve()
+            if out != dest_resolved and dest_resolved not in out.parents:
+                continue   # 解析后越出 bundle 目录 → 拒绝
             out.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(n) as src, open(out, "wb") as f:
                 shutil.copyfileobj(src, f)
