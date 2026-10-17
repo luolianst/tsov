@@ -18,6 +18,7 @@ from fastapi import HTTPException
 
 from ..core.score import Score
 from ..host import Project
+from .render_jobs import RenderJobs
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +80,7 @@ class WebState:
         self.agent_stop = threading.Event()  # 用户请求停止当前 agent 会话
         self.chat_sessions: dict[str, dict] = {}  # 工程 → {session_id}（多轮续接同一 JSONL）
         self.bus = EventBus()
+        self.render_jobs = RenderJobs()  # P0 A1：每工程渲染单飞 + 同输入合并
         self.chains: dict = {}  # M-V8 E3：工程 → ChainRunner（处理链；懒建）
         self.chains_lock = threading.Lock()
         self._engine = None  # HostEngine 懒加载（soundfont 依赖）
@@ -109,6 +111,7 @@ class WebState:
             raise HTTPException(404, f"工程不存在：{name!r}")
         with self.projects_lock:
             self.projects.pop(name, None)
+        self.render_jobs.forget(name)
         self.chat_sessions.pop(name, None)
         try:   # 批I：清该工程的持久化会话绑定
             from .session_store import clear_binding

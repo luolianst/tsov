@@ -229,13 +229,22 @@ export async function playWav() {
   if (store.loopOn && L && (from < L.start || from >= L.end)) from = L.start;
   try {
     /* src 带时间戳：工程每次变化（渲染自动更新）后强制刷新流 */
-    a.src = api.wavUrl(store.project) + '?v=' + Date.now();
-    await new Promise((res, rej) => {
+    const load = (url) => new Promise((res, rej) => {
       const ok = () => { a.removeEventListener('loadedmetadata', ok); a.removeEventListener('error', bad); res(); };
       const bad = () => { a.removeEventListener('loadedmetadata', ok); a.removeEventListener('error', bad); rej(new Error(t('wav 加载失败（先「渲染」生成试听 wav）'))); };
       a.addEventListener('loadedmetadata', ok);
       a.addEventListener('error', bad);
+      a.src = url;
     });
+    try {
+      await load(api.wavUrl(store.project) + '?v=' + Date.now());
+    } catch (e) {
+      /* A1：GET /wav 只读（缺失/过期 → 404/409）——先重渲，再重试一次 */
+      toast(t('渲染中…'));
+      await api.render(store.project);
+      if (gen !== playGen) return;
+      await load(api.wavUrl(store.project) + '?v=' + Date.now());
+    }
     if (gen !== playGen) return;      // 加载期间已按停止/改播 → 不冒播
     if (from > 0) {
       const dur = a.duration;

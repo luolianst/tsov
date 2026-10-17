@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -74,8 +76,18 @@ class Project:
         return cls(score=score, root=root, name=root.name)
 
     def save(self) -> Path:
+        """落盘 score.json：P0 A1/A2——内容未变不写（保持 mtime 稳定）；写入 tmp→os.replace 原子替换。"""
         path = self.root / "score.json"
-        path.write_text(json.dumps(self.score.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+        text = json.dumps(self.score.to_dict(), ensure_ascii=False, indent=2)
+        if getattr(self, "_saved_text", None) == text and path.is_file():
+            return path
+        tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}-{threading.get_ident()}")
+        try:
+            tmp.write_text(text, encoding="utf-8")
+            os.replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
+        self._saved_text = text
         return path
 
     # ------------------------------------------------------------------
