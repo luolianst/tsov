@@ -446,10 +446,16 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
 
 
 def _apply_set_tempo(score: Score, c: EditCommand) -> str | None:
-    """value = {"tempo"?: number, "time_signature"?: "6/8"}（至少一个）。"""
+    """value = {"tempo"?: number, "time_signature"?: "6/8"}（至少一个）。
+
+    P0 A3：先全部解析/校验，后统一落值——被拒命令不得留下半改状态。
+    """
     v = c.value
     if not isinstance(v, dict):
         return "set_tempo value 需 {tempo?, time_signature?}"
+    if v.get("tempo") is None and v.get("time_signature") is None:
+        return "set_tempo 至少需要 tempo 或 time_signature 之一"
+    new_tempo = None
     if v.get("tempo") is not None:
         try:
             t = float(v["tempo"])
@@ -457,7 +463,8 @@ def _apply_set_tempo(score: Score, c: EditCommand) -> str | None:
             return f"set_tempo 非法：{v['tempo']!r}"
         if not (20.0 <= t <= 400.0):
             return f"tempo 越界：{t}（20~400）"
-        score.tempo = round(t, 3)
+        new_tempo = round(t, 3)
+    new_ts = None
     if v.get("time_signature") is not None:
         from ..core.score import parse_time_signature
 
@@ -465,14 +472,19 @@ def _apply_set_tempo(score: Score, c: EditCommand) -> str | None:
         num, den = parse_time_signature(raw)
         if f"{num}/{den}" != raw:
             return f"time_signature 非法（形如 6/8 / 3/4）：{v['time_signature']!r}"
-        score.time_signature = f"{num}/{den}"
-    if v.get("tempo") is None and v.get("time_signature") is None:
-        return "set_tempo 至少需要 tempo 或 time_signature 之一"
+        new_ts = f"{num}/{den}"
+    if new_tempo is not None:
+        score.tempo = new_tempo
+    if new_ts is not None:
+        score.time_signature = new_ts
     return None
 
 
 def _apply_set_track_mix(score: Score, track, c: EditCommand) -> str | None:
-    """value = {"volume"?: 0~2, "pan"?: -1~1, "mute"?: bool, "solo"?: bool, "bus"?: name}。"""
+    """value = {"volume"?: 0~2, "pan"?: -1~1, "mute"?: bool, "solo"?: bool, "bus"?: name}。
+
+    P0 A3：先解析全部字段并校验，通过后统一落值——后半段被拒不得留下前半段已改。
+    """
     v = c.value
     if not isinstance(v, dict):
         return "set_track_mix value 需 {volume?, pan?, mute?, solo?, bus?}"
@@ -480,6 +492,7 @@ def _apply_set_track_mix(score: Score, track, c: EditCommand) -> str | None:
     for k in v:
         if k not in known:
             return f"set_track_mix 未知键：{k!r}（可用：{', '.join(known)}）"
+    patch: dict = {}
     if v.get("volume") is not None:
         try:
             vol = float(v["volume"])
@@ -487,7 +500,7 @@ def _apply_set_track_mix(score: Score, track, c: EditCommand) -> str | None:
             return f"volume 非法：{v['volume']!r}"
         if not (0.0 <= vol <= 2.0):
             return f"volume 越界：{vol}（0~2）"
-        track.instrument.volume = round(vol, 4)
+        patch["volume"] = round(vol, 4)
     if v.get("pan") is not None:
         try:
             pan = float(v["pan"])
@@ -495,17 +508,17 @@ def _apply_set_track_mix(score: Score, track, c: EditCommand) -> str | None:
             return f"pan 非法：{v['pan']!r}"
         if not (-1.0 <= pan <= 1.0):
             return f"pan 越界：{pan}（-1~1）"
-        track.pan = round(pan, 4)
+        patch["pan"] = round(pan, 4)
     if v.get("mute") is not None:
-        track.mute = bool(v["mute"])
+        patch["mute"] = bool(v["mute"])
     if v.get("solo") is not None:
-        track.solo = bool(v["solo"])
+        patch["solo"] = bool(v["solo"])
     if v.get("bus") is not None:
         name = str(v["bus"]).strip() or "master"
         known_buses = {"master"} | {b.name for b in getattr(score, "buses", []) or []}
         if name not in known_buses:
             return f"未知总线：{name!r}（可用：{', '.join(sorted(known_buses))}）"
-        track.bus = name
+        patch["bus"] = name
     # M-V8 E5：send 支路 {总线名: 量 0~1}；整体替换（量 0 = 视为移除该支路，不占位）
     if v.get("sends") is not None:
         raw = v["sends"]
@@ -525,7 +538,20 @@ def _apply_set_track_mix(score: Score, track, c: EditCommand) -> str | None:
                 return f"sends[{s}] 量越界：{a}（0~1）"
             if a > 0:
                 sends[s] = round(a, 4)
-        track.sends = sends
+        patch["sends"] = sends
+    # —— 全部校验通过，统一落值 ——
+    if "volume" in patch:
+        track.instrument.volume = patch["volume"]
+    if "pan" in patch:
+        track.pan = patch["pan"]
+    if "mute" in patch:
+        track.mute = patch["mute"]
+    if "solo" in patch:
+        track.solo = patch["solo"]
+    if "bus" in patch:
+        track.bus = patch["bus"]
+    if "sends" in patch:
+        track.sends = patch["sends"]
     return None
 
 

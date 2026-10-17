@@ -20,6 +20,7 @@ from pathlib import Path
 
 from ..core.atomic import write_text_atomic
 from ..core.names import midi_to_note_name
+from ..core.validate import validate_score
 from ..core.key import detect_key  # 2026-09-22 F1：下沉 core（命令层编辑后调性同步）
 from ..core.score import Score
 from .command import EditBatch
@@ -315,6 +316,18 @@ class Project:
         old_notes = self.score.tracks[0].notes if self.score.tracks else []
         new_notes = new_score.tracks[0].notes if new_score.tracks else []
         note_diff = diff_notes(old_notes, new_notes)
+        # P0 A3：入站校验（apply_score 是 agent/导入/采用的整谱入口，必须过同一闸门）
+        errs = validate_score(new_score)
+        if errs:
+            return {
+                "ok": False,
+                "applied": 0,
+                "errors": errs,
+                "diff": note_diff.to_dict(),
+                "commit": None,
+                "seq": None,
+                "changed": False,
+            }
         if note_diff.total == 0 and self.score.to_dict() == new_score.to_dict():
             return {
                 "ok": False,
