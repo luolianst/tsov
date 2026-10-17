@@ -81,7 +81,7 @@ def test_det_clipping_suggestion():
     clip = [s for s in out if "削波" in s["title"]]
     assert len(clip) == 1
     assert clip[0]["track"] == 1                 # 最响轨（drums）
-    assert clip[0]["values"]["delta_db"] == -2.2
+    assert clip[0]["values"]["delta_db"] == 2.2          # 正 = 降（与 _vol_after 同口径）
     assert clip[0]["evidence"]["refs"] == ["levels.mix_peak_dbfs"]
 
 

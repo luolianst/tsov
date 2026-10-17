@@ -93,7 +93,7 @@ def deterministic_suggestions(facts: dict) -> list[dict]:
                 out.append({
                     "source": "det", "kind": "level", "track": i,
                     "title": f"混音削波：降「{top['name']}」{reduce_db:.1f} dB",
-                    "values": {"delta_db": -reduce_db, "raw_diff_db": -reduce_db,
+                    "values": {"delta_db": reduce_db, "raw_diff_db": reduce_db,
                                "target_rel_db": None, "measured_rel_db": top["rel_db"],
                                "before_volume": vol, "after_volume": new_vol, "capped": False},
                     "evidence": {"refs": ["levels.mix_peak_dbfs"],
