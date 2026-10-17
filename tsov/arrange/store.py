@@ -13,6 +13,8 @@ import json
 import time
 from pathlib import Path
 
+from ..core.atomic import write_json_atomic
+
 ARRANGE_DIR = "arrange"
 EVENTS_FILE = "events.jsonl"
 
@@ -43,7 +45,7 @@ def save_batch(root, batch: dict) -> Path:
     ts = _safe_ts(batch.get("batch_ts"))
     p = arrange_dir(root) / f"{ts}.json"
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(batch, ensure_ascii=False, indent=1), encoding="utf-8")
+    write_json_atomic(p, batch, indent=1)
     return p
 
 

@@ -15,6 +15,8 @@ import re
 import time
 from pathlib import Path
 
+from .core.atomic import write_text_atomic
+
 STATE_BEGIN = "<!-- TSOV-STATE:BEGIN -->"
 STATE_END = "<!-- TSOV-STATE:END -->"
 
@@ -124,7 +126,7 @@ def sync_project_agents(proj_root, score, *, name: str | None = None, ts: float 
             at = 1 if lines and lines[0].startswith("#") else 0
             lines.insert(at, f"\n{STATE_BEGIN}\n{block}\n{STATE_END}\n")
             text = "\n".join(lines)
-    path.write_text(text, encoding="utf-8")
+    write_text_atomic(path, text)
     return {"path": str(path), "file": FILE, "created": created, "updated": not created}
 
 
@@ -134,7 +136,7 @@ def ensure_user_agents(*, path=None) -> dict:
     created = not p.is_file()
     if created:
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(_user_skeleton(), encoding="utf-8")
+        write_text_atomic(p, _user_skeleton())
     return {"path": str(p), "file": USER_FILE, "created": created}
 
 
@@ -174,7 +176,7 @@ def append_history(proj_root, entry: str, *, ts: float | None = None) -> dict:
             eol = text.find("\n", idx)
             text = text + "\n" + block + "\n" if eol == -1 else (
                 text[: eol + 1] + "\n" + block + "\n" + text[eol + 1:])
-    path.write_text(text, encoding="utf-8")
+    write_text_atomic(path, text)
     return {"path": str(path), "appended": True}
 
 
@@ -209,5 +211,5 @@ def update_user_stats(*, delta: dict | None = None, path=None, ts: float | None 
         text = text.replace(STATS_PLACEHOLDER, block)
     else:
         text = text.rstrip("\n") + f"\n{block}\n"
-    p.write_text(text, encoding="utf-8")
+    write_text_atomic(p, text)
     return {"path": str(p), "total": total, "level": lv, "pan": pn, "effect": ef, "last": stamp}

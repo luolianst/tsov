@@ -14,6 +14,8 @@ import os
 import time
 from pathlib import Path
 
+from ..core.atomic import write_json_atomic
+
 FILE = ".tsov-state.json"
 GLOBAL_FILE = "tsov-settings.json"
 
@@ -67,8 +69,7 @@ class ProjectState:
     # ---- 持久化 ----
     def save(self) -> None:
         try:
-            self.path.write_text(json.dumps(self.data, ensure_ascii=False, indent=1),
-                                 encoding="utf-8")
+            write_json_atomic(self.path, self.data, indent=1)
         except OSError:
             pass
 
@@ -155,7 +156,7 @@ def set_global_settings(patch: dict, *, path: Path | str | None = None) -> dict:
     cur = _read_json(p)
     _deep_merge(cur, patch or {})
     try:
-        p.write_text(json.dumps(cur, ensure_ascii=False, indent=1), encoding="utf-8")
+        write_json_atomic(p, cur, indent=1)
     except OSError:
         pass
     return cur

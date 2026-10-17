@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import copy
+import functools
 import json
 import os
 import re
@@ -17,6 +18,7 @@ import threading
 import time
 from pathlib import Path
 
+from ..core.atomic import write_text_atomic
 from ..core.names import midi_to_note_name
 from ..core.key import detect_key  # 2026-09-22 F1：下沉 core（命令层编辑后调性同步）
 from ..core.score import Score
@@ -43,6 +45,15 @@ def _audio_slug(name: str) -> str:
     return s[:60] or "audio"
 
 
+def _locked(method):
+    """Project 写路径互斥（P0 A2）：save / apply / undo / redo / rollback / jump 串行。"""
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return wrapper
+
+
 class Project:
     """一个音乐工程：Score + 历史 + git。"""
 
@@ -51,6 +62,7 @@ class Project:
         self.root = Path(root)
         self.name = name
         self._journal: ActionJournal | None = None   # 快照窗口（懒建，M-V7 D2）
+        self._lock = threading.RLock()               # P0 A2：写路径互斥
         self.root.mkdir(parents=True, exist_ok=True)
         self._ensure_git()
         if not (self.root / "score.json").exists():
@@ -75,18 +87,14 @@ class Project:
         score = Score.from_dict(json.loads((root / "score.json").read_text(encoding="utf-8")))
         return cls(score=score, root=root, name=root.name)
 
+    @_locked
     def save(self) -> Path:
         """落盘 score.json：P0 A1/A2——内容未变不写（保持 mtime 稳定）；写入 tmp→os.replace 原子替换。"""
         path = self.root / "score.json"
         text = json.dumps(self.score.to_dict(), ensure_ascii=False, indent=2)
         if getattr(self, "_saved_text", None) == text and path.is_file():
             return path
-        tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}-{threading.get_ident()}")
-        try:
-            tmp.write_text(text, encoding="utf-8")
-            os.replace(tmp, path)
-        finally:
-            tmp.unlink(missing_ok=True)
+        write_text_atomic(path, text)
         self._saved_text = text
         return path
 
@@ -213,6 +221,7 @@ class Project:
     # 编辑事务 + 历史
     # ------------------------------------------------------------------
 
+    @_locked
     def apply_batch(self, batch: EditBatch, commit_message: str | None = None, *,
                     source: str = "user", record: bool = True) -> dict:
         """应用一批编辑命令（事务）→ 结果 dict（diff/错误/窗口 seq）。
@@ -293,6 +302,7 @@ class Project:
     def can_redo(self) -> bool:
         return self.journal.can_redo()
 
+    @_locked
     def apply_score(self, new_score: Score, commit_message: str = "整谱替换", *,
                     source: str = "user", record: bool = True) -> dict:
         """整谱落定（agent 高层语义编辑结果的采用入口，与 apply_batch 同协议）。
@@ -347,6 +357,7 @@ class Project:
                         pre=j.snapshot(pre_dict), post=post_hash,
                         summary=summary).get("seq")
 
+    @_locked
     def undo(self) -> bool:
         """窗口游标后退一步（零 commit）；恢复失败/无路可退返回 False。"""
         snap = self.journal.undo()
@@ -360,6 +371,7 @@ class Project:
         self.save()
         return True
 
+    @_locked
     def redo(self) -> bool:
         """窗口游标前进一步（零 commit）；无路可进/前方已失效返回 False。"""
         snap = self.journal.redo()
@@ -464,6 +476,7 @@ class Project:
         except Exception:  # noqa: BLE001 版本内容损坏
             return None
 
+    @_locked
     def rollback(self, rev: str = "HEAD~1") -> bool:
         """回滚到指定版本（只动 score.json；M-V7 D2：记快照窗口条目，零 commit）。"""
         if not self._has_git() or not self.log():
@@ -485,6 +498,7 @@ class Project:
         )
         return True
 
+    @_locked
     def jump_window(self, cursor: int) -> bool:
         """快照点跳转（M-V7 D3 回滚下拉「最近窗口」段）：恢复到窗口内任意位置，零 commit。"""
         r = self.journal.jump_to_cursor(int(cursor))

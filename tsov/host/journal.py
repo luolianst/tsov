@@ -21,6 +21,8 @@ import threading
 import time
 from pathlib import Path
 
+from ..core.atomic import write_bytes_atomic, write_text_atomic
+
 
 class ActionJournal:
     """单工程写入快照日志（弱留存窗口，ADR-0019）。"""
@@ -63,7 +65,7 @@ class ActionJournal:
         h = hashlib.sha1(data).hexdigest()[:12]
         p = self.dir / f"{h}.json"
         if not p.is_file():
-            p.write_bytes(data)
+            write_bytes_atomic(p, data)
         return h
 
     def load(self, h: str | None) -> dict | None:
@@ -233,9 +235,9 @@ class ActionJournal:
     def _save(self) -> None:
         with self._lock:
             try:
-                self.index_path.write_text(
+                write_text_atomic(
+                    self.index_path,
                     json.dumps({"entries": self.entries, "cursor": self.cursor},
-                               ensure_ascii=False, indent=1),
-                    encoding="utf-8")
+                               ensure_ascii=False, indent=1))
             except OSError:
                 pass

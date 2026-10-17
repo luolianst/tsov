@@ -23,6 +23,8 @@ import json
 import time
 from pathlib import Path
 
+from .core.atomic import write_json_atomic
+
 STATE_FILE = ".tsov-state.json"
 CHAIN_DIR = "chain"
 TUNE_DIR = "tune"
@@ -50,7 +52,7 @@ def _load_state(proj_root) -> dict:
 
 def _save_state(proj_root, data: dict) -> None:
     p = Path(proj_root) / STATE_FILE
-    p.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    write_json_atomic(p, data, indent=1)
 
 
 def load_records(proj_root) -> dict:
