@@ -36,9 +36,13 @@ class HostEngine:
     # 加载
     # ------------------------------------------------------------------
 
-    def load(self, score: Score, base_dir=None) -> HostSession:
-        """Score → 会话。``base_dir``（工程根）：音频轨（kind=="audio"）解析 audio.file 相对路径用。"""
-        return HostSession.from_score(score, soundfont=self.soundfont, samplerate=self.samplerate, base_dir=base_dir)
+    def load(self, score: Score, base_dir=None, *, lazy: bool = True) -> HostSession:
+        """Score → 会话。``base_dir``（工程根）：音频轨（kind=="audio"）解析 audio.file 相对路径用。
+
+        ``lazy=True``（默认）：音源延迟实例化——stem 缓存全命中时不建 synth / 不拉 VST worker。
+        """
+        return HostSession.from_score(score, soundfont=self.soundfont, samplerate=self.samplerate,
+                                      base_dir=base_dir, lazy=lazy)
 
     def load_score(self, score_path) -> HostSession:
         import json
@@ -108,23 +112,30 @@ class HostEngine:
         - `stop_event`：threading.Event（`/play/stop` 置位）
         """
         audio = mix_graph(session, samplerate=self.samplerate)
+        self._play_audio(audio, blocking=blocking, start=start, loop=loop, stop_event=stop_event)
+
+    def _play_audio(self, audio: np.ndarray, *, blocking: bool = True, start: float = 0.0,
+                    loop: tuple[float, float] | None = None, stop_event=None,
+                    samplerate: int | None = None) -> None:
+        """（内部）预渲染缓冲 → sounddevice；start/loop/stop 语义见 play()。"""
+        sr = int(samplerate or self.samplerate)
         total = audio.shape[0]
-        i0 = max(0, min(total, int(round(float(start or 0.0) * self.samplerate))))
+        i0 = max(0, min(total, int(round(float(start or 0.0) * sr))))
         if i0 >= total:
             return
         if loop:
-            ia = max(0, min(total - 1, int(round(float(loop[0]) * self.samplerate))))
-            ib = max(ia + 1, min(total, int(round(float(loop[1]) * self.samplerate))))
+            ia = max(0, min(total - 1, int(round(float(loop[0]) * sr))))
+            ib = max(ia + 1, min(total, int(round(float(loop[1]) * sr))))
             seg = audio[ia:ib]
             try:
                 while stop_event is None or not stop_event.is_set():
-                    play_buffer(seg, samplerate=self.samplerate, blocking=True)
+                    play_buffer(seg, samplerate=sr, blocking=True)
             except RuntimeError:
                 pass  # sd.stop() 打断（正常停止路径）
             return
         if stop_event is not None and stop_event.is_set():
             return  # E1：起播前已按停止（预渲染期间）→ 不冒播
-        play_buffer(audio[i0:], samplerate=self.samplerate, blocking=blocking)
+        play_buffer(audio[i0:], samplerate=sr, blocking=blocking)
 
     def play_score(self, score_path, blocking: bool = True) -> None:
         session = self.load_score(score_path)
@@ -133,11 +144,14 @@ class HostEngine:
         finally:
             session.close()
 
-    def play_wav(self, wav_path, blocking: bool = True) -> None:
+    def play_wav(self, wav_path, blocking: bool = True, start: float = 0.0,
+                 loop: tuple[float, float] | None = None, stop_event=None) -> None:
+        """直接播放已渲染 wav（B3：命中新鲜 render.wav 时免整谱重混）。"""
         import soundfile as sf
 
-        audio, sr = sf.read(str(wav_path), dtype="float32")
-        play_buffer(audio, samplerate=sr, blocking=blocking)
+        audio, sr = sf.read(str(wav_path), dtype="float32", always_2d=False)
+        self._play_audio(audio, blocking=blocking, start=start, loop=loop, stop_event=stop_event,
+                         samplerate=sr)
 
     # ------------------------------------------------------------------
     # 实时流式回放（transport 深化，里程碑二）

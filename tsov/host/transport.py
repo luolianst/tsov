@@ -17,7 +17,7 @@ import time
 
 import numpy as np
 
-from .session import HostSession
+from .session import HostSession, _LazySource
 
 
 class MixStreamer:
@@ -55,6 +55,8 @@ class SynthStreamer:
         self.tracks: list[dict] = []
         for ht in session.tracks:
             src = ht.source
+            if isinstance(src, _LazySource):
+                src = src._get()   # B1：流式播放需要真音源，先实例化再判 streamable
             if not getattr(src, "streamable", False):
                 raise RuntimeError(f"音源不支持实时流式（streamable=False）：{type(src).__name__}")
             events: list[tuple[float, int, int, int]] = []

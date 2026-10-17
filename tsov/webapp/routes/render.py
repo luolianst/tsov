@@ -114,7 +114,8 @@ def register(app: FastAPI) -> None:
                 if hit is not None:
                     return {**_merged(hit), "rev": body.rev[:8]}
                 info = _assemble(name, proj, score, out, rev=body.rev)
-                payload = {"wav": str(out), "sr": engine.samplerate, **info}
+                payload = {"wav": str(out), "sr": engine.samplerate,
+                           "wav_mtime": out.stat().st_mtime_ns if out.is_file() else 0, **info}
                 jobs.put_done(name, key, payload)
             return {**payload, "rev": body.rev[:8]}
         out = Path(body.out) if body.out else proj.root / config.RENDER_WAV_NAME
@@ -133,7 +134,8 @@ def register(app: FastAPI) -> None:
             if hit is not None:
                 return _merged(hit)
             info = _assemble(name, proj, proj.score, out)
-            payload = {"wav": str(out), "sr": engine.samplerate, **info}
+            payload = {"wav": str(out), "sr": engine.samplerate,
+                       "wav_mtime": out.stat().st_mtime_ns if out.is_file() else 0, **info}
             jobs.put_done(name, key, payload)
         return payload
 

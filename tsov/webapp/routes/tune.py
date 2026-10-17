@@ -174,13 +174,14 @@ def register(app: FastAPI) -> None:
 
         cache = StemStore(proj.root)
         pack = batch.get("pack")
+        render_errors: list[str] = []   # B5：试听渲染失败不再静默——进报告
         facts_before = build_facts(proj.root, proj.score, name=proj.name, pack=pack, cache=cache)
         bdir = store.batch_dir(proj.root, ts)
         before_wav, after_wav = bdir / "before.wav", bdir / "after.wav"
         try:
             _render_mix(st().engine(), proj, proj.score, before_wav, cache)
-        except Exception:  # noqa: BLE001 —— 试听渲染失败不阻塞应用
-            pass
+        except Exception as e:  # noqa: BLE001 —— 试听渲染失败不阻塞应用
+            render_errors.append(f"before: {type(e).__name__}: {e}")
         lufs_before = measure.measure_lufs(before_wav) if before_wav.is_file() else None
 
         eb = EditBatch(label=f"调参应用（{ts}）")
@@ -198,14 +199,16 @@ def register(app: FastAPI) -> None:
         facts_after = build_facts(proj.root, proj.score, name=proj.name, pack=pack, cache=cache)
         try:
             _render_mix(st().engine(), proj, proj.score, after_wav, cache)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as e:  # noqa: BLE001
+            render_errors.append(f"after: {type(e).__name__}: {e}")
         lufs_after = measure.measure_lufs(after_wav) if after_wav.is_file() else None
         files = {"before": before_wav.name if before_wav.is_file() else None,
                  "after": after_wav.name if after_wav.is_file() else None}
         report = compare_mod.build_report(facts_before, facts_after, applied_ids=meta["ids"],
                                           lufs_before=lufs_before, lufs_after=lufs_after,
                                           files=files)
+        if render_errors:
+            report["render_errors"] = render_errors
         batch = store.update_batch(proj.root, ts, state="adopted", applied=meta["ids"],
                                    report=report, decided_at=time.time())
         try:

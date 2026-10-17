@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import abc
 import re
+import threading
 from pathlib import Path
 from typing import Iterable
 
@@ -49,6 +50,39 @@ class SoundSource(abc.ABC):
 _FLUID_BLOCK = 64  # FluidSynth 内部渲染块的样本数（实测：音符事件按 64 样本边界量化）
 
 
+# ---- P0 B1：SF2 Synth 池（跨会话复用已加载 SoundFont）----
+# 键 = (soundfont 绝对路径, program, gain, samplerate, fx)；close() 归池而非 delete。
+# 渲染前 SF2Source.render → reset() 会 system_reset + 相位补齐，池化不破坏确定性。
+_SF2_POOL: dict[tuple, list["SF2Source"]] = {}
+_SF2_POOL_LOCK = threading.Lock()
+_SF2_POOL_MAX = 3           # 每键最多留 3 个（并发渲染上限；再多直接销毁）
+
+
+def _sf2_key(soundfont, program, gain, samplerate, fx) -> tuple:
+    try:
+        sf = str(Path(soundfont).resolve())
+    except Exception:  # noqa: BLE001 路径异常时退回原串（仅作键）
+        sf = str(soundfont)
+    return (sf, str(program), round(float(gain), 6), int(samplerate), bool(fx))
+
+
+def _sf2_take(key: tuple) -> "SF2Source | None":
+    with _SF2_POOL_LOCK:
+        lst = _SF2_POOL.get(key)
+        if lst:
+            return lst.pop()
+    return None
+
+
+def _sf2_put(key: tuple, src: "SF2Source") -> bool:
+    with _SF2_POOL_LOCK:
+        lst = _SF2_POOL.setdefault(key, [])
+        if len(lst) >= _SF2_POOL_MAX:
+            return False
+        lst.append(src)
+        return True
+
+
 class SF2Source(SoundSource):
     """SF2/SF3 SoundFont 音源（pyfluidsynth 实时合成，初版实现）。
 
@@ -75,11 +109,19 @@ class SF2Source(SoundSource):
 
         self._fluid = _load_fluidsynth()
         self._samplerate = int(samplerate)
-        self._synth = self._fluid.Synth(gain=gain, samplerate=self._samplerate)
-        self._sfid = self._synth.sfload(str(soundfont))
-        if self._sfid == self._fluid.FLUID_FAILED:
-            self._synth.delete()
-            raise RuntimeError(f"SoundFont 加载失败：{soundfont}")
+        self._pool_key = _sf2_key(soundfont, program, gain, samplerate, fx)
+        self._closed = False
+        pooled = _sf2_take(self._pool_key)
+        if pooled is not None:
+            self._synth = pooled._synth
+            self._sfid = pooled._sfid
+            self._synth.system_reset()   # 清上次会话状态（尾音/参数）
+        else:
+            self._synth = self._fluid.Synth(gain=gain, samplerate=self._samplerate)
+            self._sfid = self._synth.sfload(str(soundfont))
+            if self._sfid == self._fluid.FLUID_FAILED:
+                self._synth.delete()
+                raise RuntimeError(f"SoundFont 加载失败：{soundfont}")
         self.program = program
         self._channel = 9 if is_drum_track(program) else 0
         self._select_program()
@@ -163,6 +205,12 @@ class SF2Source(SoundSource):
         self._select_program()
 
     def close(self) -> None:
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
+        key = getattr(self, "_pool_key", None)
+        if key is not None and _sf2_put(key, self):
+            return   # 归池复用（下次同键会话直接用，免 sfload）
         self._synth.delete()
 
 

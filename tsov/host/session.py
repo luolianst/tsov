@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 from ..core.notes import Note
@@ -14,6 +16,40 @@ from ..core.score import Score, Track
 from ..render.fluidsynth_backend import default_soundfont
 from .audio_source import AudioClipSource
 from .instrument import SoundSource, make_source
+
+
+class _LazySource(SoundSource):
+    """延迟实例化音源（P0 B1/B2）：缓存命中时完全不建 synth / 不拉 worker。
+
+    首次 render / 显式属性访问才调用工厂；close 只关闭已创建的真源。
+    """
+
+    name = "lazy"
+    streamable = True
+
+    def __init__(self, factory):
+        self._factory = factory
+        self._src: SoundSource | None = None
+        self._lock = threading.Lock()
+
+    def _get(self) -> SoundSource:
+        if self._src is None:
+            with self._lock:
+                if self._src is None:
+                    self._src = self._factory()
+        return self._src
+
+    def render(self, notes, samplerate: int, n_frames: int):
+        return self._get().render(notes, samplerate, n_frames)
+
+    def close(self) -> None:
+        src, self._src = self._src, None
+        if src is not None:
+            src.close()
+
+    def __getattr__(self, item):
+        # 实时流接口（note_on/note_off/pull/reset 等）→ 首次访问才实例化
+        return getattr(self._get(), item)
 
 
 @dataclass
@@ -43,6 +79,7 @@ class HostSession:
         soundfont: str | None = None,
         samplerate: int = 44100,
         base_dir=None,
+        lazy: bool = True,
     ) -> "HostSession":
         """Score → 宿主会话：为每条轨道实例化音源。
 
@@ -88,12 +125,9 @@ class HostSession:
                         "preset": getattr(track.instrument, "preset", None),
                         "base_dir": base_dir,
                     }
-                source = make_source(
-                    track.instrument.program,
-                    soundfont=soundfont,
-                    samplerate=samplerate,
-                    **extra,
-                )
+                factory = partial(make_source, track.instrument.program,
+                                  soundfont=soundfont, samplerate=samplerate, **extra)
+                source = _LazySource(factory) if lazy else factory()
             tracks.append(HostTrack(track=track, source=source))
         return cls(score=score, tracks=tracks, samplerate=samplerate)
 
@@ -102,6 +136,8 @@ class HostSession:
         """会话总时长 = max(音符尾, 音频轨 clip 尾〔offset + 文件时长〕)。"""
         ends = [float(n.end) for t in self.tracks for n in t.notes]
         for t in self.tracks:
+            if not isinstance(t.source, AudioClipSource):
+                continue   # 懒音源不要为了 probe clip_end 而实例化
             clip_end = getattr(t.source, "clip_end", None)
             if clip_end is not None:
                 ends.append(float(clip_end))

@@ -307,6 +307,7 @@ export async function rerender(opts = {}) {
 
 /* M-V7 D1（ADR-0018）：松手即听——手势落盘后自动重拼混音（缓存命中为亚秒级），播放中位置保持续播 */
 let freshTimer = 0;
+let lastWavMtime = 0;   /* B4：最近一次已知 wav 内容代际（后端 mtime_ns） */
 
 export function scheduleFresh() {
   clearTimeout(freshTimer);
@@ -324,8 +325,12 @@ export async function ensureFresh() {
     const n = (r.rendered || []).length;
     if (n > 0) toast(t('已重渲 ') + r.rendered.join(t('、')) + t('（') + Math.round(performance.now() - t0) + t('ms）'));
     showWarnings(r.warnings || []);   /* P62a：松手即听重渲后同步静音警告面 */
-    a.src = api.wavUrl(store.project) + '?v=' + Date.now();
-    if (wasPlaying) {
+    /* B4：只有音频内容真的变化才换源（合并命中不重下整段 wav；暂停时不预载） */
+    const mt = Number(r.wav_mtime || 0);
+    const changed = !!mt && mt !== lastWavMtime;
+    lastWavMtime = mt;
+    if (changed && wasPlaying) {
+      a.src = api.wavUrl(store.project) + '?v=' + Date.now();
       a.addEventListener('loadedmetadata', () => {
         try { a.currentTime = pos; a.play(); } catch (e) { /* 忽略 */ }
       }, { once: true });

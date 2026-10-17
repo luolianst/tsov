@@ -6,6 +6,7 @@ import threading
 
 from fastapi import FastAPI, HTTPException
 
+from .. import config
 from ..helpers import score_duration
 from ..models import PlayIn
 from ..state import WebState
@@ -43,8 +44,24 @@ def register(app: FastAPI) -> None:
             bus.publish(name, "playback_start", {"duration": duration, "start": start,
                                                  "loop": list(loop) if loop else None})
             engine = st().engine()
-            engine.play(engine.load(proj.score, base_dir=proj.root), blocking=True, start=start, loop=loop,
-                        stop_event=st().play_stop)
+            # B3：新鲜 render.wav 直接播（免整谱重混）；过期/缺失才走宿主实时混音
+            wav_path = proj.root / config.RENDER_WAV_NAME
+            fresh = False
+            try:
+                fresh = (wav_path.is_file()
+                         and (proj.root / "score.json").stat().st_mtime_ns <= wav_path.stat().st_mtime_ns)
+            except OSError:
+                fresh = False
+            if fresh:
+                engine.play_wav(wav_path, blocking=True, start=start, loop=loop,
+                                stop_event=st().play_stop)
+            else:
+                session = engine.load(proj.score, base_dir=proj.root)
+                try:
+                    engine.play(session, blocking=True, start=start, loop=loop,
+                                stop_event=st().play_stop)
+                finally:
+                    session.close()
             bus.publish(name, "playback_stop", {"duration": duration})
             return {"ok": True, "duration": duration, "start": start,
                     "loop": list(loop) if loop else None}
