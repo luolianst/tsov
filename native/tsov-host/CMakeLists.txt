@@ -19,7 +19,10 @@ juce_add_console_app(tsov_host
     PRODUCT_NAME "tsov-host"
     VERSION "0.1.0")
 
-target_sources(tsov_host PRIVATE Source/Main.cpp)
+target_sources(tsov_host PRIVATE
+    Source/Main.cpp
+    Source/AudioEngine.cpp
+    Source/PluginHost.cpp)
 
 target_compile_definitions(tsov_host PRIVATE
     JUCE_WEB_BROWSER=0
@@ -27,6 +30,7 @@ target_compile_definitions(tsov_host PRIVATE
     JUCE_DISPLAY_SPLASH_SCREEN=0
     JUCE_PLUGINHOST_VST3=1
     JUCE_PLUGINHOST_VST=0
+    JUCE_MODAL_LOOPS_PERMITTED=1
     JUCE_APPLICATION_NAME_STRING="tsov-host"
     JUCE_APPLICATION_VERSION_STRING="0.1.0")
 
