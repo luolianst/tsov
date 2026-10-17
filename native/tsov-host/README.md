@@ -31,6 +31,7 @@ native/tsov-host/build/bin/Release/tsov-host.exe --mix-test "vendor/vst3/Dexed.v
 native/tsov-host/build/bin/Release/tsov-host.exe --mix-test "vendor/vst3/Dexed.vst3" --tracks 1 --record "output/host-record.wav" --device "GP-50" --device-type "Windows Audio" --duration 3
 native/tsov-host/build/bin/Release/tsov-host.exe --plugin-editor "C:/Program Files/Common Files/VST3/SSDSampler5.vst3" --device "GP-50" --device-type "Exclusive" --duration 120 --note 36 --state "output/ssd5-free.state"
 native/tsov-host/build/bin/Release/tsov-host.exe --plugin-live "C:/Program Files/Common Files/VST3/SSDSampler5.vst3" --device "GP-50" --device-type "Exclusive" --duration 3 --note 36 --state "output/ssd5-free.state"
+native/tsov-host/build/bin/Release/tsov-host.exe --plugin-live "C:/Program Files/Common Files/VST3/Kontakt 8.vst3" --device "GP-50" --device-type "Exclusive" --duration 3 --note 60 --state "output/kontakt-factory.state"
 native/tsov-host/build/bin/Release/tsov-host.exe --version
 ```
 
