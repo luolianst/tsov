@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -37,6 +38,16 @@ def create_app(output_dir: str | Path = "output") -> FastAPI:
         if isinstance(exc.detail, dict):
             return JSONResponse(exc.detail, status_code=exc.status_code)
         return JSONResponse({"error": str(exc.detail)}, status_code=exc.status_code)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
+        """C4：422 也走统一错误契约（{"error": ...}，不再是 FastAPI 默认 detail 数组）。"""
+        parts = []
+        for e in exc.errors()[:8]:
+            loc = ".".join(str(x) for x in (e.get("loc") or []) if x != "body")
+            parts.append(f"{loc or 'body'}: {e.get('msg')}")
+        return JSONResponse({"error": "请求参数不合法：" + "；".join(parts),
+                             "details": exc.errors()}, status_code=422)
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(_request: Request, exc: Exception) -> JSONResponse:

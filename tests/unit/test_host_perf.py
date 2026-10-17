@@ -110,4 +110,7 @@ def test_midi_export_no_perf_zero_events(tmp_path):
     p = tmp_path / "out.mid"
     score_to_midi(_score(), str(p))
     inst = pretty_midi.PrettyMIDI(str(p)).instruments[0]
-    assert not inst.pitch_bends and not inst.control_changes
+    perf_cc = [e for e in inst.control_changes if e.number in (1, 11, 64)]
+    assert not inst.pitch_bends and not perf_cc
+    # C3：混音 CC7/CC10 恒有（默认音量 100 / 声像居中 64）
+    assert {e.number for e in inst.control_changes} == {7, 10}

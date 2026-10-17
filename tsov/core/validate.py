@@ -44,6 +44,10 @@ def _check_effect(e, where: str, errors: list[str]) -> None:
 def validate_score(score: Score) -> list[str]:
     errors: list[str] = []
 
+    meta = getattr(score, "meta", None)
+    if isinstance(meta, dict) and meta.get("schema_version") not in (None, "", 1, "1"):
+        errors.append(f"meta.schema_version 不支持：{meta.get('schema_version')!r}（本版支持 1）")
+
     tempo = getattr(score, "tempo", None)
     if not _finite(tempo) or float(tempo) <= 0:
         errors.append(f"tempo 非法：{tempo!r}（需 >0 的有限数）")

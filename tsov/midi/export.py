@@ -68,21 +68,36 @@ _PITCH_CLASS = {
     "f#": 6, "gb": 6, "g": 7, "g#": 8, "ab": 8, "a": 9, "a#": 10, "bb": 10, "b": 11,
 }
 
+# 调式 → 相对大调主音位移（调号写法 = 该大调的调号）
+_MODE_SHIFT = {
+    "major": 0, "ionian": 0,
+    "dorian": -2, "phrygian": -4, "lydian": -5,
+    "mixolydian": -7, "locrian": 1,
+}
+_MODE_WORDS = set(_MODE_SHIFT) | {"minor", "aeolian"}
+
 
 def parse_key_signature(key_str: str) -> int:
-    """'C major' / 'a minor' / 'F# major' → MIDI key number（大调 0-11，小调 12-23）。"""
+    """'C major' / 'a minor' / 'D dorian' / 'F# lydian' → MIDI key number。
+
+    大调系用相对大调调号（dorian/phrygian/lydian/mixolydian/locrian 均折算）；
+    小调/aeolian → 12 + 主音（pretty_midi 的小调约定）。
+    """
     if not key_str:
         return 0
-    key_str = key_str.strip()
-    lower = key_str.lower()
-    if "minor" in lower:
-        root = lower.split("minor")[0].strip()
-        return 12 + _PITCH_CLASS.get(root, 0)
-    if "major" in lower:
-        root = lower.split("major")[0].strip()
-        return _PITCH_CLASS.get(root, 0)
-    # 兜底：当作根音名（默认大调）
-    return _PITCH_CLASS.get(lower.split()[0], 0)
+    lower = str(key_str).strip().lower().replace("_", " ")
+    tokens = lower.split()
+    mode = "major"
+    root = tokens[0] if tokens else ""
+    for i, tok in enumerate(tokens):
+        if tok in _MODE_WORDS:
+            mode = tok
+            root = " ".join(tokens[:i]).strip() or root
+            break
+    pc = _PITCH_CLASS.get(root, 0)
+    if mode in ("minor", "aeolian"):
+        return 12 + pc
+    return (pc + _MODE_SHIFT.get(mode, 0)) % 12
 
 
 def program_number(program: str) -> int:
@@ -166,16 +181,56 @@ def _append_perf_events(inst, track, bpm: float) -> None:
             inst.control_changes.append(pretty_midi.ControlChange(int(kind[2:]), int(val), float(t)))
 
 
+def _append_mix_events(inst, track, *, any_solo: bool) -> None:
+    """B/C3：轨道混音 → CC7（音量）/ CC10（声像）；mute 或被 solo 排除 → CC7=0。
+
+    automation 的 volume（倍率）/ pan 曲线优先（按点发事件）；无曲线 → t=0 单事件。
+    """
+    muted = bool(getattr(track, "mute", False)) or (
+        any_solo and not bool(getattr(track, "solo", False)))
+    vol = 0.0 if muted else max(0.0, min(2.0, float(getattr(track.instrument, "volume", 1.0) or 0.0)))
+    auto = getattr(track, "automation", None) or {}
+
+    def _cc7(mult: float) -> int:
+        return max(0, min(127, int(round(vol * float(mult) * 100.0))))
+
+    if muted:
+        inst.control_changes.append(pretty_midi.ControlChange(7, 0, 0.0))
+    else:
+        pts = auto.get("volume")
+        if pts:
+            for t, v in sorted((float(p[0]), float(p[1])) for p in pts if p and len(p) >= 2):
+                inst.control_changes.append(pretty_midi.ControlChange(7, _cc7(v), max(0.0, t)))
+        else:
+            inst.control_changes.append(pretty_midi.ControlChange(7, _cc7(1.0), 0.0))
+
+    pan = max(-1.0, min(1.0, float(getattr(track, "pan", 0.0) or 0.0)))
+
+    def _cc10(p: float) -> int:
+        return max(0, min(127, int(round((max(-1.0, min(1.0, p)) + 1.0) * 63.5))))
+
+    pan_pts = auto.get("pan")
+    if pan_pts:
+        for t, v in sorted((float(p[0]), float(p[1])) for p in pan_pts if p and len(p) >= 2):
+            inst.control_changes.append(pretty_midi.ControlChange(10, _cc10(v), max(0.0, t)))
+    else:
+        inst.control_changes.append(pretty_midi.ControlChange(10, _cc10(pan), 0.0))
+
+
 def score_to_midi(score: Score, output_path: str) -> str:
     """Score → MIDI 文件，返回产物路径。
 
     - 遍历全部 tracks：每轨一个 Instrument（GM program 映射；drums → is_drum=True；轨名写入
-      instrument name——回环导入保名）
+      instrument name——回环导入保名）；**音频轨（kind=audio）跳过**（无 MIDI 语义）
+    - 混音：volume → CC7、pan → CC10、mute/solo → CC7=0（automation volume/pan 按点发）
     - tempo 用 score.tempo；key signature 用第一个调性候选；拍号用 score.time_signature
     """
     midi = pretty_midi.PrettyMIDI(initial_tempo=float(score.tempo or 120.0))
+    any_solo = any(bool(getattr(t, "solo", False)) for t in score.tracks)
 
     for track in score.tracks:
+        if str(getattr(track, "kind", "midi") or "midi") == "audio":
+            continue   # 音频轨不进 MIDI（避免空 Instrument 假轨）
         is_drum = is_drum_track(track.instrument.program)
         prog = 0 if is_drum else program_number(track.instrument.program)
         inst = pretty_midi.Instrument(program=prog, is_drum=is_drum,
@@ -191,6 +246,7 @@ def score_to_midi(score: Score, output_path: str) -> str:
                 )
             )
         _append_perf_events(inst, track, float(score.tempo or 120.0))   # v0.2 批C 后段：perf 曲线 → CC/弯音事件
+        _append_mix_events(inst, track, any_solo=any_solo)              # C3：推子/声像/静音 → CC7/CC10
         midi.instruments.append(inst)
 
     if score.key_candidates and score.key_candidates[0].key:

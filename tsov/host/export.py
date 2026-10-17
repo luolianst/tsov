@@ -141,9 +141,12 @@ def export_matrix(
         (out / "midi").mkdir(parents=True, exist_ok=True)
         report["midi_stems"] = {}
         for i, ht in enumerate(session.tracks):
+            if str(getattr(ht.track, "kind", "midi") or "midi") == "audio":
+                continue   # C3：音频轨无 MIDI stem
             single = Score(
                 title=session.score.title,
                 tempo=session.score.tempo,
+                time_signature=session.score.time_signature,
                 key_candidates=list(session.score.key_candidates),
                 tracks=[ht.track],
                 meta=dict(session.score.meta),
