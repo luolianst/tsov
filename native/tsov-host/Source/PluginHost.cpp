@@ -147,4 +147,46 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::create(const juce::String
     formats.addDefaultFormats();
     return loadFirstClass(formats, path, sampleRate, blockSize, error);
 }
+
+bool PluginHost::loadState(juce::AudioPluginInstance& instance,
+                           const juce::File& file,
+                           juce::String& error)
+{
+    if (! file.existsAsFile())
+    {
+        error = "state file not found: " + file.getFullPathName();
+        return false;
+    }
+
+    juce::MemoryBlock data;
+    if (! file.loadFileAsData(data) || data.getSize() == 0)
+    {
+        error = "cannot read state file: " + file.getFullPathName();
+        return false;
+    }
+
+    instance.setStateInformation(data.getData(), (int) data.getSize());
+    return true;
+}
+
+bool PluginHost::saveState(juce::AudioPluginInstance& instance,
+                           const juce::File& file,
+                           juce::String& error)
+{
+    file.getParentDirectory().createDirectory();
+    juce::MemoryBlock data;
+    instance.getStateInformation(data);
+    if (data.getSize() == 0)
+    {
+        error = "plugin returned empty state";
+        return false;
+    }
+
+    if (! file.replaceWithData(data.getData(), data.getSize()))
+    {
+        error = "cannot write state file: " + file.getFullPathName();
+        return false;
+    }
+    return true;
+}
 } // namespace tsov

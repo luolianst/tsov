@@ -249,9 +249,9 @@ void AudioEngine::renderBlock(juce::AudioBuffer<float>& buffer, int numSamples)
         {
             const auto phaseInCycle = (startFrame + i) % cycle;
             if (phaseInCycle == 0)
-                pluginMidi.addEvent(juce::MidiMessage::noteOn(1, 60, 0.8f), i);
+                pluginMidi.addEvent(juce::MidiMessage::noteOn(1, cfg.testNote, 0.8f), i);
             else if (phaseInCycle == cycle / 2)
-                pluginMidi.addEvent(juce::MidiMessage::noteOff(1, 60), i);
+                pluginMidi.addEvent(juce::MidiMessage::noteOff(1, cfg.testNote), i);
         }
 
         plugin->processBlock(pluginBuffer, pluginMidi);

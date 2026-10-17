@@ -36,5 +36,13 @@ public:
                                                              double sampleRate,
                                                              int blockSize,
                                                              juce::String& error);
+
+    // VST3 state blob persistence (plugin preset/kit/multi lives here).
+    static bool loadState(juce::AudioPluginInstance& instance,
+                          const juce::File& file,
+                          juce::String& error);
+    static bool saveState(juce::AudioPluginInstance& instance,
+                          const juce::File& file,
+                          juce::String& error);
 };
 } // namespace tsov

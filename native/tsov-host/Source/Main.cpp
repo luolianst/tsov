@@ -66,8 +66,8 @@ void printUsage()
     line("                   [--sample-rate <Hz>] [--block-size <frames>]");
     line("  tsov-host --scan-vst3");
     line("  tsov-host --plugin-test <path.vst3> [--sample-rate <Hz>] [--block-size <frames>]");
-    line("  tsov-host --plugin-live <path.vst3> [--device <name|null>] [--duration <sec>]");
-    line("  tsov-host --plugin-editor <path.vst3> [--device <name>] [--duration <sec>]");
+    line("  tsov-host --plugin-live <path.vst3> [--device <name|null>] [--duration <sec>] [--note <midi>] [--state <file>]");
+    line("  tsov-host --plugin-editor <path.vst3> [--device <name>] [--duration <sec>] [--note <midi>] [--state <file>]");
     line("  tsov-host --mix-test <path.vst3> [--tracks <n>] [--mix-gain <g>] [--device <name|null>] [--monitor] [--record <out.wav>]");
     line("  tsov-host --version");
     line("  tsov-host --help");
@@ -101,7 +101,9 @@ int runEngine(bool nullDevice,
               double toneHz,
               double gain,
               double sampleRate,
-              int blockSize)
+              int blockSize,
+              int testNote,
+              const juce::String& statePath)
 {
     juce::ScopedJuceInitialiser_GUI juceInit;
 
@@ -113,6 +115,7 @@ int runEngine(bool nullDevice,
     config.blockSize = blockSize;
     config.toneHz = toneHz;
     config.gain = gain;
+    config.testNote = testNote;
 
     if (pluginPath.isNotEmpty())
     {
@@ -122,6 +125,12 @@ int runEngine(bool nullDevice,
         {
             std::cerr << "plugin load failed: " << pluginError << std::endl;
             return 4;
+        }
+        if (statePath.isNotEmpty())
+        {
+            juce::String stateError;
+            if (! tsov::PluginHost::loadState(*instance, juce::File(statePath), stateError))
+                std::cerr << "state load failed: " << stateError << std::endl;
         }
         engine.setPlugin(std::move(instance));
     }
@@ -242,7 +251,9 @@ int runPluginEditor(const juce::String& pluginPath,
                     const juce::String& deviceTypeSubstring,
                     double durationSeconds,
                     double sampleRate,
-                    int blockSize)
+                    int blockSize,
+                    int testNote,
+                    const juce::String& statePath)
 {
     juce::ScopedJuceInitialiser_GUI juceInit;
 
@@ -252,6 +263,13 @@ int runPluginEditor(const juce::String& pluginPath,
     {
         std::cerr << "plugin load failed: " << pluginError << std::endl;
         return 4;
+    }
+
+    if (statePath.isNotEmpty())
+    {
+        juce::String stateError;
+        if (! tsov::PluginHost::loadState(*instance, juce::File(statePath), stateError))
+            std::cerr << "state load failed: " << stateError << std::endl;
     }
 
     auto* editor = instance->createEditorIfNeeded();
@@ -268,6 +286,7 @@ int runPluginEditor(const juce::String& pluginPath,
     config.sampleRate = sampleRate;
     config.blockSize = blockSize;
     config.toneHz = 0.0;
+    config.testNote = testNote;
     engine.setPlugin(std::move(instance));
 
     juce::String error;
@@ -296,6 +315,7 @@ int runPluginEditor(const juce::String& pluginPath,
     juce::String deviceName;
     double actualRate = 0.0;
     int actualBlock = 0;
+    bool stateSaved = false;
 
     // Tear the editor/plugin down while the message loop is still running:
     // Kontakt 8's destructor needs the message thread; doing it after
@@ -314,6 +334,18 @@ int runPluginEditor(const juce::String& pluginPath,
         deviceName = engine.deviceName();
         actualRate = engine.sampleRate();
         actualBlock = engine.blockSize();
+
+        if (statePath.isNotEmpty())
+        {
+            auto* plugin = engine.pluginInstance();
+            if (plugin != nullptr)
+            {
+                juce::String stateError;
+                stateSaved = tsov::PluginHost::saveState(*plugin, juce::File(statePath), stateError);
+                if (! stateSaved)
+                    std::cerr << "state save failed: " << stateError << std::endl;
+            }
+        }
 
         engine.close();
         engine.setPlugin(nullptr);
@@ -338,6 +370,11 @@ int runPluginEditor(const juce::String& pluginPath,
     line("xruns=" + juce::String(xruns));
     line("output_latency_samples=" + juce::String(latency));
     line("plugin_peak=" + juce::String(peak, 6));
+    if (statePath.isNotEmpty())
+    {
+        line("state_path=" + statePath);
+        line("state_saved=" + juce::String(stateSaved ? 1 : 0));
+    }
     line("editor=ok");
     std::cout.flush();
     // Kontakt 8 blocks in ExitProcess/DLL detach after the editor closes.
@@ -488,6 +525,7 @@ int main(int argc, char** argv)
     juce::String pluginEditorPath;
     juce::String mixTestPath;
     juce::String recordPath;
+    juce::String statePath;
     int mixTracks = 2;
     double mixGain = 0.55;
     bool monitorInput = false;
@@ -498,6 +536,7 @@ int main(int argc, char** argv)
     double gain = 0.02;
     double sampleRate = 48000.0;
     int blockSize = 128;
+    int testNote = 60;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -517,6 +556,7 @@ int main(int argc, char** argv)
         else if (arg == "--mix-test" && i + 1 < argc)
             mixTestPath = juce::String(argv[++i]);
         else if (arg == "--record" && i + 1 < argc) recordPath = juce::String(argv[++i]);
+        else if (arg == "--state" && i + 1 < argc) statePath = juce::String(argv[++i]);
         else if (arg == "--tracks" && i + 1 < argc) mixTracks = std::stoi(argv[++i]);
         else if (arg == "--mix-gain" && i + 1 < argc) mixGain = std::stod(argv[++i]);
         else if (arg == "--monitor") monitorInput = true;
@@ -532,6 +572,7 @@ int main(int argc, char** argv)
         else if (arg == "--gain" && i + 1 < argc) gain = std::stod(argv[++i]);
         else if (arg == "--sample-rate" && i + 1 < argc) sampleRate = std::stod(argv[++i]);
         else if (arg == "--block-size" && i + 1 < argc) blockSize = std::stoi(argv[++i]);
+        else if (arg == "--note" && i + 1 < argc) testNote = std::stoi(argv[++i]);
         else if (arg == "--version")
         {
             line("tsov-host 0.1.0 (JUCE " + juceVersion() + ")");
@@ -565,11 +606,11 @@ int main(int argc, char** argv)
     if (pluginTestPath.isNotEmpty())
         return testPlugin(pluginTestPath, sampleRate, blockSize);
     if (pluginEditorPath.isNotEmpty())
-        return runPluginEditor(pluginEditorPath, deviceSubstring, deviceTypeSubstring, duration, sampleRate, blockSize);
+        return runPluginEditor(pluginEditorPath, deviceSubstring, deviceTypeSubstring, duration, sampleRate, blockSize, testNote, statePath);
     if (mixTestPath.isNotEmpty())
         return runMixEngine(nullDevice, deviceSubstring, deviceTypeSubstring, mixTestPath, duration, sampleRate, blockSize, mixTracks, monitorInput, recordPath, mixGain);
     if (run)
-        return runEngine(nullDevice, deviceSubstring, deviceTypeSubstring, pluginLivePath, duration, toneHz, gain, sampleRate, blockSize);
+        return runEngine(nullDevice, deviceSubstring, deviceTypeSubstring, pluginLivePath, duration, toneHz, gain, sampleRate, blockSize, testNote, statePath);
 
     printUsage();
     return 2;

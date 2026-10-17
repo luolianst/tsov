@@ -19,6 +19,7 @@ public:
         int blockSize = 128;
         double toneHz = 220.0;
         double gain = 0.02;
+        int testNote = 60;
     };
 
     AudioEngine() = default;
@@ -32,6 +33,7 @@ public:
     void setPlugin(std::unique_ptr<juce::AudioPluginInstance> instance);
     juce::String pluginName() const;
     float pluginPeak() const { return pluginPeakValue.load(); }
+    juce::AudioPluginInstance* pluginInstance() const { return plugin.get(); }
 
     // No audio device: run the same render path synchronously (CI / offline smoke).
     void runNull(int blocks);
