@@ -30,6 +30,7 @@ GLOBAL_FILE = "sources.json"
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 DEFAULT_ROOTS = [
+    "C:/Program Files/Common Files/VST3",
     "D:/VST3",
     "D:/Sound source",
     "D:/VPO",
