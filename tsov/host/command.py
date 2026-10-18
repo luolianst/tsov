@@ -1435,10 +1435,15 @@ def _new_part_id(track) -> str:
 
 
 def _sync_parts(track) -> None:
-    """Part 变更后维护顺序 + 旧读侧绝对 notes。"""
+    """Part 变更后维护顺序 + 旧读侧绝对 notes。
+
+    注意：这里**不能**走 `assign_notes()`——它会按 notes 最大 end 重算单默认
+    Part 的 length，导致「crop 模式延长 Part（不带音符）」在落盘时回弹。
+    Part 的 length 是显式编辑量，只有 resize 自己可以改。
+    """
     if getattr(track, "parts", None) is not None:
         track.parts.sort(key=lambda p: (float(p.start), p.id))
-        track.assign_notes(track.flat_notes())
+        track.notes = track.flat_notes()
 
 
 def _crop_notes(notes: list[Note], length: float) -> list[Note]:

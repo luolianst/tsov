@@ -85,6 +85,19 @@ def test_resize_part_loop_extension_and_crop():
     assert cropped.tracks[0].notes[0].end == 0.3
 
 
+def test_resize_part_crop_extension_preserves_length():
+    """关闭音符循环时右拉延伸：只加长 Part，不复制音符（回弹回归）。"""
+    score = _score(_track(parts=[Part(id="pA", start=0.0, length=1.0,
+                                     notes=[_note(0.0, 0.5)])]))
+    new, res = _batch(score, "resize_part",
+                      value={"part": "pA", "length": 3.0, "mode": "crop"})
+    assert res.ok, res.errors
+    track = new.tracks[0]
+    assert track.parts[0].length == 3.0
+    assert len(track.parts[0].notes) == 1
+    assert [(round(n.start, 3), round(n.end, 3)) for n in track.notes] == [(0.0, 0.5)]
+
+
 def test_resize_part_left_crop_shifts_notes():
     score = _score(_track(parts=[Part(id="pA", start=1.0, length=2.0,
                                      notes=[_note(0.0, 0.5), _note(1.0, 1.5)])]))
