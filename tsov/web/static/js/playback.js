@@ -12,6 +12,9 @@ let audio = null;        // <audio> wav 试听
 let rafId = 0;
 let hostT0 = 0;          // 后端播放起始时刻（playback_start；含 start 偏移）
 let hostMode = 'host';   // S2.3：'live'=sidecar SSE 驱动；'wav'=旧阻塞路径（rAF 插值）
+let liveBase = 0;        // S2.4：最近一帧 SSE 播放头（秒）
+let liveAt = 0;          // S2.4：该帧到达的 performance.now()
+let liveSeen = false;    // live 模式下是否已有基线，用于 30Hz 之间的平滑插值
 let playGen = 0;         // E1 修复：起播代际——停止作废在途起播（加载中点⏹不再事后冒播）
 
 /* ---------------- E5 段2：电平表（试听通路；MediaElementSource 单次绑定） ---------------- */
@@ -182,6 +185,14 @@ function tick() {
       try { audio.currentTime = L.start; } catch (e) { /* 忽略 */ }
     }
     setPlayhead(audio.currentTime);
+  } else if (store.playing === 'host' && hostMode === 'live' && liveSeen) {
+    /* C1：SSE 30Hz 帧之间按 rAF 插值；循环区间内用本地时间补齐。 */
+    let p = liveBase + (performance.now() - liveAt) / 1000;
+    const L = store.loop;
+    if (store.loopOn && L && L.end > L.start && p >= L.end) {
+      p = L.start + ((p - L.start) % (L.end - L.start));
+    }
+    setPlayhead(Math.max(0, p));
   } else if (store.playing === 'host' && hostMode !== 'live') {
     setPlayhead(loopedPos((performance.now() - hostT0) / 1000));
   }
@@ -203,6 +214,9 @@ export function seekTo(t) {
     try { audio.currentTime = v; } catch (e) { /* 忽略 */ }
   } else if (store.playing === 'host' && hostMode === 'live' && store.project) {
     /* S2.3：sidecar 定位（不等待；失败由 SSE/状态提示） */
+    liveBase = v;
+    liveAt = performance.now();
+    liveSeen = true;
     api.seek(store.project, v).catch(() => {});
   }
 }
@@ -385,6 +399,9 @@ export function init(opts) {
     const st = (d && d.start) || 0;
     hostMode = (d && d.mode) || 'host';
     hostT0 = performance.now() - st * 1000;
+    liveBase = st;
+    liveAt = performance.now();
+    liveSeen = hostMode === 'live';
     mNext = 0;
     setPlaying('host');
     setPlayhead(st);
@@ -392,10 +409,15 @@ export function init(opts) {
   });
   bus.on('playhead', (d) => {
     if (store.playing !== 'host' || hostMode !== 'live' || !d) return;
-    setPlayhead(Math.max(0, Number(d.playhead) || 0));
+    const p = Math.max(0, Number(d.playhead) || 0);
+    liveBase = p;
+    liveAt = performance.now();
+    liveSeen = true;
+    setPlayhead(p);
   });
   bus.on('playback_stop', () => {
     /* E1：停在原地（不再回零） */
+    liveSeen = false;
     if (store.playing === 'host') setPlaying(null);
   });
 
