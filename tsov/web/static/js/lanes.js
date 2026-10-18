@@ -81,6 +81,13 @@ function audioBandOf(ti) {
   return { yTop: rowY(ti) - scrollY + pad, hh: Math.max(8, rh - pad * 2 - 2) };
 }
 
+/* S3.3：Part 整轨背景带（与音符 inner 同高；header 13px 在顶部） */
+function partBandOf(ti) {
+  const rh = rowH();
+  const pad = Math.max(3, rh * 0.10);
+  return { yTop: rowY(ti) - scrollY + pad, hh: Math.max(8, rh - pad * 2 - 2) };
+}
+
 /* ---- M-V8 E1：书签小旗（轨道/文件夹层）+ 可见性（隐藏/文件夹折叠） ---- */
 
 function trackVisible(ti) {
@@ -231,8 +238,10 @@ export function draw() {
     const partPrev = partPreviewFor(ti);
     const partList = partPrev || partsOf(trk);
     if (partList.length) {
+      const pb = partBandOf(ti);
       drawPartBands(ctx, {
-        list: partList, col: tc[ti % tc.length], yTop: y0 + 2, h: partStripH(),
+        list: partList, col: tc[ti % tc.length], yTop: pb.yTop, h: partStripH(),
+        bodyY: pb.yTop, bodyH: pb.hh,
         selId: (partSelOf() && partSelOf().ti === ti) ? partSelOf().id : null,
         inDrag: !!partPrev, p, v, xLo: KEYS, xHi: W,
       });
@@ -342,8 +351,8 @@ export function init(el, opts) {
     const trk = store.score && store.score.tracks[ti];
     /* S3.3：Part 顶条手势优先（只在顶条内；下方音符逻辑不变） */
     if (trk && trk.kind !== 'audio' && !isPartDragging()) {
-      const y0 = rowY(ti) - scrollY;
-      const ph = partHitBand(ti, e.offsetX, e.offsetY, y0 + 2, partStripH());
+      const pb = partBandOf(ti);
+      const ph = partHitBand(ti, e.offsetX, e.offsetY, pb.yTop, partStripH());
       if (ph) {
         beginPartDrag(ti, ph, e, draw, (offY) => laneAt(offY));
         canvas.style.cursor = ph.zone === 'move' ? 'grabbing' : 'ew-resize';
@@ -400,8 +409,8 @@ export function init(el, opts) {
     const trk = ti >= 0 && store.score ? store.score.tracks[ti] : null;
     let cur = '';
     if (trk && trk.kind !== 'audio') {
-      const y0 = rowY(ti) - scrollY;
-      const ph = partHitBand(ti, e.offsetX, e.offsetY, y0 + 2, partStripH());
+      const pb = partBandOf(ti);
+      const ph = partHitBand(ti, e.offsetX, e.offsetY, pb.yTop, partStripH());
       if (ph) cur = ph.zone === 'move' ? 'grab' : 'ew-resize';
     }
     if (trk && trk.kind === 'audio') {
