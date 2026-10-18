@@ -46,6 +46,7 @@ class HostClient:
         self._reader = None
         self._next_id = 0
         self.info: dict[str, Any] = {}
+        self.revision = 0
 
     def start(self, timeout: float = 15.0) -> dict[str, Any]:
         if not self.manifest.exists():
@@ -94,6 +95,7 @@ class HostClient:
             raise HostError("cannot connect to host IPC")
         self._reader = self.sock.makefile("r", encoding="utf-8", newline="\n")
         self.info = self.request("hello", {"protocol": 0, "client": "tsov-python"})
+        self.revision = int(self.info.get("revision", 0))
         return self.info
 
     def request(self, method: str, params: dict[str, Any] | None = None) -> Any:
@@ -115,7 +117,23 @@ class HostClient:
         return response.get("result")
 
     def state(self) -> dict[str, Any]:
-        return self.request("state")
+        state = self.request("state")
+        self.revision = int(state.get("revision", self.revision))
+        return state
+
+    def load_graph(self, graph: dict[str, Any], revision: int | None = None) -> dict[str, Any]:
+        """全量装载活图（tracks[].notes/gain/pan/mute）；服务端 revision 单调递增。"""
+        expected = self.revision if revision is None else int(revision)
+        result = self.request("load_graph", {"revision": expected, "graph": graph})
+        self.revision = int(result.get("revision", self.revision))
+        return result
+
+    def patch(self, ops: list[dict[str, Any]], revision: int | None = None) -> dict[str, Any]:
+        """增量 patch（set_notes / set_track_mix）；revision 断档由服务端拒绝（-32001）。"""
+        expected = self.revision if revision is None else int(revision)
+        result = self.request("patch", {"revision": expected, "ops": ops})
+        self.revision = int(result.get("revision", self.revision))
+        return result
 
     def transport(self, action: str, **params: Any) -> dict[str, Any]:
         return self.request("transport", {"action": action, **params})

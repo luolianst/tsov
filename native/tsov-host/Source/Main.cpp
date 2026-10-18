@@ -6,6 +6,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 
 #include <cmath>
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -749,6 +750,164 @@ int runIpcServer(const juce::String& manifestPath,
         return juce::JSON::toString(juce::var(object), true) + "\n";
     };
 
+    juce::int64 revision = 0;
+
+    auto parseNotes = [&engine, sampleRate](const juce::var& value,
+                                             std::vector<tsov::MixNote>& notes,
+                                             juce::String& error) -> bool
+    {
+        auto* array = value.getArray();
+        if (array == nullptr)
+        {
+            error = "notes must be an array";
+            return false;
+        }
+
+        const auto sr = engine.sampleRate() > 0.0 ? engine.sampleRate() : sampleRate;
+        for (const auto& item : *array)
+        {
+            auto* note = item.getDynamicObject();
+            if (note == nullptr)
+            {
+                error = "note must be an object";
+                return false;
+            }
+
+            const auto start = (double) item.getProperty("start", 0.0);
+            const auto end = (double) item.getProperty("end", 0.0);
+            const auto pitchValue = item.getProperty("pitch_midi", item.getProperty("note", 60));
+            const auto pitch = (int) pitchValue;
+            const auto velocity = (double) item.getProperty("velocity", 0.8);
+            if (start < 0.0 || end <= start || pitch < 0 || pitch > 127)
+            {
+                error = "invalid note (start/end/pitch)";
+                return false;
+            }
+
+            tsov::MixNote out;
+            out.startSample = (juce::int64) std::llround(start * sr);
+            out.endSample = (juce::int64) std::llround(end * sr);
+            out.note = pitch;
+            out.velocity = (float) juce::jlimit(0.0, 1.0, velocity);
+            notes.push_back(out);
+        }
+
+        std::stable_sort(notes.begin(), notes.end(), [](const tsov::MixNote& a, const tsov::MixNote& b)
+        {
+            return a.startSample < b.startSample;
+        });
+        return true;
+    };
+
+    auto applyGraph = [&engine, &parseNotes](const juce::var& graphValue, juce::String& error) -> bool
+    {
+        auto* graph = graphValue.getDynamicObject();
+        if (graph == nullptr)
+        {
+            error = "graph must be an object";
+            return false;
+        }
+        auto* tracks = graph->getProperty("tracks").getArray();
+        if (tracks == nullptr)
+        {
+            error = "graph.tracks must be an array";
+            return false;
+        }
+        if (tracks->size() > engine.trackCount())
+        {
+            error = "graph has more tracks than the sidecar manifest (restart required)";
+            return false;
+        }
+
+        struct Prepared
+        {
+            int index = 0;
+            std::vector<tsov::MixNote> notes;
+            float gain = 1.0f;
+            float pan = 0.0f;
+            bool mute = false;
+        };
+        std::vector<Prepared> prepared;
+        for (int i = 0; i < tracks->size(); ++i)
+        {
+            auto* track = (*tracks)[i].getDynamicObject();
+            if (track == nullptr)
+            {
+                error = "graph.tracks[] must be objects";
+                return false;
+            }
+            Prepared item;
+            item.index = i;
+            const auto trackValue = (*tracks)[i];
+            if (! parseNotes(trackValue.getProperty("notes", juce::var()), item.notes, error))
+                return false;
+            const auto info = engine.trackInfo(i);
+            item.gain = (float) (double) trackValue.getProperty("gain", info.gain);
+            item.pan = (float) (double) trackValue.getProperty("pan", info.pan);
+            item.mute = (bool) trackValue.getProperty("mute", info.mute);
+            prepared.push_back(std::move(item));
+        }
+
+        for (const auto& item : prepared)
+        {
+            engine.setNotes(item.index, item.notes);
+            engine.setTrackGain(item.index, item.gain);
+            engine.setTrackPan(item.index, item.pan);
+            engine.setTrackMute(item.index, item.mute);
+        }
+        return true;
+    };
+
+    auto applyOps = [&engine, &parseNotes](const juce::var& opsValue, juce::String& error) -> bool
+    {
+        auto* ops = opsValue.getArray();
+        if (ops == nullptr)
+        {
+            error = "ops must be an array";
+            return false;
+        }
+        for (const auto& opValue : *ops)
+        {
+            auto* op = opValue.getDynamicObject();
+            if (op == nullptr)
+            {
+                error = "op must be an object";
+                return false;
+            }
+            const auto kind = opValue.getProperty("op", juce::var()).toString();
+            const auto trackIndex = (int) opValue.getProperty("track", 0);
+            if (trackIndex < 0 || trackIndex >= engine.trackCount())
+            {
+                error = "track index out of range";
+                return false;
+            }
+
+            if (kind == "set_notes")
+            {
+                std::vector<tsov::MixNote> notes;
+                if (! parseNotes(opValue.getProperty("notes", juce::var()), notes, error))
+                    return false;
+                engine.setNotes(trackIndex, std::move(notes));
+            }
+            else if (kind == "set_track_mix")
+            {
+                const auto info = engine.trackInfo(trackIndex);
+                if (op->hasProperty("gain"))
+                    engine.setTrackGain(trackIndex, (float) (double) opValue.getProperty("gain", info.gain));
+                if (op->hasProperty("pan"))
+                    engine.setTrackPan(trackIndex, (float) (double) opValue.getProperty("pan", info.pan));
+                if (op->hasProperty("mute"))
+                    engine.setTrackMute(trackIndex, (bool) opValue.getProperty("mute", info.mute));
+            }
+            else
+            {
+                error = "unsupported op: " + kind;
+                return false;
+            }
+        }
+        return true;
+    };
+
     bool running = true;
     while (running)
     {
@@ -808,7 +967,7 @@ int runIpcServer(const juce::String& manifestPath,
                     result->setProperty("sampleRate", engine.sampleRate());
                     result->setProperty("blockSize", engine.blockSize());
                     result->setProperty("tracks", engine.trackCount());
-                    result->setProperty("revision", 0);
+                    result->setProperty("revision", revision);
                     response = makeResponse(id, juce::var(result));
                 }
                 else if (method == "state")
@@ -821,18 +980,76 @@ int runIpcServer(const juce::String& manifestPath,
                     result->setProperty("blockSize", engine.blockSize());
                     result->setProperty("masterPeak", engine.masterPeak());
                     result->setProperty("inputPeak", engine.inputPeak());
-                    result->setProperty("revision", 0);
+                    result->setProperty("revision", revision);
 
                     juce::Array<juce::var> tracks;
                     for (int i = 0; i < engine.trackCount(); ++i)
                     {
+                        const auto info = engine.trackInfo(i);
                         auto* track = new juce::DynamicObject();
-                        track->setProperty("name", engine.trackInfo(i).name);
+                        track->setProperty("name", info.name);
                         track->setProperty("peak", engine.trackPeak(i));
+                        track->setProperty("notes", info.noteCount);
+                        track->setProperty("gain", info.gain);
+                        track->setProperty("pan", info.pan);
+                        track->setProperty("mute", info.mute);
                         tracks.add(juce::var(track));
                     }
                     result->setProperty("tracks", tracks);
                     response = makeResponse(id, juce::var(result));
+                }
+                else if (method == "load_graph")
+                {
+                    const auto expected = (juce::int64) params.getProperty("revision", revision + 1);
+                    if (expected < revision)
+                    {
+                        response = makeError(id, -32001,
+                                             "stale revision: current=" + juce::String(revision));
+                    }
+                    else
+                    {
+                        juce::String graphError;
+                        const auto graph = params.getProperty("graph", juce::var());
+                        if (! applyGraph(graph, graphError))
+                        {
+                            response = makeError(id, -32602, graphError);
+                        }
+                        else
+                        {
+                            revision = juce::jmax(revision + 1, expected);
+                            auto* result = new juce::DynamicObject();
+                            result->setProperty("ok", true);
+                            result->setProperty("revision", revision);
+                            result->setProperty("tracks", engine.trackCount());
+                            response = makeResponse(id, juce::var(result));
+                        }
+                    }
+                }
+                else if (method == "patch")
+                {
+                    const auto expected = (juce::int64) params.getProperty("revision", revision);
+                    if (expected != revision)
+                    {
+                        response = makeError(id, -32001,
+                                             "stale revision: expected=" + juce::String(expected)
+                                             + " current=" + juce::String(revision));
+                    }
+                    else
+                    {
+                        juce::String opError;
+                        if (! applyOps(params.getProperty("ops", juce::var()), opError))
+                        {
+                            response = makeError(id, -32602, opError);
+                        }
+                        else
+                        {
+                            revision += 1;
+                            auto* result = new juce::DynamicObject();
+                            result->setProperty("ok", true);
+                            result->setProperty("revision", revision);
+                            response = makeResponse(id, juce::var(result));
+                        }
+                    }
                 }
                 else if (method == "transport")
                 {

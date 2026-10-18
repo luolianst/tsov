@@ -215,6 +215,7 @@ MixTrackInfo MixEngine::trackInfo(int index) const
         return info;
 
     const auto& track = *tracks[(size_t) index];
+    const juce::SpinLock::ScopedLockType lock(track.eventsLock);
     info.name = track.name;
     info.gain = track.gain;
     info.pan = track.pan;
@@ -233,19 +234,19 @@ float MixEngine::trackPeak(int index) const
 void MixEngine::setTrackGain(int index, float gain)
 {
     if (index >= 0 && index < (int) tracks.size())
-        tracks[(size_t) index]->gain = juce::jlimit(0.0f, 2.0f, gain);
+        tracks[(size_t) index]->gain.store(juce::jlimit(0.0f, 2.0f, gain));
 }
 
 void MixEngine::setTrackPan(int index, float pan)
 {
     if (index >= 0 && index < (int) tracks.size())
-        tracks[(size_t) index]->pan = juce::jlimit(-1.0f, 1.0f, pan);
+        tracks[(size_t) index]->pan.store(juce::jlimit(-1.0f, 1.0f, pan));
 }
 
 void MixEngine::setTrackMute(int index, bool mute)
 {
     if (index >= 0 && index < (int) tracks.size())
-        tracks[(size_t) index]->mute = mute;
+        tracks[(size_t) index]->mute.store(mute);
 }
 
 void MixEngine::setNotes(int index, std::vector<MixNote> notes)
@@ -254,6 +255,7 @@ void MixEngine::setNotes(int index, std::vector<MixNote> notes)
         return;
 
     auto& track = *tracks[(size_t) index];
+    const juce::SpinLock::ScopedLockType lock(track.eventsLock);
     track.notes = std::move(notes);
     track.events.clear();
     track.eventCursor = 0;
@@ -319,7 +321,10 @@ void MixEngine::play()
 {
     playhead = 0;
     for (auto& track : tracks)
+    {
+        const juce::SpinLock::ScopedLockType lock(track->eventsLock);
         track->eventCursor = 0;
+    }
     playing = true;
 }
 
@@ -334,6 +339,7 @@ void MixEngine::seek(int64_t sample)
     playhead = target;
     for (auto& track : tracks)
     {
+        const juce::SpinLock::ScopedLockType lock(track->eventsLock);
         track->eventCursor = (size_t) std::distance(
             track->events.begin(),
             std::lower_bound(track->events.begin(), track->events.end(), target,
@@ -513,6 +519,10 @@ void MixEngine::renderBlock(juce::AudioBuffer<float>& buffer, int numSamples)
             if (track->mute || track->plugin == nullptr)
                 continue;
 
+            const juce::SpinLock::ScopedTryLockType eventLock(track->eventsLock);
+            if (! eventLock.isLocked())
+                continue;
+
             if (track->buffer.getNumChannels() < 2 || track->buffer.getNumSamples() < numSamples)
                 track->buffer.setSize(juce::jmax(2, track->plugin->getTotalNumOutputChannels()), numSamples);
 
@@ -534,15 +544,16 @@ void MixEngine::renderBlock(juce::AudioBuffer<float>& buffer, int numSamples)
             if (peak > track->peak.load())
                 track->peak = peak;
 
-            const auto angle = (track->pan + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
-            const auto leftGain = track->gain * std::cos(angle);
-            const auto rightGain = track->gain * std::sin(angle);
+            const auto angle = (track->pan.load() + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
+            const auto leftGain = track->gain.load() * std::cos(angle);
+            const auto rightGain = track->gain.load() * std::sin(angle);
 
             const auto sourceChannels = track->buffer.getNumChannels();
             for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
             {
                 const auto sourceChannel = juce::jmin(channel, sourceChannels - 1);
-                const auto gain = channel == 0 ? leftGain : (channel == 1 ? rightGain : track->gain);
+                const auto gain = channel == 0 ? leftGain
+                                               : (channel == 1 ? rightGain : track->gain.load());
                 buffer.addFrom(channel, 0, track->buffer, sourceChannel, 0, numSamples, gain);
             }
         }

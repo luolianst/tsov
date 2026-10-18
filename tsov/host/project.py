@@ -63,6 +63,7 @@ class Project:
         self.root = Path(root)
         self.name = name
         self._journal: ActionJournal | None = None   # 快照窗口（懒建，M-V7 D2）
+        self._live_client = None                     # S2.2：可选 sidecar IPC 客户端
         self._lock = threading.RLock()               # P0 A2：写路径互斥
         self.root.mkdir(parents=True, exist_ok=True)
         self._ensure_git()
@@ -87,6 +88,26 @@ class Project:
         root = Path(root)
         score = Score.from_dict(json.loads((root / "score.json").read_text(encoding="utf-8")))
         return cls(score=score, root=root, name=root.name)
+
+    def attach_live(self, client) -> "Project":
+        """绑定 sidecar IPC 客户端；之后每次 apply_batch/apply_score/undo/redo 同步活图。"""
+        self._live_client = client
+        return self
+
+    def _sync_live(self) -> dict | None:
+        """把当前 Score 推成 sidecar 全量图；失败不阻断落盘（返回错误供调用方观察）。"""
+        if self._live_client is None:
+            return None
+        from .live import score_to_graph
+
+        try:
+            sample_rate = float((getattr(self._live_client, "info", {}) or {}).get("sampleRate", 44100.0))
+            return self._live_client.load_graph(
+                score_to_graph(self.score, sample_rate=sample_rate),
+                revision=int(getattr(self._live_client, "revision", 0)),
+            )
+        except Exception as exc:  # noqa: BLE001 sidecar 不在线不能阻断编辑落盘
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
     @_locked
     def save(self) -> Path:
@@ -278,7 +299,7 @@ class Project:
             )
             seq = entry["seq"]
 
-        return {
+        payload = {
             "ok": result.ok,
             "applied": result.applied,
             "errors": result.errors,
@@ -287,6 +308,10 @@ class Project:
             "seq": seq,
             "changed": True,
         }
+        live = self._sync_live()
+        if live is not None:
+            payload["live"] = live
+        return payload
 
     @property
     def journal(self) -> ActionJournal:
@@ -345,7 +370,7 @@ class Project:
         seq = None
         if record:
             seq = self._journal_append_apply(pre_dict, commit_message, source, note_diff.summary())
-        return {
+        payload = {
             "ok": True,
             "applied": 1,
             "errors": [],
@@ -353,6 +378,10 @@ class Project:
             "commit": None,
             "seq": seq,
         }
+        live = self._sync_live()
+        if live is not None:
+            payload["live"] = live
+        return payload
 
     def _journal_append_apply(self, pre_dict: dict, label: str, source: str, summary: str = "") -> int | None:
         """记窗口条目；**去重**：若窗口末条 post 已是该状态（agent 工具链已记录），只返回其 seq。
@@ -382,6 +411,7 @@ class Project:
             self.journal.redo()
             return False
         self.save()
+        self._sync_live()
         return True
 
     @_locked
@@ -396,6 +426,7 @@ class Project:
             self.journal.undo()
             return False
         self.save()
+        self._sync_live()
         return True
 
     # ------------------------------------------------------------------

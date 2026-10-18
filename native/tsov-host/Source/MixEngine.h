@@ -121,11 +121,12 @@ private:
         size_t eventCursor = 0;
         std::vector<MixNote> notes;
         std::atomic<float> peak { 0.0f };
-        float gain = 1.0f;
-        float pan = 0.0f;
-        bool mute = false;
+        std::atomic<float> gain { 1.0f };
+        std::atomic<float> pan { 0.0f };
+        std::atomic<bool> mute { false };
         bool testPattern = false;
         int noteOffset = 0;
+        mutable juce::SpinLock eventsLock;
     };
 
     void prepareTracks(double sampleRate, int blockSize);
