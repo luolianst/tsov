@@ -45,7 +45,7 @@ Python（`tsov/host/host_client.py`）与 sidecar（`tsov-host.exe`）之间的�
 ## 约束
 
 - 只绑定 `127.0.0.1`；v0 不做鉴权（本机单用户），S1 起加临时 token。
-- `revision` 单调递增；`patch` 幂等，重复 revision 直接返回当前 revision。
+- `revision` 单调递增；`patch` 以 expected revision 对账，断档/重复回 `-32001`（v0 不做幂等重放）。
 - 音频线程只消费已排序事件队列；不得在回调内做 JSON/分配/锁。
 - 崩溃/重启后客户端重连 → `hello` → 全量恢复；当前由 `HostClient.restart()` 重新拉起同一 manifest 并重载每轨 VST3 state。
 - **活图 v0（S2.2）**：`graph = {sample_rate, tempo, time_signature, tracks:[{id,name,notes:[{start,end,pitch_midi,velocity}],gain,pan,mute}]}`；notes 为**秒**，sidecar 按实际采样率转样本。`load_graph` 以 sidecar 现存轨序为准，插件实例/state 仍由 manifest 启动时加载；`patch` 的 op 只影响未来触发（播放中编辑不重触发已发声音符）。
