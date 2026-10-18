@@ -18,6 +18,11 @@ let lastDraw = () => {};
 
 function r6(x) { return Math.round(Number(x) * 1e6) / 1e6; }
 
+/* 设置：音符循环（默认关；开=右缘延伸按原内容 loop，关=只加长不复制） */
+function noteLoopEnabled() {
+  try { return localStorage.getItem('tsov.noteLoop') === '1'; } catch (e) { return false; }
+}
+
 export function partsOf(trk) {
   return (trk && Array.isArray(trk.parts)) ? trk.parts : [];
 }
@@ -144,7 +149,7 @@ export async function finishPartDrag() {
       : d.mode === 'trim-in'
         ? { op: 'resize_part', track: d.ti, value: { part: o.id, start: r6(p.start), length: r6(p.length), mode: 'crop' } }
         : { op: 'resize_part', track: d.ti, value: { part: o.id, length: r6(p.length),
-          mode: p.length > o.length ? 'loop' : 'crop' } };
+          mode: p.length > o.length ? (noteLoopEnabled() ? 'loop' : 'crop') : 'crop' } };
   try {
     const r = await api.postBatch(store.project, label, [cmd], null);
     if (!r.applied) setError(t('被拒：') + (r.errors || []).join('；'));

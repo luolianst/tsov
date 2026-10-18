@@ -411,6 +411,15 @@ function boot() {
   if (setThemeSel) setThemeSel.addEventListener('change', () => setTheme(setThemeSel.value));
   window.addEventListener('tsov-theme', () => { syncThemeSel(); bus.dispatch('view'); });
   syncThemeSel();
+
+  /* ---- 音符循环开关（默认关；只影响 Part 右缘延伸的重复音符） ---- */
+  const setNoteLoop = $('set-note-loop');
+  if (setNoteLoop) {
+    try { setNoteLoop.checked = localStorage.getItem('tsov.noteLoop') === '1'; } catch (e) { /* ignore */ }
+    setNoteLoop.addEventListener('change', () => {
+      try { localStorage.setItem('tsov.noteLoop', setNoteLoop.checked ? '1' : '0'); } catch (e) { /* ignore */ }
+    });
+  }
   const setOut = $('set-out');
   if (setOut) setOut.addEventListener('change', () => toast(t('输出：') + setOut.value + t('（ASIO / 低延迟后续迭代）')));
 
