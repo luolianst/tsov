@@ -349,10 +349,10 @@ export function init(el, opts) {
     /* E3 段1 / v0.2 C2：参照层（Ctrl/Shift 单击）——灰显示仅总谱面用；单轨副区改走左栏手势族 */
     if (e.ctrlKey || e.shiftKey || e.metaKey) { toggleRef(ti); return; }
     const trk = store.score && store.score.tracks[ti];
-    /* S3.3：Part 顶条手势优先（只在顶条内；下方音符逻辑不变） */
+    /* S3.3：Part 整块命中（总谱内不可编辑音符，整块都可拖） */
     if (trk && trk.kind !== 'audio' && !isPartDragging()) {
       const pb = partBandOf(ti);
-      const ph = partHitBand(ti, e.offsetX, e.offsetY, pb.yTop, partStripH());
+      const ph = partHitBand(ti, e.offsetX, e.offsetY, pb.yTop, pb.hh);
       if (ph) {
         beginPartDrag(ti, ph, e, draw, (offY) => laneAt(offY));
         canvas.style.cursor = ph.zone === 'move' ? 'grabbing' : 'ew-resize';
@@ -410,7 +410,7 @@ export function init(el, opts) {
     let cur = '';
     if (trk && trk.kind !== 'audio') {
       const pb = partBandOf(ti);
-      const ph = partHitBand(ti, e.offsetX, e.offsetY, pb.yTop, partStripH());
+      const ph = partHitBand(ti, e.offsetX, e.offsetY, pb.yTop, pb.hh);
       if (ph) cur = ph.zone === 'move' ? 'grab' : 'ew-resize';
     }
     if (trk && trk.kind === 'audio') {

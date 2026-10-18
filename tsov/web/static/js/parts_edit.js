@@ -47,11 +47,11 @@ function geom(part) {
   return { x0, w, x1: x0 + w };
 }
 
-/* 命中：只在 Part 顶条内（保留下方音符编辑）；zone=move/trim-in/trim-out */
-export function partHitBand(ti, offX, offY, yTop, stripH = STRIP) {
+/* 命中：Part 整块（总谱用 bodyH；单轨可传 header 高，保留音符编辑） */
+export function partHitBand(ti, offX, offY, yTop, hitH = STRIP) {
   const trk = store.score && store.score.tracks[ti];
   if (!trk || trk.kind === 'audio') return null;
-  if (offY < yTop - 2 || offY > yTop + stripH + 2) return null;
+  if (offY < yTop - 2 || offY > yTop + hitH + 2) return null;
   const list = (drag && drag.ti === ti) ? drag.preview : partsOf(trk);
   for (let idx = list.length - 1; idx >= 0; idx--) {
     const p = list[idx];
@@ -176,9 +176,9 @@ export function drawPartBands(ctx, o) {
     const isPreview = String(part.id || '').startsWith('__');
     const isSel = o.selId && part.id === o.selId;
 
-    /* 整轨淡色 body（在音符下面） */
+    /* 整轨深色 body（在音符下面；总谱里深色块本人可拖） */
     ctx.fillStyle = o.col;
-    ctx.globalAlpha = isPreview ? 0.11 : (o.inDrag ? 0.11 : (isSel ? 0.13 : 0.08));
+    ctx.globalAlpha = isPreview ? 0.24 : (o.inDrag ? 0.50 : (isSel ? 0.52 : 0.40));
     if (ctx.roundRect) {
       ctx.beginPath();
       ctx.roundRect(g.x0, bodyY, g.w, bodyH, 4);
@@ -188,7 +188,7 @@ export function drawPartBands(ctx, o) {
     }
     ctx.globalAlpha = 1;
     ctx.strokeStyle = isPreview ? p.playhead : (isSel ? p.selStroke : o.col);
-    ctx.globalAlpha = isPreview ? 0.55 : (isSel ? 0.85 : 0.30);
+    ctx.globalAlpha = isPreview ? 0.55 : (isSel ? 0.9 : 0.72);
     if (ctx.roundRect) {
       ctx.beginPath();
       ctx.roundRect(g.x0 + 0.5, bodyY + 0.5, Math.max(2, g.w) - 1, bodyH - 1, 3.5);
@@ -198,9 +198,9 @@ export function drawPartBands(ctx, o) {
     }
     ctx.globalAlpha = 1;
 
-    /* 顶部 header（手势命中区；仍保持轻淡，不盖住下方音符） */
+    /* 顶部 header（标题/标签；视觉仍略强于 body） */
     ctx.fillStyle = o.col;
-    ctx.globalAlpha = isPreview ? 0.18 : (o.inDrag ? 0.24 : (isSel ? 0.28 : 0.14));
+    ctx.globalAlpha = isPreview ? 0.28 : (o.inDrag ? 0.54 : (isSel ? 0.56 : 0.46));
     ctx.fillRect(g.x0, bodyY, g.w, Math.min(headH, bodyH));
     ctx.globalAlpha = 1;
     ctx.strokeStyle = isPreview ? p.playhead : (isSel ? p.selStroke : p.keySep);
@@ -208,9 +208,9 @@ export function drawPartBands(ctx, o) {
     ctx.strokeRect(g.x0 + 0.5, bodyY + 0.5, Math.max(2, g.w) - 1, Math.min(headH, bodyH) - 1);
     ctx.setLineDash([]);
 
-    /* 左右缘把手（整高，便于识别可拖边界） */
+    /* 左右缘把手（整高） */
     ctx.fillStyle = isPreview ? p.playhead : o.col;
-    ctx.globalAlpha = 0.55;
+    ctx.globalAlpha = 0.8;
     ctx.fillRect(g.x0, bodyY, 3, bodyH);
     ctx.fillRect(Math.max(g.x0 + 3, g.x1 - 3), bodyY, 3, bodyH);
     ctx.globalAlpha = 1;
