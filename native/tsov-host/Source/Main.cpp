@@ -855,6 +855,8 @@ int runIpcServer(const juce::String& manifestPath,
             engine.setTrackPan(item.index, item.pan);
             engine.setTrackMute(item.index, item.mute);
         }
+        for (int i = (int) prepared.size(); i < engine.trackCount(); ++i)
+            engine.setNotes(i, {});
         return true;
     };
 

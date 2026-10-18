@@ -275,6 +275,17 @@ void MixEngine::setNotes(int index, std::vector<MixNote> notes)
             return a.sample < b.sample;
         return a.message.isNoteOff() && !b.message.isNoteOff();
     });
+
+    // Live edits only affect future triggers (N1): skip events already behind
+    // the current playhead instead of replaying the whole track.
+    const auto target = playhead.load();
+    track.eventCursor = (size_t) std::distance(
+        track.events.begin(),
+        std::lower_bound(track.events.begin(), track.events.end(), target,
+                         [](const MixTimedEvent& event, int64_t value)
+                         {
+                             return event.sample < value;
+                         }));
 }
 
 void MixEngine::buildTestPattern(Track& track, double sampleRate)
