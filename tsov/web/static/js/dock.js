@@ -319,6 +319,15 @@ function fillSourceRows(listEl) {
   for (const s of rows) {
     const row = document.createElement('div');
     row.className = 'src-lib-item' + (s.missing ? ' missing' : '');
+    /* S4.2：音源条目可拖到轨道行（替换）或轨道列表空白（新建轨） */
+    row.draggable = !s.missing;
+    row.addEventListener('dragstart', (e) => {
+      if (s.missing) { e.preventDefault(); return; }
+      try {
+        e.dataTransfer.setData('application/x-tsov-source', s.id);
+        e.dataTransfer.effectAllowed = 'copy';
+      } catch (err) { /* ignore */ }
+    });
 
     const fav = document.createElement('button');
     fav.className = 'src-fav' + (s.favorite ? ' on' : '');
@@ -366,10 +375,8 @@ function fillSourceRows(listEl) {
     } else {
       const mount = document.createElement('button');
       mount.textContent = t('挂载');
-      mount.disabled = !cur || !['vst3', 'sfz'].includes(s.kind);
-      mount.title = !cur ? t('先选一条轨道')
-        : (s.kind === 'sf2' ? t('SF2 轨道级挂载后续')
-          : t('把此音源挂到当前轨'));
+      mount.disabled = !cur;
+      mount.title = !cur ? t('先选一条轨道') : t('把此音源挂到当前轨');
       mount.onclick = async (ev) => {
         ev.stopPropagation();
         if (!cur) return;

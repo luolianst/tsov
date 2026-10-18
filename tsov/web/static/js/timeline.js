@@ -138,6 +138,30 @@ async function postMix(ti, value, label) {
   } catch (e) { setError(e.message); }
 }
 
+/* S4.2：音源面板拖拽/挂载命令层（与面板按钮同一路径） */
+async function mountSourceAt(ti, sourceId) {
+  if (!store.project || !sourceId) return;
+  try {
+    const r = await api.postBatch(store.project, t('挂载音源'),
+      [{ op: 'mount_source', track: ti, value: { source_id: sourceId } }], null);
+    if (r.applied) bus.dispatch('toast', t('已挂载音源') + ' ' + refTag(r));
+    else setError(t('被拒：') + (r.errors || []).join('；'));
+  } catch (e) { setError(e.message); }
+}
+
+async function newTrackWithSource(sourceId) {
+  if (!store.project || !sourceId) return;
+  const idx = (store.score && store.score.tracks ? store.score.tracks.length : 0);
+  try {
+    const r = await api.postBatch(store.project, t('新建音源轨'), [
+      { op: 'add_track', value: { name: t('新音源轨') } },
+      { op: 'mount_source', track: idx, value: { source_id: sourceId } },
+    ], null);
+    if (r.applied) bus.dispatch('toast', t('已新建音源轨并挂载') + ' ' + refTag(r));
+    else setError(t('被拒：') + (r.errors || []).join('；'));
+  } catch (e) { setError(e.message); }
+}
+
 function markSelected(el) {
   let sel = -1;
   for (const node of el.children) {
@@ -169,19 +193,20 @@ function trackAddBtn() {
 /* ---- v0.2 批C 后段（P4/P5）：拖拽排序辅助 ---- */
 
 function clearDropMarks(el) {
-  for (const c of el.querySelectorAll('.drop-before, .drop-after, .drop-into')) {
-    c.classList.remove('drop-before', 'drop-after', 'drop-into');
+  for (const c of el.querySelectorAll('.drop-before, .drop-after, .drop-into, .drop-source')) {
+    c.classList.remove('drop-before', 'drop-after', 'drop-into', 'drop-source');
   }
-  el.classList.remove('drop-end');
+  el.classList.remove('drop-end', 'drop-source');
 }
 
 function dragKinds(e) {
   /* dragover 期 getData 被浏览器禁用 → 以「在途状态 + 类型表」判定；drop 期由 getDragSource 取真值 */
-  const out = { track: dragTrack >= 0, folder: !!dragFolder };
+  const out = { track: dragTrack >= 0, folder: !!dragFolder, source: false };
   try {
     const ts = Array.from((e.dataTransfer && e.dataTransfer.types) || []);
     if (ts.includes('application/x-tsov-track')) out.track = true;
     if (ts.includes('application/x-tsov-folder')) out.folder = true;
+    if (ts.includes('application/x-tsov-source')) out.source = true;
   } catch (err) { /* 合成事件无 dt */ }
   return out;
 }
@@ -192,6 +217,8 @@ function getDragSource(e) {
   try {
     const dt = e && e.dataTransfer;
     if (dt) {
+      const sid = dt.getData('application/x-tsov-source');
+      if (sid !== '' && sid != null) return { kind: 'source', sourceId: sid };
       const t = dt.getData('application/x-tsov-track');
       if (t !== '' && t != null) return { kind: 'track', ti: parseInt(t, 10) };
       const f = dt.getData('application/x-tsov-folder');
@@ -295,8 +322,29 @@ async function leaveToEnd(ti) {
   } catch (e) { setError(e.message); }
 }
 
+function wireSourceDropList(el) {
+  /* S4.2：拖到空白处 = 新建音源轨（与轨道行 drop 同命令路径） */
+  el.ondragover = (e) => {
+    if (!dragKinds(e).source) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    el.classList.add('drop-source');
+  };
+  el.ondragleave = (e) => {
+    if (!el.contains(e.relatedTarget)) el.classList.remove('drop-source');
+  };
+  el.ondrop = (e) => {
+    const src = getDragSource(e);
+    if (!src || src.kind !== 'source') return;
+    e.preventDefault();
+    el.classList.remove('drop-source');
+    newTrackWithSource(src.sourceId);
+  };
+}
+
 function renderTracks(el) {
   el.innerHTML = '';
+  wireSourceDropList(el);
   if (!store.score || !store.score.tracks.length) {
     const d = document.createElement('div');
     d.className = 'muted small';
@@ -420,18 +468,24 @@ function renderTracks(el) {
     item.addEventListener('dragend', () => { dragTrack = -1; item.classList.remove('dragging'); clearDropMarks(el); });
     item.addEventListener('dragover', (e) => {
       const k = dragKinds(e);
-      if (!k.track) return;
+      if (!k.track && !k.source) return;
       e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
+      e.dataTransfer.dropEffect = k.source ? 'copy' : 'move';
       clearDropMarks(el);
+      if (k.source) { e.stopPropagation(); item.classList.add('drop-source'); return; }
       const r = item.getBoundingClientRect();
       item.classList.add((e.clientY - r.top) < r.height / 2 ? 'drop-before' : 'drop-after');
     });
     item.addEventListener('drop', (e) => {
       const src = getDragSource(e);
-      if (!src || src.kind !== 'track') return;
+      if (!src || (src.kind !== 'track' && src.kind !== 'source')) return;
       e.preventDefault();
+      e.stopPropagation();
       clearDropMarks(el);
+      if (src.kind === 'source') {
+        mountSourceAt(ti, src.sourceId);
+        return;
+      }
       if (src.ti === ti) return;
       const r = item.getBoundingClientRect();
       dropTrackAt(el, src.ti, ti, (e.clientY - r.top) < r.height / 2);

@@ -1187,7 +1187,10 @@ body.chat-resizing { cursor: col-resize; user-select: none; }
 .track-item.drop-before, .tl-folder.drop-before { box-shadow: 0 -2px 0 0 var(--accent); }
 .track-item.drop-after, .tl-folder.drop-after { box-shadow: 0 2px 0 0 var(--accent); }
 .tl-folder.drop-into { outline: 2px dashed var(--accent); outline-offset: -2px; }
+.track-item.drop-source, #track-list.drop-source { outline: 2px dashed var(--accent); outline-offset: -2px; }
 #track-list.drop-end { box-shadow: inset 0 -3px 0 0 var(--accent); }
+.src-lib-item[draggable="true"] { cursor: grab; }
+.src-lib-item[draggable="true"]:active { cursor: grabbing; }
 
 .fx-gear {
   border: none; background: none; cursor: pointer; font-size: 12px;
