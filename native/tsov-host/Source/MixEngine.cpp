@@ -323,6 +323,27 @@ void MixEngine::play()
     playing = true;
 }
 
+void MixEngine::resume()
+{
+    playing = true;
+}
+
+void MixEngine::seek(int64_t sample)
+{
+    const auto target = juce::jmax<int64_t>(0, sample);
+    playhead = target;
+    for (auto& track : tracks)
+    {
+        track->eventCursor = (size_t) std::distance(
+            track->events.begin(),
+            std::lower_bound(track->events.begin(), track->events.end(), target,
+                             [](const MixTimedEvent& event, int64_t value)
+                             {
+                                 return event.sample < value;
+                             }));
+    }
+}
+
 void MixEngine::stop()
 {
     playing = false;

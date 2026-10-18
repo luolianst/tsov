@@ -73,6 +73,8 @@ public:
     void setNotes(int index, std::vector<MixNote> notes);
 
     void play();
+    void resume();
+    void seek(int64_t sample);
     void stop();
     bool isPlaying() const { return playing.load(); }
     int64_t playheadSamples() const { return playhead.load(); }

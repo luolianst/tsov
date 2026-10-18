@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <thread>
 #include <chrono>
@@ -158,6 +159,7 @@ void printUsage()
     line("  tsov-host --plugin-editor <path.vst3> [--device <name>] [--duration <sec>] [--note <midi>] [--state <file>]");
     line("  tsov-host --mix-test <path.vst3> [--tracks <n>] [--mix-gain <g>] [--device <name|null>] [--monitor] [--record <out.wav>]");
     line("  tsov-host --mix-manifest <tracks.json> [--device <name|null>] [--duration <sec>]");
+    line("  tsov-host --mix-manifest <tracks.json> --serve [--port 8765]   # IPC server");
     line("  tsov-host --mix-manifest <tracks.json> --crash-after <sec>   # watchdog test only");
     line("  tsov-host --version");
     line("  tsov-host --help");
@@ -654,6 +656,241 @@ int runMixEngine(bool nullDevice,
     line("mix=ok");
     return 0;
 }
+
+int runIpcServer(const juce::String& manifestPath,
+                 int port,
+                 const juce::String& deviceSubstring,
+                 const juce::String& deviceTypeSubstring,
+                 double sampleRate,
+                 int blockSize,
+                 double trackGain)
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+
+    tsov::MixEngine engine;
+    tsov::MixEngine::Config config;
+    config.deviceSubstring = deviceSubstring;
+    config.deviceTypeSubstring = deviceTypeSubstring;
+    config.sampleRate = sampleRate;
+    config.blockSize = blockSize;
+
+    std::vector<MixTrackSpec> specs;
+    juce::String manifestError;
+    if (! loadMixManifest(juce::File(manifestPath), specs, manifestError))
+    {
+        std::cerr << "manifest load failed: " << manifestError << std::endl;
+        return 6;
+    }
+    if (specs.empty() || specs.size() > 16)
+    {
+        std::cerr << "manifest track count invalid" << std::endl;
+        return 6;
+    }
+
+    for (const auto& spec : specs)
+    {
+        juce::String pluginError;
+        auto instance = tsov::PluginHost::create(spec.plugin, sampleRate, blockSize, pluginError);
+        if (instance == nullptr)
+        {
+            std::cerr << "plugin load failed: " << pluginError << std::endl;
+            return 4;
+        }
+        if (spec.state.isNotEmpty())
+        {
+            juce::String stateError;
+            if (! tsov::PluginHost::loadState(*instance, juce::File(spec.state), stateError))
+                std::cerr << "state load failed: " << stateError << std::endl;
+        }
+        if (engine.addTrack(std::move(instance), spec.name, (float) spec.gain, (float) spec.pan, spec.note - 60, true) < 0)
+            return 5;
+    }
+
+    juce::String openError;
+    if (! engine.open(config, openError))
+    {
+        std::cerr << "open failed: " << openError << std::endl;
+        return 3;
+    }
+    engine.stop();
+
+    juce::StreamingSocket listener;
+    if (! listener.createListener(port, "127.0.0.1"))
+    {
+        std::cerr << "cannot listen on 127.0.0.1:" << port << std::endl;
+        return 7;
+    }
+
+    std::cout << "ipc_ready port=" << port
+              << " sample_rate=" << engine.sampleRate()
+              << " block_size=" << engine.blockSize()
+              << " tracks=" << engine.trackCount()
+              << std::endl;
+    std::cout.flush();
+
+    auto makeResponse = [](const juce::var& id, const juce::var& result)
+    {
+        auto* object = new juce::DynamicObject();
+        object->setProperty("jsonrpc", "2.0");
+        object->setProperty("id", id);
+        object->setProperty("result", result);
+        return juce::JSON::toString(juce::var(object), true) + "\n";
+    };
+
+    auto makeError = [](const juce::var& id, int code, const juce::String& message)
+    {
+        auto* error = new juce::DynamicObject();
+        error->setProperty("code", code);
+        error->setProperty("message", message);
+        auto* object = new juce::DynamicObject();
+        object->setProperty("jsonrpc", "2.0");
+        object->setProperty("id", id);
+        object->setProperty("error", juce::var(error));
+        return juce::JSON::toString(juce::var(object), true) + "\n";
+    };
+
+    bool running = true;
+    while (running)
+    {
+        std::unique_ptr<juce::StreamingSocket> client(listener.waitForNextConnection());
+        if (client == nullptr)
+            continue;
+
+        std::string pending;
+        while (running && client->isConnected())
+        {
+            if (client->waitUntilReady(true, 100) != 1)
+                continue;
+
+            char buffer[4096];
+            const auto bytes = client->read(buffer, (int) sizeof(buffer), false);
+            if (bytes <= 0)
+                break;
+            pending.append(buffer, (size_t) bytes);
+
+            size_t newline = 0;
+            while ((newline = pending.find('\n')) != std::string::npos)
+            {
+                auto line = juce::String(pending.substr(0, newline)).trim();
+                pending.erase(0, newline + 1);
+                if (line.isEmpty())
+                    continue;
+
+                const auto message = juce::JSON::parse(line);
+                auto* object = message.getDynamicObject();
+                if (object == nullptr)
+                {
+                    const auto response = makeError({}, -32700, "parse error");
+                    client->write(response.toRawUTF8(), response.getNumBytesAsUTF8());
+                    continue;
+                }
+
+                const auto id = object->getProperty("id");
+                const auto method = object->getProperty("method").toString();
+                const auto params = object->getProperty("params");
+                juce::String response;
+
+                if (method == "hello")
+                {
+                    const auto protocol = (int) params.getProperty("protocol", 0);
+                    if (protocol != 0)
+                    {
+                        response = makeError(id, -32000, "protocol mismatch");
+                        client->write(response.toRawUTF8(), response.getNumBytesAsUTF8());
+                        running = false;
+                        break;
+                    }
+
+                    auto* result = new juce::DynamicObject();
+                    result->setProperty("protocol", 0);
+                    result->setProperty("host", "tsov-host");
+                    result->setProperty("version", "0.1.0");
+                    result->setProperty("sampleRate", engine.sampleRate());
+                    result->setProperty("blockSize", engine.blockSize());
+                    result->setProperty("tracks", engine.trackCount());
+                    result->setProperty("revision", 0);
+                    response = makeResponse(id, juce::var(result));
+                }
+                else if (method == "state")
+                {
+                    auto* result = new juce::DynamicObject();
+                    result->setProperty("playhead", (juce::int64) engine.playheadSamples());
+                    result->setProperty("playing", engine.isPlaying());
+                    result->setProperty("xruns", engine.xrunCount());
+                    result->setProperty("sampleRate", engine.sampleRate());
+                    result->setProperty("blockSize", engine.blockSize());
+                    result->setProperty("masterPeak", engine.masterPeak());
+                    result->setProperty("inputPeak", engine.inputPeak());
+                    result->setProperty("revision", 0);
+
+                    juce::Array<juce::var> tracks;
+                    for (int i = 0; i < engine.trackCount(); ++i)
+                    {
+                        auto* track = new juce::DynamicObject();
+                        track->setProperty("name", engine.trackInfo(i).name);
+                        track->setProperty("peak", engine.trackPeak(i));
+                        tracks.add(juce::var(track));
+                    }
+                    result->setProperty("tracks", tracks);
+                    response = makeResponse(id, juce::var(result));
+                }
+                else if (method == "transport")
+                {
+                    const auto action = params.getProperty(juce::Identifier("action"), {}).toString();
+                    auto* result = new juce::DynamicObject();
+                    if (action == "play")
+                    {
+                        engine.resume();
+                        result->setProperty("ok", true);
+                    }
+                    else if (action == "stop")
+                    {
+                        engine.stop();
+                        result->setProperty("ok", true);
+                    }
+                    else if (action == "seek")
+                    {
+                        const auto position = (juce::int64) params.getProperty("position", 0);
+                        engine.seek(position);
+                        result->setProperty("ok", true);
+                    }
+                    else
+                    {
+                        response = makeError(id, -32602, "unsupported transport action");
+                    }
+                    if (response.isEmpty())
+                        response = makeResponse(id, juce::var(result));
+                }
+                else if (method == "shutdown")
+                {
+                    auto* result = new juce::DynamicObject();
+                    result->setProperty("ok", true);
+                    response = makeResponse(id, juce::var(result));
+                    running = false;
+                }
+                else
+                {
+                    response = makeError(id, -32601, "method not found");
+                }
+
+                if (response.isNotEmpty())
+                    client->write(response.toRawUTF8(), response.getNumBytesAsUTF8());
+                if (! running)
+                    break;
+            }
+        }
+    }
+
+    std::cout << "ipc_shutdown=ok" << std::endl;
+    std::cout.flush();
+#if defined(_WIN32)
+    // Same teardown guard as --plugin-editor: Kontakt's DLL detach can hang.
+    ::TerminateProcess(::GetCurrentProcess(), 0);
+#else
+    std::_Exit(0);
+#endif
+    return 0;
+}
 } // namespace
 
 int main(int argc, char** argv)
@@ -674,6 +911,8 @@ int main(int argc, char** argv)
     double mixGain = 0.55;
     double crashAfter = 0.0;
     bool monitorInput = false;
+    bool serve = false;
+    int ipcPort = 8765;
     juce::String deviceSubstring;
     juce::String deviceTypeSubstring;
     double duration = 2.0;
@@ -706,6 +945,8 @@ int main(int argc, char** argv)
         else if (arg == "--tracks" && i + 1 < argc) mixTracks = std::stoi(argv[++i]);
         else if (arg == "--mix-gain" && i + 1 < argc) mixGain = std::stod(argv[++i]);
         else if (arg == "--crash-after" && i + 1 < argc) crashAfter = std::stod(argv[++i]);
+        else if (arg == "--serve") serve = true;
+        else if (arg == "--port" && i + 1 < argc) ipcPort = std::stoi(argv[++i]);
         else if (arg == "--monitor") monitorInput = true;
         else if (arg == "--device" && i + 1 < argc)
         {
@@ -755,7 +996,11 @@ int main(int argc, char** argv)
     if (pluginEditorPath.isNotEmpty())
         return runPluginEditor(pluginEditorPath, deviceSubstring, deviceTypeSubstring, duration, sampleRate, blockSize, testNote, statePath);
     if (mixTestPath.isNotEmpty() || mixManifestPath.isNotEmpty())
+    {
+        if (serve)
+            return runIpcServer(mixManifestPath, ipcPort, deviceSubstring, deviceTypeSubstring, sampleRate, blockSize, mixGain);
         return runMixEngine(nullDevice, deviceSubstring, deviceTypeSubstring, mixTestPath, mixManifestPath, duration, sampleRate, blockSize, mixTracks, monitorInput, recordPath, mixGain, crashAfter);
+    }
     if (run)
         return runEngine(nullDevice, deviceSubstring, deviceTypeSubstring, pluginLivePath, duration, toneHz, gain, sampleRate, blockSize, testNote, statePath);
 
