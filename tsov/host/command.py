@@ -579,6 +579,9 @@ def _apply_set_instrument(track, c: EditCommand) -> str | None:
     track.instrument.program = program
     # S4.1：手动改 program = 脱离全局库身份；清掉旧 source_id，避免工程指向错误音源
     track.instrument.source_id = ""
+    # S4.2：切到 VST3/SFZ 时 SF2 soundfont 不再适用；GM 程序保留轨级 soundfont
+    if program.startswith(("vst3:", "sfz:")):
+        track.instrument.soundfont = ""
     return None
 
 
@@ -589,7 +592,7 @@ def _apply_mount_source(track, c: EditCommand) -> str | None:
       - source_id 必须在 sources.json 中且非 missing；
       - VST3 → program="vst3:<bundle path>"，清除旧 params/preset（换源不是换预设）；
       - SFZ  → program="sfz:<sfz path>"；
-      - SF2  → 暂不支持（引擎 soundfont 是全局的；S4 后续加轨级 soundfont 字段）。
+      - SF2  → 轨级 soundfont=<sf2 path>；program 保持空/合法 GM 名（默认钢琴，drums=打击乐）。
     """
     v = c.value if isinstance(c.value, dict) else {}
     sid = str(v.get("source_id") or "").strip()
@@ -608,12 +611,19 @@ def _apply_mount_source(track, c: EditCommand) -> str | None:
         program = f"vst3:{src.path}"
     elif src.kind == "sfz":
         program = f"sfz:{src.path}"
+    elif src.kind == "sf2":
+        from ..midi.export import GM_PROGRAMS
+
+        program = str(getattr(track.instrument, "program", "") or "")
+        if program and program not in GM_PROGRAMS:
+            program = ""
     else:
-        return f"SF2 音源暂不支持按轨挂载：{src.name}（S4 后续）"
+        return f"未知音源类型：{src.kind}（{src.name}）"
     track.instrument.program = program
     track.instrument.source_id = src.id
     track.instrument.params = {}
     track.instrument.preset = None
+    track.instrument.soundfont = src.path if src.kind == "sf2" else ""
     try:
         lib.mark_recent(src.id)
         lib.save()

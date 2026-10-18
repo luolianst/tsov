@@ -174,3 +174,36 @@ def test_mount_source_command(tmp_path, monkeypatch):
     assert result["applied"] == 1 and not result["errors"], result
     assert project.score.tracks[0].instrument.program == f"sfz:{sfz.path}"
     assert project.score.tracks[0].instrument.source_id == sfz.id
+    assert project.score.tracks[0].instrument.soundfont == ""
+
+    # S4.2：SF2 轨级挂载——保留合法 GM program（默认空=钢琴），写轨级 soundfont
+    sf2 = next(s for s in lib.sources.values() if s.kind == "sf2")
+    batch = EditBatch(label="mount-sf2").add(
+        "mount_source", track=0, value={"source_id": sf2.id})
+    result = project.apply_batch(batch)
+    assert result["applied"] == 1 and not result["errors"], result
+    inst = project.score.tracks[0].instrument
+    assert inst.program == ""
+    assert inst.source_id == sf2.id
+    assert inst.soundfont == sf2.path
+    assert inst.params == {} and inst.preset is None
+
+
+def test_mount_sf2_preserves_valid_gm_program(tmp_path, monkeypatch):
+    root = tmp_path / "sources"
+    root.mkdir()
+    _tree(root)
+    lib = SourceLibrary(tmp_path / "sources.json", roots=[str(root)])
+    lib.scan()
+    monkeypatch.setenv("TSOV_SOURCES_PATH", str(tmp_path / "sources.json"))
+    sf2 = next(s for s in lib.sources.values() if s.kind == "sf2")
+    score = Score(title="sf2-drums", tracks=[Track(name="drums", instrument=Instrument(program="drums"))])
+    project = Project.create("sf2-drums", score, parent=tmp_path)
+    result = project.apply_batch(
+        EditBatch(label="mount-sf2-drums").add(
+            "mount_source", track=0, value={"source_id": sf2.id})
+    )
+    assert result["applied"] == 1 and not result["errors"], result
+    inst = project.score.tracks[0].instrument
+    assert inst.program == "drums"
+    assert inst.soundfont == sf2.path

@@ -32,11 +32,12 @@ class _SigSource(SoundSource):
         return np.full((n_frames,), base, dtype=np.float32)
 
 
-def _track(name="t", pitches=(60,), volume=1.0, program="piano", effects=None, params=None, preset=None):
+def _track(name="t", pitches=(60,), volume=1.0, program="piano", effects=None, params=None, preset=None,
+           soundfont=""):
     return Track(
         name=name,
         instrument=Instrument(program=program, volume=volume, effects=list(effects or []),
-                              params=dict(params or {}), preset=preset),
+                              params=dict(params or {}), preset=preset, soundfont=soundfont),
         notes=[Note(start=0.0, end=0.5, pitch_midi=p, pitch_hz=440.0, velocity=0.8) for p in pitches],
     )
 
@@ -66,6 +67,10 @@ def test_track_key_stability_and_invalidation():
     # 批L L1-6：VST3 参数/预设入键（改参/换预设必须失效重渲）
     assert track_key(_track(pitches=(60, 62), params={"Cutoff": 0.5}), SR) != k0
     assert track_key(_track(pitches=(60, 62), preset={"kind": "state", "path": "a.state"}), SR) != k0
+    # S4.2：SF2 轨级 soundfont 入键（换库必须失效重渲）
+    assert track_key(_track(pitches=(60, 62), soundfont="D:/sf/a.sf2"), SR) != k0
+    assert track_key(_track(pitches=(60, 62), soundfont="D:/sf/a.sf2"), SR) != \
+        track_key(_track(pitches=(60, 62), soundfont="D:/sf/b.sf2"), SR)
     kp = track_key(_track(pitches=(60, 62), params={"Cutoff": 0.5}), SR)
     assert track_key(_track(pitches=(60, 62), params={"Cutoff": 0.5}), SR) == kp     # 同参 → 同键
     assert track_key(_track(pitches=(60, 62), params={"Cutoff": 0.6}), SR) != kp     # 值变 → 键变

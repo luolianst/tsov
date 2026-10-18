@@ -113,6 +113,8 @@ class Instrument:
     preset: dict | None = None  # VST3 预设引用：{"kind": "vstpreset|fxp|state", "path": "工程内相对路径或绝对路径"}
     # ---- S4.1（additive）：全局音源库稳定 id（VST3 class id / SFZ/SF2 内容哈希）----
     source_id: str = ""
+    # ---- S4.2（additive）：SF2 轨级 soundfont 覆盖（空 = 沿用工程/引擎默认）----
+    soundfont: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -127,6 +129,7 @@ class Instrument:
             params=dict(data.get("params") or {}),
             preset=dict(data["preset"]) if data.get("preset") else None,
             source_id=str(data.get("source_id") or ""),
+            soundfont=str(data.get("soundfont") or ""),
         )
 
 

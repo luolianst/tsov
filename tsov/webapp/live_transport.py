@@ -135,12 +135,15 @@ class LiveTransport:
                     if track.notes:
                         raise LiveUnsupported(f"未知音色程序，暂不支持实时播放：{track.name} / {program}")
                     continue
-                if not _DEFAULT_SF2.is_file():
-                    raise LiveUnsupported(f"内置 SoundFont 不存在：{_DEFAULT_SF2}")
+                sf2_path = Path(str(getattr(track.instrument, "soundfont", "") or _DEFAULT_SF2))
+                if not sf2_path.is_absolute():
+                    sf2_path = project.root / sf2_path
+                if not sf2_path.is_file():
+                    raise LiveUnsupported(f"轨级 SoundFont 不存在：{track.name} / {sf2_path}")
                 item.update(
                     {
                         "type": "sf2",
-                        "soundfont": str(_DEFAULT_SF2),
+                        "soundfont": str(sf2_path),
                         "bank": DRUM_BANK if program == "drums" else 0,
                         "program": program_number,
                     }

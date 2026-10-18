@@ -15,7 +15,9 @@ import numpy as np
 import pytest
 
 from tsov.core.notes import Note
+from tsov.core.score import Instrument, Score, Track
 from tsov.host.instrument import SF2Source, SFZSource, VST3Source, _parse_sfz, _sfz_key, make_source
+from tsov.host.session import HostSession
 
 from unit._cleanup import rmtree_force
 from unit._vst_helpers import assert_onset_stable
@@ -220,6 +222,28 @@ def test_vst3_source_rerender_deterministic_no_leak():
         assert_onset_stable(out1, out2, onsets=[0.0, 0.5], sr=sr)
     finally:
         src.close()
+
+
+def test_host_session_uses_track_soundfont_override(monkeypatch):
+    """S4.2：每轨 soundfont 优先于工程/引擎默认；空值回落默认。"""
+    calls = []
+
+    class _FakeSource:
+        def close(self):
+            pass
+
+    def _fake_make_source(program, **kwargs):
+        calls.append((program, kwargs.get("soundfont")))
+        return _FakeSource()
+
+    monkeypatch.setattr("tsov.host.session.make_source", _fake_make_source)
+    score = Score(tracks=[
+        Track(name="a", instrument=Instrument(program="piano", soundfont="/track.sf2")),
+        Track(name="b", instrument=Instrument(program="drums")),
+    ])
+    sess = HostSession.from_score(score, soundfont="/global.sf2", lazy=False)
+    assert len(sess.tracks) == 2
+    assert calls == [("piano", "/track.sf2"), ("drums", "/global.sf2")]
 
 
 def test_make_source_dispatch():

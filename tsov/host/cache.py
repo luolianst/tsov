@@ -71,6 +71,7 @@ def track_key(track, samplerate: int) -> str:
         "sr": int(samplerate),
         "backend": str(inst.backend),
         "program": str(inst.program),
+        "soundfont": str(getattr(inst, "soundfont", "") or ""),
         "instance": _vst_plugin_epoch(str(inst.program)),
         "params": {str(k): v for k, v in dict(inst.params or {}).items()},
         "preset": (dict(inst.preset) if inst.preset else None),

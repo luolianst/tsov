@@ -126,7 +126,8 @@ class HostSession:
                         "base_dir": base_dir,
                     }
                 factory = partial(make_source, track.instrument.program,
-                                  soundfont=soundfont, samplerate=samplerate, **extra)
+                                  soundfont=getattr(track.instrument, "soundfont", "") or soundfont,
+                                  samplerate=samplerate, **extra)
                 source = _LazySource(factory) if lazy else factory()
             tracks.append(HostTrack(track=track, source=source))
         return cls(score=score, tracks=tracks, samplerate=samplerate)

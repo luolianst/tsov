@@ -61,6 +61,21 @@ def test_manifest_maps_gm_tracks_to_sf2(tmp_path):
     assert tracks[1]["bank"] == 128
 
 
+def test_manifest_uses_track_soundfont_override(tmp_path):
+    sf2 = tmp_path / "custom.sf2"
+    sf2.write_bytes(b"fake-sf2")
+    transport = LiveTransport(EventBus())
+    project = _Project(
+        Score(tracks=[
+            Track(name="piano", instrument=Instrument(program="piano", soundfont=str(sf2)),
+                  notes=[_note()]),
+        ]),
+        tmp_path,
+    )
+    tracks, _selected = transport._manifest_for(project)
+    assert tracks[0]["soundfont"] == str(sf2)
+
+
 def test_manifest_rejects_unknown_program_with_notes(tmp_path):
     transport = LiveTransport(EventBus())
     project = _Project(
