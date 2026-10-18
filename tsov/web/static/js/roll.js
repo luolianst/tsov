@@ -7,6 +7,7 @@ import { KEYS_W, store, scoreBounds, tempo, beatsPerBar, setSelection, setView, 
 import { peaksGet } from './peaks.js';   /* E3 段1：单轨波形峰值（公共管线） */
 import { xOf, tOf } from './geom.js';   /* v0.2 批C 前段（R2 地基件）：时间↔x 几何共享 */
 import { clipHitBand, beginAudioDrag, updateAudioDrag, finishAudioDrag, isDragging, dragPreviewOf, selOf, clearSel, splitClipAt, drawClipBlocks } from './audio_edit.js';   /* E6 段1 补：音频 clip 手势引擎（单轨/总谱共用） */
+import { partPreviewOf, partHitBand, beginPartDrag, updatePartDrag, isPartDragging, partSelOf, drawPartBands, partStripH } from './parts_edit.js';   /* S3.3：Part 顶条手势（与总谱共用） */
 import { diffLayers } from './diff.js';
 import { pal, trackColors } from './theme.js';
 
@@ -176,6 +177,20 @@ export function draw() {
         }
       }
     });
+  }
+
+  /* ---- S3.3：当前单轨 Part 顶条（拖=移动；左右缘=裁剪/延伸；Alt=复制） ---- */
+  if (single && mainTrk && mainTrk.kind !== 'audio') {
+    const prev = partPreviewOf(store.singleTrack);
+    const list = prev || (mainTrk.parts || []);
+    if (list.length) {
+      drawPartBands(ctx, {
+        list, col: trackColors()[store.singleTrack % trackColors().length],
+        yTop: 0, h: partStripH(),
+        selId: (partSelOf() && partSelOf().ti === store.singleTrack) ? partSelOf().id : null,
+        inDrag: !!prev, p, v, xLo: KEYS_W, xHi: W,
+      });
+    }
   }
 
   /* ---- M-V8 E5：范围框选 / 橡皮拖刷 视觉 ---- */
@@ -921,6 +936,19 @@ export function init(rollCanvas) {
       canvas.style.cursor = 'row-resize';
       return;
     }
+    /* S3.3：Part 顶条优先（单轨主轨 MIDI；顶条外不影响音符手势） */
+    if (store.viewMode === 'single' && store.score) {
+      const mtr = store.score.tracks[store.singleTrack];
+      if (mtr && mtr.kind !== 'audio') {
+        const ph = partHitBand(store.singleTrack, e.offsetX, e.offsetY, 0, partStripH());
+        if (ph) {
+          setFocus(store.singleTrack);
+          beginPartDrag(store.singleTrack, ph, e, draw);
+          canvas.style.cursor = ph.zone === 'move' ? 'grabbing' : 'ew-resize';
+          return;
+        }
+      }
+    }
     /* E6 段1 补 / v0.2 C2：音频 clip 手势（主区带与副区带共引擎；带外不吃音符逻辑） */
     for (const band of [audioMainBand(), partnerBand()]) {
       if (!band) continue;
@@ -1022,6 +1050,11 @@ export function init(rollCanvas) {
 
   canvas.addEventListener('mousemove', (e) => {
     mouseInCanvas = true;
+    if (isPartDragging()) {   /* S3.3：Part 预览跟手 */
+      updatePartDrag(e);
+      canvas.style.cursor = 'grabbing';
+      return;
+    }
     /* E3 段1：分界线拖拽（比例跟随；松手重适配） */
     if (splitDrag) {
       setSplitRatio(e.offsetY / Math.max(1, H));
@@ -1087,6 +1120,13 @@ export function init(rollCanvas) {
     }
     /* E3 段1 / v0.2 C2：分界线悬停（row-resize）；音频带光标（主/副两带共引擎） */
     if (splitOn && Math.abs(e.offsetY - splitH1) <= 6) { canvas.style.cursor = 'row-resize'; return; }
+    if (store.viewMode === 'single' && store.score) {
+      const mtr = store.score.tracks[store.singleTrack];
+      if (mtr && mtr.kind !== 'audio') {
+        const ph = partHitBand(store.singleTrack, e.offsetX, e.offsetY, 0, partStripH());
+        if (ph) { canvas.style.cursor = ph.zone === 'move' ? 'grab' : 'ew-resize'; return; }
+      }
+    }
     for (const band of [audioMainBand(), partnerBand()]) {
       if (!band) continue;
       const hit = clipHitBand(band.ti, e.offsetX, e.offsetY, band.yTop, band.hh);

@@ -12,6 +12,7 @@ import { seekTo } from './playback.js';
 import { api } from './api.js';
 import { xOf, tOf } from './geom.js';   /* v0.2 批C 前段（R2 地基件）：时间↔x 几何共享 */
 import { clipHitBand, beginAudioDrag, updateAudioDrag, finishAudioDrag, isDragging, dragPreviewOf, selOf, clearSel, splitClipAt, drawClipBlocks } from './audio_edit.js';   /* E6 段1 补：音频 clip 手势引擎（总谱/单轨共用） */
+import { partsOf, partPreviewFor, partHitBand, beginPartDrag, updatePartDrag, isPartDragging, partSelOf, clearPartSel, drawPartBands, partStripH } from './parts_edit.js';   /* S3.3：Part 顶条手势（与单轨共用） */
 
 const KEYS = 56;   // 左侧标签槽（与卷帘 KEYS_W 对齐）
 const FONT_UI = '11px "Microsoft YaHei UI","PingFang SC","MiSans","HarmonyOS Sans SC",system-ui,sans-serif';
@@ -226,6 +227,16 @@ export function draw() {
       continue;
     }
     const notes = trk.notes;
+    /* S3.3：Part 顶条（默认 Part 也显示；拖顶条=移动，拖左右缘=裁剪/延伸，Alt=复制） */
+    const partPrev = partPreviewFor(ti);
+    const partList = partPrev || partsOf(trk);
+    if (partList.length) {
+      drawPartBands(ctx, {
+        list: partList, col: tc[ti % tc.length], yTop: y0 + 2, h: partStripH(),
+        selId: (partSelOf() && partSelOf().ti === ti) ? partSelOf().id : null,
+        inDrag: !!partPrev, p, v, xLo: KEYS, xHi: W,
+      });
+    }
     if (!notes.length) continue;
     const ref = store.refs.has(ti);   /* v0.2 C2：参照层（旧灰叠加） */
     const selected = store.selection.track === ti;
@@ -329,6 +340,16 @@ export function init(el, opts) {
     /* E3 段1 / v0.2 C2：参照层（Ctrl/Shift 单击）——灰显示仅总谱面用；单轨副区改走左栏手势族 */
     if (e.ctrlKey || e.shiftKey || e.metaKey) { toggleRef(ti); return; }
     const trk = store.score && store.score.tracks[ti];
+    /* S3.3：Part 顶条手势优先（只在顶条内；下方音符逻辑不变） */
+    if (trk && trk.kind !== 'audio' && !isPartDragging()) {
+      const y0 = rowY(ti) - scrollY;
+      const ph = partHitBand(ti, e.offsetX, e.offsetY, y0 + 2, partStripH());
+      if (ph) {
+        beginPartDrag(ti, ph, e, draw, (offY) => laneAt(offY));
+        canvas.style.cursor = ph.zone === 'move' ? 'grabbing' : 'ew-resize';
+        return;
+      }
+    }
     if (trk && trk.kind === 'audio') {   /* M-V8 E2/E6：音频轨手势（移动/修剪/淡化/伸缩/切分） */
       const bd = audioBandOf(ti);
       const hit = clipHitBand(ti, e.offsetX, e.offsetY, bd.yTop, bd.hh);
@@ -348,10 +369,16 @@ export function init(el, opts) {
       return;
     }
     setSelection(ti, []);
+    clearPartSel();
   });
 
   /* M-V8 E1：小旗悬停提示 ｜ E6：音频块手势与光标反馈 */
   canvas.addEventListener('mousemove', (e) => {
+    if (isPartDragging()) {   /* S3.3：Part 预览跟手 */
+      updatePartDrag(e);
+      canvas.style.cursor = 'grabbing';
+      return;
+    }
     if (isDragging()) {   /* M-V8 E6：音频手势（预览跟手，松手提交） */
       updateAudioDrag(e);
       return;
@@ -372,6 +399,11 @@ export function init(el, opts) {
     const ti = laneAt(e.offsetY);
     const trk = ti >= 0 && store.score ? store.score.tracks[ti] : null;
     let cur = '';
+    if (trk && trk.kind !== 'audio') {
+      const y0 = rowY(ti) - scrollY;
+      const ph = partHitBand(ti, e.offsetX, e.offsetY, y0 + 2, partStripH());
+      if (ph) cur = ph.zone === 'move' ? 'grab' : 'ew-resize';
+    }
     if (trk && trk.kind === 'audio') {
       const bd = audioBandOf(ti);
       const hit = clipHitBand(ti, e.offsetX, e.offsetY, bd.yTop, bd.hh);

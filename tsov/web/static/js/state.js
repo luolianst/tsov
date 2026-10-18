@@ -19,6 +19,7 @@ export const store = {
 
   /* 交互态 */
   selection: { track: 0, indices: [] },
+  partSel: null,               /* S3.3：选中 Part {ti,id}（CDP 观察用） */
   diff: null,                  // docs/05 §五 diff schema；null = 无叠层
   playhead: 0,
   playing: null,               // null | 'wav' | 'host'
@@ -721,6 +722,7 @@ export function snapshot() {
     gitLog: store.gitLog,
     history: store.history,
     selection: { track: store.selection.track, indices: store.selection.indices.slice() },
+    partSel: store.partSel ? Object.assign({}, store.partSel) : null,
     viewMode: store.viewMode,
     singleTrack: store.singleTrack,
     partner: store.partner ? Object.assign({}, store.partner) : null,
