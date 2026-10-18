@@ -358,14 +358,26 @@ class SFZSource(SoundSource):
         self._regions = _parse_sfz(self.sfz_path)
         if not self._regions:
             raise RuntimeError(f"SFZ 无可用 region（子集不支持？）：{sfz_path}")
+        # 预检：至少一条 region 的采样文件可读；否则试听只会得到误解的静音/底层错误。
+        if not any(self._region_sample_path(r).is_file() for r in self._regions):
+            raise RuntimeError(f"SFZ 采样文件全部缺失（检查解压/relink）：{sfz_path}")
         self._cache: dict[Path, np.ndarray] = {}
+
+    def _region_sample_path(self, reg: dict) -> Path:
+        rel = str(reg.get("sample") or "").replace("\\", "/")
+        return (self.sfz_path.parent / rel).resolve()
 
     def _sample(self, rel: str) -> np.ndarray:
         p = (self.sfz_path.parent / rel.replace("\\", "/")).resolve()
+        if not p.is_file():
+            raise RuntimeError(f"SFZ 采样文件缺失：{p}（SFZ: {self.sfz_path}）")
         if p not in self._cache:
             import soundfile as sf
 
-            audio, _sr = sf.read(str(p), dtype="float32", always_2d=True)
+            try:
+                audio, _sr = sf.read(str(p), dtype="float32", always_2d=True)
+            except Exception as exc:  # noqa: BLE001 —— 转成可读的试听错误
+                raise RuntimeError(f"SFZ 采样不可读：{p}（{exc}）") from exc
             self._cache[p] = audio.mean(axis=1)  # mono
         return self._cache[p]
 
@@ -378,7 +390,7 @@ class SFZSource(SoundSource):
             sample = self._sample(reg["sample"])
             if reg.get("offset"):
                 sample = sample[int(reg["offset"]):]
-            ratio = 2.0 ** ((int(n.pitch_midi) - int(reg.get("pitch_keycenter", 60))) / 12.0)
+            ratio = 2.0 ** ((int(n.pitch_midi) - _sfz_key(reg.get("pitch_keycenter", 60))) / 12.0)
             start = max(0.0, float(n.start))
             dur = max(0.01, float(n.end) - start)
             out_len = int(round(dur * samplerate))
@@ -458,12 +470,49 @@ def _parse_sfz(path: Path) -> list[dict]:
     return [r for r in regions if r.get("sample")]
 
 
+_NOTE_NAME_RE = re.compile(r'^([a-gA-G])([#b]?)(-?\d+)$')
+_NOTE_PC = {"c": 0, "d": 2, "e": 4, "f": 5, "g": 7, "a": 9, "b": 11}
+
+
+def _sfz_key(value) -> int:
+    """SFZ 音高值 → MIDI：支持 0..127 整数与 `c4` / `c#4` / `db4` 音名。"""
+    if isinstance(value, bool):
+        raise ValueError(f"非法 SFZ 音高：{value!r}")
+    if isinstance(value, int):
+        midi = value
+    elif isinstance(value, float):
+        if not value.is_integer():
+            raise ValueError(f"非法 SFZ 音高：{value!r}")
+        midi = int(value)
+    else:
+        text = str(value).strip()
+        try:
+            midi = int(text)
+        except ValueError:
+            m = _NOTE_NAME_RE.match(text)
+            if not m:
+                raise ValueError(f"非法 SFZ 音高：{value!r}") from None
+            letter, accidental, octave = m.group(1).lower(), m.group(2), int(m.group(3))
+            midi = (octave + 1) * 12 + _NOTE_PC[letter]
+            if accidental == "#":
+                midi += 1
+            elif accidental == "b":
+                midi -= 1
+    if not 0 <= midi <= 127:
+        raise ValueError(f"SFZ 音高越界：{value!r}")
+    return midi
+
+
 def _region_bounds(reg: dict) -> tuple[int, int, int, int, int]:
-    """(lokey, hikey, lovel, hivel, pitch_keycenter)；`key=` 同时充当三者。"""
+    """(lokey, hikey, lovel, hivel, pitch_keycenter)；`key=` 同时充当三者。
+
+    SFZ 允许音名（VPO 的 `lokey=c2` 等）；非法 region 由 `_pick_region` 跳过，
+    不让整次试听因个别坏 region 失败。
+    """
     key = reg.get("key")
-    lokey = int(reg.get("lokey", key if key is not None else 0))
-    hikey = int(reg.get("hikey", key if key is not None else 127))
-    kc = int(reg.get("pitch_keycenter", key if key is not None else 60))
+    lokey = _sfz_key(reg.get("lokey", key if key is not None else 0))
+    hikey = _sfz_key(reg.get("hikey", key if key is not None else 127))
+    kc = _sfz_key(reg.get("pitch_keycenter", key if key is not None else 60))
     lovel = int(reg.get("lovel", 1))
     hivel = int(reg.get("hivel", 127))
     return lokey, hikey, lovel, hivel, kc
@@ -473,7 +522,10 @@ def _pick_region(regions: list[dict], pitch: int, velocity: float) -> dict | Non
     vel = int(round(min(1.0, max(0.0, velocity)) * 127))
     best = None
     for reg in regions:
-        lokey, hikey, lovel, hivel, _kc = _region_bounds(reg)
+        try:
+            lokey, hikey, lovel, hivel, _kc = _region_bounds(reg)
+        except (TypeError, ValueError):
+            continue
         if lokey <= pitch <= hikey and lovel <= vel <= hivel:
             best = reg  # 简化：后匹配者优先（不做 layer crossfade）
     return best

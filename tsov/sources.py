@@ -38,6 +38,25 @@ DEFAULT_ROOTS = [
 ]
 
 _KIND_BY_SUFFIX = {".vst3": "vst3", ".sfz": "sfz", ".sf2": "sf2", ".sf3": "sf2"}
+_SFZ_SAMPLE_RE = re.compile(r'(?:^|\s)sample\s*=\s*(?:"([^"]*)"|(\S+))', re.IGNORECASE)
+
+
+def _sfz_sample_health(path: Path) -> tuple[int, int]:
+    """SFZ 的 (可找到采样数, 总采样数)；用于同内容多副本时优先选完整包。"""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return 0, 0
+    present = total = 0
+    for match in _SFZ_SAMPLE_RE.finditer(text):
+        rel = (match.group(1) or match.group(2) or "").strip()
+        if not rel:
+            continue
+        total += 1
+        sample = (path.parent / rel.replace("\\", "/")).resolve()
+        if sample.is_file():
+            present += 1
+    return present, total
 
 
 class SourceError(RuntimeError):
@@ -304,8 +323,26 @@ class SourceLibrary:
                     continue
                 name = self._display_name(kind, path)
                 if sid in discovered:
+                    existing = discovered[sid]
+                    # 同内容多副本（VPO 常见：extracted 目录缺采样、完整包在另一处）：
+                    # SFZ 优先保留采样更完整的副本，避免库指向只会静音/报错的包。
+                    if kind == "sfz":
+                        latest_health = _sfz_sample_health(path)
+                        existing_health = _sfz_sample_health(Path(existing.path))
+                        if latest_health[0] > existing_health[0]:
+                            discovered[sid] = Source(
+                                id=sid, kind=kind, name=name, path=ap, root=root_s,
+                                class_id=cid, content_hash=chash, size=size, mtime=mtime,
+                                missing=False, favorite=existing.favorite, last_seen=_now(),
+                                tags=list(existing.tags),
+                            )
+                            self.errors.append(
+                                f"重复音源 id {sid}：改用采样更完整的 {path}"
+                                f"（{latest_health[0]}/{latest_health[1]}，原 {existing.path}）"
+                            )
+                            continue
                     # 同 class id 的多个安装：保留第一条，记录在 errors 便于排查
-                    self.errors.append(f"重复音源 id {sid}：{path}（保留 {discovered[sid].path}）")
+                    self.errors.append(f"重复音源 id {sid}：{path}（保留 {existing.path}）")
                     continue
                 prior = old or old_by_id.get(sid)   # 同内容移动路径：id 不变，继承收藏
                 if prior is None:

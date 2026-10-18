@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 
 from tsov.core.notes import Note
-from tsov.host.instrument import SF2Source, SFZSource, VST3Source, _parse_sfz, make_source
+from tsov.host.instrument import SF2Source, SFZSource, VST3Source, _parse_sfz, _sfz_key, make_source
 
 from unit._cleanup import rmtree_force
 from unit._vst_helpers import assert_onset_stable
@@ -100,6 +100,35 @@ def test_sfz_parse_subset_and_key_alias():
         assert regions[1]["lokey"] == 100 and regions[1]["sample"] == "b.wav"
     finally:
         rmtree_force(d)   # 清理：.git/objects 只读属性 → chmod 强删（见 _cleanup.py）
+
+
+def test_sfz_note_name_keys_and_bad_region_skipped():
+    """SFZ 音名键（VPO 用 `lokey=c2`）、八度换算与坏 region 跳过（试听不整单失败）。"""
+    assert _sfz_key("c4") == 60
+    assert _sfz_key("C#4") == 61
+    assert _sfz_key("db4") == 61
+    assert _sfz_key("a4") == 69
+    with pytest.raises(ValueError):
+        _sfz_key("zz9")
+
+    import soundfile as sf
+
+    d = Path("output") / f"sfztest-{uuid.uuid4().hex[:8]}"
+    d.mkdir(parents=True, exist_ok=True)
+    try:
+        sr = 44100
+        t = np.arange(int(sr * 0.5)) / sr
+        sf.write(str(d / "a4.wav"), (0.5 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32), sr, subtype="PCM_16")
+        (d / "x.sfz").write_text(
+            "<region> sample=a4.wav lokey=zz hikey=zz\n"
+            "<region> sample=a4.wav lokey=c2 hikey=c3 pitch_keycenter=a4\n",
+            encoding="utf-8",
+        )
+        src = SFZSource(str(d / "x.sfz"))
+        out = src.render([_note(0.0, 0.25, 48)], sr, int(sr * 0.5))
+        assert float(np.abs(out).max()) > 0.01, "音名 region 应命中并出声（坏 region 不阻断）"
+    finally:
+        rmtree_force(d)
 
 
 # ---------------------------------------------------------------------------

@@ -56,6 +56,24 @@ def test_scan_stable_ids_and_summary(tmp_path):
     assert {s.id for s in again.sources.values()} == ids
 
 
+def test_duplicate_sfz_prefers_complete_sample_copy(tmp_path):
+    """同内容 SFZ 多副本：优先保留采样文件找得到的目录（VPO extracted vs 完整包）。"""
+    root = tmp_path / "sources"
+    broken = root / "a-broken"
+    full = root / "z-full"
+    broken.mkdir(parents=True)
+    full.mkdir(parents=True)
+    text = "<region> sample=hit.wav key=60\n"
+    (broken / "same.sfz").write_text(text, encoding="utf-8")
+    (full / "same.sfz").write_text(text, encoding="utf-8")
+    (full / "hit.wav").write_bytes(b"RIFF-fake")
+    lib = SourceLibrary(tmp_path / "sources.json", roots=[str(root)])
+    lib.scan()
+    sfz = next(s for s in lib.sources.values() if s.kind == "sfz")
+    assert Path(sfz.path) == (full / "same.sfz").resolve()
+    assert any("采样更完整" in e for e in lib.errors)
+
+
 def test_rescan_after_move_keeps_content_id(tmp_path):
     root = tmp_path / "sources"
     root.mkdir()
