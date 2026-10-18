@@ -4,6 +4,8 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "SF2Synth.h"
+
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -63,6 +65,12 @@ public:
                  float pan = 0.0f,
                  int noteOffset = 0,
                  bool testPattern = false);
+    int addSf2Track(std::unique_ptr<SF2Synth> synth,
+                    const juce::String& name = {},
+                    float gain = 1.0f,
+                    float pan = 0.0f,
+                    int noteOffset = 0,
+                    bool testPattern = false);
     void clearTracks();
     int trackCount() const { return (int) tracks.size(); }
     MixTrackInfo trackInfo(int index) const;
@@ -75,6 +83,10 @@ public:
     void play();
     void resume();
     void seek(int64_t sample);
+    void setLoop(int64_t startSample, int64_t endSample);
+    void clearLoop();
+    int64_t loopStartSamples() const { return loopStart.load(); }
+    int64_t loopEndSamples() const { return loopEnd.load(); }
     void stop();
     bool isPlaying() const { return playing.load(); }
     int64_t playheadSamples() const { return playhead.load(); }
@@ -115,6 +127,7 @@ private:
     {
         juce::String name;
         std::unique_ptr<juce::AudioPluginInstance> plugin;
+        std::unique_ptr<SF2Synth> sf2;
         juce::AudioBuffer<float> buffer;
         juce::MidiBuffer midi;
         std::vector<MixTimedEvent> events;
@@ -133,6 +146,7 @@ private:
     void releaseTracks();
     void buildTestPattern(Track& track, double sampleRate);
     void renderBlock(juce::AudioBuffer<float>& buffer, int numSamples);
+    void resetEventCursorsTo(int64_t sample);
 
     juce::AudioDeviceManager deviceManager;
     Config cfg;
@@ -142,6 +156,8 @@ private:
     std::atomic<int64_t> frames { 0 };
     std::atomic<int> callbacks { 0 };
     std::atomic<int64_t> playhead { 0 };
+    std::atomic<int64_t> loopStart { -1 };
+    std::atomic<int64_t> loopEnd { -1 };
     std::atomic<bool> playing { false };
     std::atomic<float> inputPeakValue { 0.0f };
     std::atomic<float> masterPeakValue { 0.0f };

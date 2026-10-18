@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 
 namespace
 {
@@ -202,6 +203,41 @@ int MixEngine::addTrack(std::unique_ptr<juce::AudioPluginInstance> instance,
     return (int) tracks.size() - 1;
 }
 
+int MixEngine::addSf2Track(std::unique_ptr<SF2Synth> synth,
+                           const juce::String& name,
+                           float gain,
+                           float pan,
+                           int noteOffset,
+                           bool testPattern)
+{
+    if (synth == nullptr)
+        return -1;
+
+    auto track = std::make_unique<Track>();
+    track->name = name.isEmpty() ? juce::String("SF2") : name;
+    track->sf2 = std::move(synth);
+    track->gain = gain;
+    track->pan = juce::jlimit(-1.0f, 1.0f, pan);
+    track->testPattern = testPattern;
+    track->noteOffset = noteOffset;
+    track->buffer.setSize(2, 512);
+
+    const auto sampleRateNow = actualSampleRate.load();
+    const auto blockSizeNow = actualBlockSize.load();
+    if (sampleRateNow > 0.0 && blockSizeNow > 0)
+    {
+        juce::String error;
+        if (! track->sf2->prepare(sampleRateNow, error))
+            std::cerr << "SF2 prepare failed: " << error << std::endl;
+        track->buffer.setSize(2, blockSizeNow);
+        if (track->testPattern)
+            buildTestPattern(*track, sampleRateNow);
+    }
+
+    tracks.push_back(std::move(track));
+    return (int) tracks.size() - 1;
+}
+
 void MixEngine::clearTracks()
 {
     releaseTracks();
@@ -318,8 +354,18 @@ void MixEngine::prepareTracks(double sampleRate, int blockSize)
 {
     for (auto& track : tracks)
     {
-        track->plugin->prepareToPlay(sampleRate, blockSize);
-        track->buffer.setSize(juce::jmax(2, track->plugin->getTotalNumOutputChannels()), blockSize);
+        if (track->sf2 != nullptr)
+        {
+            juce::String error;
+            if (! track->sf2->prepare(sampleRate, error))
+                std::cerr << "SF2 prepare failed: " << error << std::endl;
+            track->buffer.setSize(2, blockSize);
+        }
+        else if (track->plugin != nullptr)
+        {
+            track->plugin->prepareToPlay(sampleRate, blockSize);
+            track->buffer.setSize(juce::jmax(2, track->plugin->getTotalNumOutputChannels()), blockSize);
+        }
         track->buffer.clear();
         track->peak = 0.0f;
         track->eventCursor = 0;
@@ -348,16 +394,40 @@ void MixEngine::seek(int64_t sample)
 {
     const auto target = juce::jmax<int64_t>(0, sample);
     playhead = target;
+    resetEventCursorsTo(target);
+}
+
+void MixEngine::setLoop(int64_t startSample, int64_t endSample)
+{
+    if (endSample <= startSample)
+    {
+        clearLoop();
+        return;
+    }
+    loopStart = juce::jmax<int64_t>(0, startSample);
+    loopEnd = endSample;
+}
+
+void MixEngine::clearLoop()
+{
+    loopStart = -1;
+    loopEnd = -1;
+}
+
+void MixEngine::resetEventCursorsTo(int64_t sample)
+{
     for (auto& track : tracks)
     {
         const juce::SpinLock::ScopedLockType lock(track->eventsLock);
         track->eventCursor = (size_t) std::distance(
             track->events.begin(),
-            std::lower_bound(track->events.begin(), track->events.end(), target,
+            std::lower_bound(track->events.begin(), track->events.end(), sample,
                              [](const MixTimedEvent& event, int64_t value)
                              {
                                  return event.sample < value;
                              }));
+        if (track->sf2 != nullptr)
+            track->sf2->allNotesOff();
     }
 }
 
@@ -493,8 +563,30 @@ void MixEngine::audioDeviceIOCallbackWithContext(const float* const* inputChanne
         }
     }
 
-    juce::AudioBuffer<float> buffer(outputChannelData, numOutputChannels, numSamples);
-    renderBlock(buffer, numSamples);
+    int rendered = 0;
+    while (rendered < numSamples)
+    {
+        auto loopBegin = loopStart.load();
+        auto loopFinish = loopEnd.load();
+        if (playing.load() && loopFinish > loopBegin && playhead.load() >= loopFinish)
+        {
+            playhead = loopBegin;
+            resetEventCursorsTo(loopBegin);
+        }
+
+        int chunk = numSamples - rendered;
+        if (playing.load() && loopFinish > loopBegin && playhead.load() < loopFinish)
+            chunk = (int) juce::jmin<int64_t>((int64_t) chunk, loopFinish - playhead.load());
+
+        if (chunk <= 0)
+            break;
+
+        juce::AudioBuffer<float> segment(outputChannelData, numOutputChannels, rendered, chunk);
+        renderBlock(segment, chunk);
+        rendered += chunk;
+        if (playing.load())
+            playhead += chunk;
+    }
 
     if (cfg.monitorInput && inputChannelData != nullptr && numInputChannels > 0)
     {
@@ -511,8 +603,6 @@ void MixEngine::audioDeviceIOCallbackWithContext(const float* const* inputChanne
     }
 
     frames += numSamples;
-    if (playing.load())
-        playhead += numSamples;
     callbacks += 1;
 }
 
@@ -527,15 +617,18 @@ void MixEngine::renderBlock(juce::AudioBuffer<float>& buffer, int numSamples)
 
         for (auto& track : tracks)
         {
-            if (track->mute || track->plugin == nullptr)
+            if (track->mute || (track->plugin == nullptr && track->sf2 == nullptr))
                 continue;
 
             const juce::SpinLock::ScopedTryLockType eventLock(track->eventsLock);
             if (! eventLock.isLocked())
                 continue;
 
+            const auto sourceChannelsWanted = track->plugin != nullptr
+                ? juce::jmax(2, track->plugin->getTotalNumOutputChannels())
+                : 2;
             if (track->buffer.getNumChannels() < 2 || track->buffer.getNumSamples() < numSamples)
-                track->buffer.setSize(juce::jmax(2, track->plugin->getTotalNumOutputChannels()), numSamples);
+                track->buffer.setSize(sourceChannelsWanted, numSamples);
 
             track->buffer.clear();
             track->midi.clear();
@@ -549,7 +642,32 @@ void MixEngine::renderBlock(juce::AudioBuffer<float>& buffer, int numSamples)
                 ++track->eventCursor;
             }
 
-            track->plugin->processBlock(track->buffer, track->midi);
+            if (track->sf2 != nullptr)
+            {
+                auto* left = track->buffer.getWritePointer(0);
+                auto* right = track->buffer.getWritePointer(1);
+                int cursor = 0;
+                for (const auto metadata : track->midi)
+                {
+                    const auto offset = juce::jlimit(0, numSamples, metadata.samplePosition);
+                    if (offset > cursor)
+                    {
+                        track->sf2->render(left + cursor, right + cursor, offset - cursor);
+                        cursor = offset;
+                    }
+                    const auto message = metadata.getMessage();
+                    if (message.isNoteOn())
+                        track->sf2->noteOn(message.getNoteNumber(), message.getFloatVelocity());
+                    else if (message.isNoteOff())
+                        track->sf2->noteOff(message.getNoteNumber());
+                }
+                if (cursor < numSamples)
+                    track->sf2->render(left + cursor, right + cursor, numSamples - cursor);
+            }
+            else
+            {
+                track->plugin->processBlock(track->buffer, track->midi);
+            }
 
             const auto peak = track->buffer.getMagnitude(0, numSamples);
             if (peak > track->peak.load())

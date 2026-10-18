@@ -23,7 +23,8 @@ target_sources(tsov_host PRIVATE
     Source/Main.cpp
     Source/AudioEngine.cpp
     Source/MixEngine.cpp
-    Source/PluginHost.cpp)
+    Source/PluginHost.cpp
+    Source/SF2Synth.cpp)
 
 target_compile_definitions(tsov_host PRIVATE
     JUCE_WEB_BROWSER=0

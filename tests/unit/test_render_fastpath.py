@@ -16,6 +16,7 @@ from tsov.host.cache import StemStore
 from tsov.host.mix import render_buses
 from tsov.host.session import HostSession, _LazySource
 from tsov.web import create_app
+from tsov.webapp.live_transport import LiveUnsupported
 
 from unit._cleanup import rmtree_force
 
@@ -78,12 +79,29 @@ class _Engine:
         self.wav_calls.append({"path": str(path), **kw})
 
 
+class _NoLive:
+    """Force these fastpath tests through the legacy engine path."""
+
+    def play(self, *args, **kwargs):
+        raise LiveUnsupported("test stub")
+
+    def stop(self, *args, **kwargs):
+        return {"ok": True}
+
+    def seek(self, *args, **kwargs):
+        return {"ok": True}
+
+    def close(self):
+        pass
+
+
 @pytest.fixture()
 def env(monkeypatch):
     d = Path("output") / f"playfast-{uuid.uuid4().hex[:10]}"
     d.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr("tsov.webapp.config.AGENT_SESSION_DIR", str(d / "agent-sessions"))
     app = create_app(output_dir=d)
+    app.state.tsov.live = _NoLive()
     client = TestClient(app)
     try:
         yield {"dir": d, "app": app, "client": client}

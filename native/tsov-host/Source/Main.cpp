@@ -31,9 +31,13 @@ void line(const juce::String& text)
 
 struct MixTrackSpec
 {
+    juce::String type { "vst3" };
     juce::String name;
     juce::String plugin;
     juce::String state;
+    juce::String soundfont;
+    int bank = 0;
+    int program = 0;
     double gain = 0.55;
     double pan = 0.0;
     int note = 60;
@@ -83,16 +87,33 @@ bool loadMixManifest(const juce::File& file,
         }
 
         MixTrackSpec spec;
-        spec.plugin = resolveMixPath(base, object->getProperty("plugin").toString(), false).getFullPathName();
-        if (spec.plugin.isEmpty())
+        spec.type = object->getProperty("type").toString().toLowerCase();
+        if (spec.type.isEmpty())
+            spec.type = "vst3";
+        if (spec.type == "sf2")
         {
-            error = "manifest item " + juce::String(index) + " has no plugin";
-            return false;
+            spec.soundfont = resolveMixPath(base, object->getProperty("soundfont").toString(), true).getFullPathName();
+            if (spec.soundfont.isEmpty())
+            {
+                error = "manifest item " + juce::String(index) + " has no soundfont";
+                return false;
+            }
+            spec.bank = object->hasProperty("bank") ? (int) object->getProperty("bank") : 0;
+            spec.program = object->hasProperty("program") ? (int) object->getProperty("program") : 0;
+        }
+        else
+        {
+            spec.plugin = resolveMixPath(base, object->getProperty("plugin").toString(), false).getFullPathName();
+            if (spec.plugin.isEmpty())
+            {
+                error = "manifest item " + juce::String(index) + " has no plugin";
+                return false;
+            }
+            spec.state = resolveMixPath(base, object->getProperty("state").toString(), true).getFullPathName();
         }
         spec.name = object->getProperty("name").toString();
         if (spec.name.isEmpty())
             spec.name = "track-" + juce::String(index + 1);
-        spec.state = resolveMixPath(base, object->getProperty("state").toString(), true).getFullPathName();
         if (object->hasProperty("gain"))
             spec.gain = (double) object->getProperty("gain");
         if (object->hasProperty("pan"))
@@ -109,6 +130,52 @@ bool loadMixManifest(const juce::File& file,
     if (specs.empty())
     {
         error = "manifest has no tracks";
+        return false;
+    }
+    return true;
+}
+
+bool addMixSpecToEngine(tsov::MixEngine& engine,
+                        const MixTrackSpec& spec,
+                        double sampleRate,
+                        int blockSize,
+                        juce::String& error)
+{
+    if (spec.type == "sf2")
+    {
+        auto synth = std::make_unique<tsov::SF2Synth>();
+        if (! synth->load(spec.soundfont, spec.bank, spec.program, sampleRate, {}, error))
+            return false;
+        if (engine.addSf2Track(std::move(synth), spec.name,
+                               (float) spec.gain, (float) spec.pan,
+                               spec.note - 60, true) < 0)
+        {
+            error = "addSf2Track failed";
+            return false;
+        }
+        return true;
+    }
+
+    if (spec.type != "vst3")
+    {
+        error = "unsupported track type: " + spec.type;
+        return false;
+    }
+
+    auto instance = tsov::PluginHost::create(spec.plugin, sampleRate, blockSize, error);
+    if (instance == nullptr)
+        return false;
+    if (spec.state.isNotEmpty())
+    {
+        juce::String stateError;
+        if (! tsov::PluginHost::loadState(*instance, juce::File(spec.state), stateError))
+            std::cerr << "state load failed: " << stateError << std::endl;
+    }
+    if (engine.addTrack(std::move(instance), spec.name,
+                        (float) spec.gain, (float) spec.pan,
+                        spec.note - 60, true) < 0)
+    {
+        error = "addTrack failed";
         return false;
     }
     return true;
@@ -552,23 +619,11 @@ int runMixEngine(bool nullDevice,
 
     for (size_t i = 0; i < specs.size(); ++i)
     {
-        juce::String pluginError;
-        auto instance = tsov::PluginHost::create(specs[i].plugin, sampleRate, blockSize, pluginError);
-        if (instance == nullptr)
+        juce::String loadError;
+        if (! addMixSpecToEngine(engine, specs[i], sampleRate, blockSize, loadError))
         {
-            std::cerr << "track " << i << " plugin load failed: " << pluginError << std::endl;
+            std::cerr << "track " << i << " load failed: " << loadError << std::endl;
             return 4;
-        }
-        if (specs[i].state.isNotEmpty())
-        {
-            juce::String stateError;
-            if (! tsov::PluginHost::loadState(*instance, juce::File(specs[i].state), stateError))
-                std::cerr << "track " << i << " state load failed: " << stateError << std::endl;
-        }
-        if (engine.addTrack(std::move(instance), specs[i].name, (float) specs[i].gain, (float) specs[i].pan, specs[i].note - 60, true) < 0)
-        {
-            std::cerr << "addTrack failed at " << i << std::endl;
-            return 5;
         }
     }
     const auto actualTrackCount = (int) specs.size();
@@ -690,21 +745,12 @@ int runIpcServer(const juce::String& manifestPath,
 
     for (const auto& spec : specs)
     {
-        juce::String pluginError;
-        auto instance = tsov::PluginHost::create(spec.plugin, sampleRate, blockSize, pluginError);
-        if (instance == nullptr)
+        juce::String loadError;
+        if (! addMixSpecToEngine(engine, spec, sampleRate, blockSize, loadError))
         {
-            std::cerr << "plugin load failed: " << pluginError << std::endl;
+            std::cerr << "track load failed: " << loadError << std::endl;
             return 4;
         }
-        if (spec.state.isNotEmpty())
-        {
-            juce::String stateError;
-            if (! tsov::PluginHost::loadState(*instance, juce::File(spec.state), stateError))
-                std::cerr << "state load failed: " << stateError << std::endl;
-        }
-        if (engine.addTrack(std::move(instance), spec.name, (float) spec.gain, (float) spec.pan, spec.note - 60, true) < 0)
-            return 5;
     }
 
     juce::String openError;
@@ -968,6 +1014,7 @@ int runIpcServer(const juce::String& manifestPath,
                     result->setProperty("version", "0.1.0");
                     result->setProperty("sampleRate", engine.sampleRate());
                     result->setProperty("blockSize", engine.blockSize());
+                    result->setProperty("outputLatencySamples", engine.outputLatencySamples());
                     result->setProperty("tracks", engine.trackCount());
                     result->setProperty("revision", revision);
                     response = makeResponse(id, juce::var(result));
@@ -980,6 +1027,9 @@ int runIpcServer(const juce::String& manifestPath,
                     result->setProperty("xruns", engine.xrunCount());
                     result->setProperty("sampleRate", engine.sampleRate());
                     result->setProperty("blockSize", engine.blockSize());
+                    result->setProperty("outputLatencySamples", engine.outputLatencySamples());
+                    result->setProperty("loopStart", (juce::int64) engine.loopStartSamples());
+                    result->setProperty("loopEnd", (juce::int64) engine.loopEndSamples());
                     result->setProperty("masterPeak", engine.masterPeak());
                     result->setProperty("inputPeak", engine.inputPeak());
                     result->setProperty("revision", revision);
@@ -1071,6 +1121,16 @@ int runIpcServer(const juce::String& manifestPath,
                     {
                         const auto position = (juce::int64) params.getProperty("position", 0);
                         engine.seek(position);
+                        result->setProperty("ok", true);
+                    }
+                    else if (action == "loop")
+                    {
+                        const auto start = (juce::int64) params.getProperty("start", 0);
+                        const auto end = (juce::int64) params.getProperty("end", 0);
+                        if (end > start)
+                            engine.setLoop(start, end);
+                        else
+                            engine.clearLoop();
                         result->setProperty("ok", true);
                     }
                     else

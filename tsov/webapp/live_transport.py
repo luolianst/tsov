@@ -1,10 +1,9 @@
-"""Web -> tsov-host live transport bridge (S2.3).
+"""Web -> tsov-host live transport bridge.
 
 The web play button is non-blocking: this service starts/reuses a sidecar for
 the project, pushes the current Score into its live graph, and streams playhead
-state to SSE at ~30 Hz. Projects containing non-VST3 tracks are rejected here
-and the playback route falls back to the legacy wav path until those sources
-are supported by the sidecar.
+state to SSE at ~30 Hz. VST3 tracks and the bundled GM SoundFont are supported;
+projects containing unsupported sources still fall back to the legacy wav path.
 """
 
 from __future__ import annotations
@@ -20,12 +19,17 @@ from typing import Any
 
 from ..host.host_client import HostClient
 from ..host.live import score_to_graph
+from ..midi.export import DRUM_BANK, GM_PROGRAMS
 from .helpers import score_duration
 from .state import EventBus
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_DEFAULT_SF2 = _REPO_ROOT / "vendor" / "soundfonts" / "FluidR3_GM.sf2"
+_DEFAULT_SFIZZ = Path("D:/VST3/sfizz.vst3")
+
 
 class LiveUnsupported(RuntimeError):
-    """Project cannot be played by the current VST3-only sidecar."""
+    """Project cannot be played by the current sidecar."""
 
 
 def _resolve_plugin(program: str) -> Path | None:
@@ -39,6 +43,16 @@ def _resolve_plugin(program: str) -> Path | None:
             if inner.is_file():
                 return inner.resolve()
     return None
+
+
+def _gm_program_number(program: str) -> int | None:
+    if program == "":
+        return 0
+    if program.isdigit():
+        return int(program)
+    if program == "drums":
+        return 0
+    return GM_PROGRAMS.get(program)
 
 
 def _free_port() -> int:
@@ -62,8 +76,8 @@ class LiveTransport:
 
     # ---------------- lifecycle ----------------
 
-    def _manifest_for(self, project) -> tuple[Path, list[int]]:
-        tracks = []
+    def _manifest_for(self, project) -> tuple[list[dict[str, Any]], list[int]]:
+        tracks: list[dict[str, Any]] = []
         selected: list[int] = []
         for index, track in enumerate(project.score.tracks):
             kind = str(getattr(track, "kind", "midi") or "midi")
@@ -71,33 +85,61 @@ class LiveTransport:
                 if track.audio_clips():
                     raise LiveUnsupported(f"音频轨暂不支持实时播放：{track.name}")
                 continue
-            program = str(getattr(track.instrument, "program", "") or "")
-            if not program.startswith("vst3:"):
-                if track.notes:
-                    raise LiveUnsupported(f"非 VST3 轨暂不支持实时播放：{track.name}")
+            if not track.notes:
                 continue
-            plugin = _resolve_plugin(program)
-            if plugin is None or not plugin.exists():
-                raise LiveUnsupported(f"VST3 插件不存在：{track.name} / {program}")
-            item: dict[str, Any] = {
-                "name": track.name or f"track {index + 1}",
-                "plugin": str(plugin),
-                "gain": float(track.instrument.volume),
-                "pan": float(track.pan),
-                "note": 60,
-            }
+            program = str(getattr(track.instrument, "program", "") or "")
             preset = getattr(track.instrument, "preset", None) or {}
+            state_path = None
             if str(preset.get("kind") or "") == "state" and preset.get("path"):
                 state = Path(str(preset["path"]))
                 if not state.is_absolute():
                     state = project.root / state
                 if state.is_file():
-                    item["state"] = str(state.resolve())
+                    state_path = str(state.resolve())
+
+            item: dict[str, Any] = {
+                "name": track.name or f"track {index + 1}",
+                "gain": float(track.instrument.volume),
+                "pan": float(track.pan),
+                "note": 60,
+            }
+
+            if program.startswith("vst3:"):
+                plugin = _resolve_plugin(program)
+                if plugin is None or not plugin.exists():
+                    raise LiveUnsupported(f"VST3 插件不存在：{track.name} / {program}")
+                item.update({"type": "vst3", "plugin": str(plugin)})
+                if state_path:
+                    item["state"] = state_path
+            elif program.startswith("sfz:"):
+                plugin = _resolve_plugin(f"vst3:{_DEFAULT_SFIZZ}")
+                if plugin is None or not plugin.exists():
+                    raise LiveUnsupported("sfizz VST3 不可用，无法实时播放 SFZ 轨")
+                if state_path is None:
+                    raise LiveUnsupported(f"SFZ 轨缺少 sfizz 状态：{track.name}")
+                item.update({"type": "vst3", "plugin": str(plugin), "state": state_path})
+            else:
+                program_number = _gm_program_number(program)
+                if program_number is None:
+                    if track.notes:
+                        raise LiveUnsupported(f"未知音色程序，暂不支持实时播放：{track.name} / {program}")
+                    continue
+                if not _DEFAULT_SF2.is_file():
+                    raise LiveUnsupported(f"内置 SoundFont 不存在：{_DEFAULT_SF2}")
+                item.update(
+                    {
+                        "type": "sf2",
+                        "soundfont": str(_DEFAULT_SF2),
+                        "bank": DRUM_BANK if program == "drums" else 0,
+                        "program": program_number,
+                    }
+                )
+
             tracks.append(item)
             selected.append(index)
 
         if not selected:
-            raise LiveUnsupported("工程没有可实时播放的 VST3 轨")
+            raise LiveUnsupported("工程没有可实时播放的 MIDI 轨")
         return tracks, selected
 
     def _ensure_client(self, project) -> HostClient:
@@ -113,11 +155,15 @@ class LiveTransport:
 
         device = os.environ.get("TSOV_LIVE_DEVICE", "GP-50")
         device_type = os.environ.get("TSOV_LIVE_DEVICE_TYPE", "Exclusive")
+        sample_rate = float(os.environ.get("TSOV_LIVE_SAMPLE_RATE", "44100"))
+        block_size = int(os.environ.get("TSOV_LIVE_BLOCK_SIZE", "132"))
         client = HostClient(
             manifest,
             port=_free_port(),
             device=device,
             device_type=device_type,
+            sample_rate=sample_rate,
+            block_size=block_size,
         )
         try:
             client.start()
@@ -171,6 +217,9 @@ class LiveTransport:
             self._loop = loop
             self._stop.clear()
             sample_rate = float(client.info.get("sampleRate", 44100.0))
+            loop_start = int(round(loop[0] * sample_rate)) if loop else 0
+            loop_end = int(round(loop[1] * sample_rate)) if loop else 0
+            client.transport("loop", start=loop_start, end=loop_end)
             position = max(0, int(round(float(start) * sample_rate)))
             client.transport("seek", position=position)
             client.transport("play")
@@ -183,12 +232,14 @@ class LiveTransport:
                 )
                 self._thread.start()
             duration = score_duration(project.score, project.root)
+            latency_samples = int(client.info.get("outputLatencySamples", 0) or 0)
             payload = {
                 "ok": True,
                 "mode": "live",
                 "duration": duration,
                 "start": float(start),
                 "loop": list(loop) if loop else None,
+                "outputLatencySamples": latency_samples,
             }
             self.bus.publish(project.name, "playback_start", {
                 "duration": duration, "start": float(start),
@@ -244,18 +295,21 @@ class LiveTransport:
                 self.bus.publish(project_name, "playback_stop", {"mode": "live"})
                 break
             playhead = float(state.get("playhead", 0)) / sample_rate
+            latency = float(state.get("outputLatencySamples", 0) or 0) / sample_rate
+            # The speaker is hearing this far behind the source clock; expose the
+            # audible position so the playhead lines up with what the user hears.
+            playhead = max(0.0, playhead - latency)
             loop = self._loop
             if loop is not None and playhead >= loop[1]:
-                try:
-                    client.transport("seek", position=max(0, int(round(loop[0] * sample_rate))))
-                except Exception:  # noqa: BLE001
-                    pass
+                # The host loops at sample boundaries; this only guards a host
+                # that reports a stale playhead just past the loop end.
                 playhead = float(loop[0])
             self.bus.publish(project_name, "playhead", {
                 "playhead": round(max(0.0, playhead), 6),
                 "playing": True,
                 "xruns": int(state.get("xruns", 0)),
                 "masterPeak": float(state.get("masterPeak", 0.0)),
+                "outputLatencySamples": int(state.get("outputLatencySamples", 0) or 0),
             })
             next_tick += 1.0 / 30.0
             delay = next_tick - time.monotonic()
