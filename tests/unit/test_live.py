@@ -19,6 +19,11 @@ class FakeLiveClient:
         self.revision += 1
         return {"ok": True, "revision": self.revision, "tracks": len(graph["tracks"])}
 
+    def patch(self, ops, revision=None):
+        self.calls.append({"ops": ops, "revision": revision})
+        self.revision += 1
+        return {"ok": True, "revision": self.revision, "ops": len(ops)}
+
 
 def _score() -> Score:
     return Score(
@@ -74,3 +79,39 @@ def test_project_apply_score_pushes_live_graph(tmp_path):
     assert result["ok"] is True
     assert result["live"]["revision"] == 1
     assert client.calls[0]["graph"]["tracks"][0]["notes"][0]["pitch_midi"] == 64
+
+
+def test_project_second_edit_uses_incremental_patch(tmp_path):
+    project = Project.create("live-patch-test", _score(), parent=tmp_path)
+    client = FakeLiveClient()
+    project.attach_live(client)
+
+    first = project.apply_batch(EditBatch("mix").add("set_track_mix", track=0, value={"volume": 0.75}))
+    second = project.apply_batch(EditBatch("mix").add("set_track_mix", track=0, value={"volume": 0.6}))
+
+    assert first["live"]["ok"] is True
+    assert second["live"]["ok"] is True
+    assert "graph" in client.calls[0]
+    assert client.calls[1]["ops"] == [
+        {"op": "set_track_mix", "track": 0, "gain": 0.6, "pan": -0.25, "mute": True}
+    ]
+    assert client.revision == 2
+
+
+def test_project_note_edit_uses_set_notes_patch(tmp_path):
+    project = Project.create("live-notes-patch-test", _score(), parent=tmp_path)
+    client = FakeLiveClient()
+    project.attach_live(client)
+    project.apply_batch(EditBatch("mix").add("set_track_mix", track=0, value={"volume": 0.75}))
+
+    result = project.apply_score(_score_with_pitch(64))
+
+    assert result["live"]["ok"] is True
+    assert client.calls[1]["ops"][0]["op"] == "set_notes"
+    assert client.calls[1]["ops"][0]["notes"][0]["pitch_midi"] == 64
+
+
+def _score_with_pitch(pitch: int) -> Score:
+    score = _score()
+    score.tracks[0].notes[0].pitch_midi = pitch
+    return score

@@ -64,6 +64,7 @@ class Project:
         self.name = name
         self._journal: ActionJournal | None = None   # 快照窗口（懒建，M-V7 D2）
         self._live_client = None                     # S2.2：可选 sidecar IPC 客户端
+        self._live_bridge = None                     # S2.5：增量活图桥（E1 ops）
         self._lock = threading.RLock()               # P0 A2：写路径互斥
         self.root.mkdir(parents=True, exist_ok=True)
         self._ensure_git()
@@ -92,20 +93,25 @@ class Project:
     def attach_live(self, client) -> "Project":
         """绑定 sidecar IPC 客户端；之后每次 apply_batch/apply_score/undo/redo 同步活图。"""
         self._live_client = client
+        # LiveTransport loads the initial graph before attaching; seed the bridge
+        # baseline so subsequent edits go through E1 patch instead of a full snapshot.
+        from .live import LiveBridge
+        self._live_bridge = LiveBridge(client, self.score if int(getattr(client, "revision", 0)) > 0 else None)
         return self
 
     def _sync_live(self) -> dict | None:
-        """把当前 Score 推成 sidecar 全量图；失败不阻断落盘（返回错误供调用方观察）。"""
+        """把当前 Score 增量推成 sidecar 活图；失败不阻断落盘（返回错误供调用方观察）。"""
         if self._live_client is None:
             return None
-        from .live import score_to_graph
+        from .live import LiveBridge
 
         try:
-            sample_rate = float((getattr(self._live_client, "info", {}) or {}).get("sampleRate", 44100.0))
-            return self._live_client.load_graph(
-                score_to_graph(self.score, sample_rate=sample_rate),
-                revision=int(getattr(self._live_client, "revision", 0)),
-            )
+            if self._live_bridge is None or self._live_bridge.client is not self._live_client:
+                self._live_bridge = LiveBridge(
+                    self._live_client,
+                    self.score if int(getattr(self._live_client, "revision", 0)) > 0 else None,
+                )
+            return self._live_bridge.sync(self.score)
         except Exception as exc:  # noqa: BLE001 sidecar 不在线不能阻断编辑落盘
             return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
