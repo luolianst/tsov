@@ -160,9 +160,9 @@ export async function finishPartDrag() {
 }
 
 /* Part 背景绘制（Cubase 心智）：
-   - body：与轨道同色的极淡整高块，铺在音符下面（bodyH = 轨道内部高）
-   - header：顶部 13px 浅色标题条 + P 标签 + 左右缘把手
-   - 叠置 Part：半透明叠加 + 每条独立描边/标签，音符仍画在其上
+   - **单层浅色块**：整轨同色淡背景，从上到下；叠在音符下面
+   - 不再分 header/body 深浅层；只在左上写 P 标签，左右缘整高把手
+   - 叠置 Part：半透明叠加 + 独立描边/标签，音符仍画在其上
    o={list,col,yTop,h,bodyY,bodyH,selId,inDrag,p,v,xLo,xHi} */
 export function drawPartBands(ctx, o) {
   const v = o.v || store.view;
@@ -176,9 +176,9 @@ export function drawPartBands(ctx, o) {
     const isPreview = String(part.id || '').startsWith('__');
     const isSel = o.selId && part.id === o.selId;
 
-    /* 整轨深色 body（在音符下面；总谱里深色块本人可拖） */
+    /* 单层浅色 Part 背景（在音符下面；整个块都可拖） */
     ctx.fillStyle = o.col;
-    ctx.globalAlpha = isPreview ? 0.24 : (o.inDrag ? 0.50 : (isSel ? 0.52 : 0.40));
+    ctx.globalAlpha = isPreview ? 0.16 : (o.inDrag ? 0.26 : (isSel ? 0.24 : 0.20));
     if (ctx.roundRect) {
       ctx.beginPath();
       ctx.roundRect(g.x0, bodyY, g.w, bodyH, 4);
@@ -188,7 +188,7 @@ export function drawPartBands(ctx, o) {
     }
     ctx.globalAlpha = 1;
     ctx.strokeStyle = isPreview ? p.playhead : (isSel ? p.selStroke : o.col);
-    ctx.globalAlpha = isPreview ? 0.55 : (isSel ? 0.9 : 0.72);
+    ctx.globalAlpha = isPreview ? 0.55 : (isSel ? 0.9 : 0.55);
     if (ctx.roundRect) {
       ctx.beginPath();
       ctx.roundRect(g.x0 + 0.5, bodyY + 0.5, Math.max(2, g.w) - 1, bodyH - 1, 3.5);
@@ -198,19 +198,9 @@ export function drawPartBands(ctx, o) {
     }
     ctx.globalAlpha = 1;
 
-    /* 顶部 header（标题/标签；视觉仍略强于 body） */
-    ctx.fillStyle = o.col;
-    ctx.globalAlpha = isPreview ? 0.28 : (o.inDrag ? 0.54 : (isSel ? 0.56 : 0.46));
-    ctx.fillRect(g.x0, bodyY, g.w, Math.min(headH, bodyH));
-    ctx.globalAlpha = 1;
-    ctx.strokeStyle = isPreview ? p.playhead : (isSel ? p.selStroke : p.keySep);
-    ctx.setLineDash(isPreview ? [3, 2] : []);
-    ctx.strokeRect(g.x0 + 0.5, bodyY + 0.5, Math.max(2, g.w) - 1, Math.min(headH, bodyH) - 1);
-    ctx.setLineDash([]);
-
     /* 左右缘把手（整高） */
     ctx.fillStyle = isPreview ? p.playhead : o.col;
-    ctx.globalAlpha = 0.8;
+    ctx.globalAlpha = 0.70;
     ctx.fillRect(g.x0, bodyY, 3, bodyH);
     ctx.fillRect(Math.max(g.x0 + 3, g.x1 - 3), bodyY, 3, bodyH);
     ctx.globalAlpha = 1;
@@ -218,7 +208,7 @@ export function drawPartBands(ctx, o) {
     if (g.w > 24 && !isPreview) {
       ctx.fillStyle = p.laneLabel;
       ctx.font = '10px "Microsoft YaHei UI","PingFang SC",system-ui,sans-serif';
-      ctx.fillText('▭ P' + (idx + 1), g.x0 + 5, bodyY + Math.min(headH, bodyH) - 3);
+      ctx.fillText('P' + (idx + 1), g.x0 + 6, bodyY + Math.min(headH, bodyH) - 3);
     }
   });
 }
