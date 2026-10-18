@@ -12,6 +12,7 @@ import json
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,7 @@ class HostClient:
         self._next_id = 0
         self.info: dict[str, Any] = {}
         self.revision = 0
+        self._io_lock = threading.Lock()
 
     def start(self, timeout: float = 15.0) -> dict[str, Any]:
         if not self.manifest.exists():
@@ -104,8 +106,9 @@ class HostClient:
         self._next_id += 1
         request_id = self._next_id
         payload = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params or {}}
-        self.sock.sendall((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
-        line = self._reader.readline()
+        with self._io_lock:
+            self.sock.sendall((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
+            line = self._reader.readline()
         if not line:
             raise HostError("host closed the IPC connection")
         response = json.loads(line)

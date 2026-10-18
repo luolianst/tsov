@@ -84,6 +84,9 @@ class WebState:
         self.chains: dict = {}  # M-V8 E3：工程 → ChainRunner（处理链；懒建）
         self.chains_lock = threading.Lock()
         self._engine = None  # HostEngine 懒加载（soundfont 依赖）
+        from .live_transport import LiveTransport  # 延迟导入：避免 state ↔ live_transport 循环
+
+        self.live = LiveTransport(self.bus)  # S2.3：sidecar 实时播放/30Hz 播放头
 
     # ---------------- 工程 ----------------
 
@@ -120,6 +123,10 @@ class WebState:
             pass
         with self.chains_lock:
             self.chains.pop(name, None)
+        try:
+            self.live.stop(name)
+        except Exception:  # noqa: BLE001
+            pass
         trash = self.output_dir / ".trash"
         trash.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")

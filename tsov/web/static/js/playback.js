@@ -11,6 +11,7 @@ import { isEditorWatchActive, showWarnings } from './warnings.js';
 let audio = null;        // <audio> wav 试听
 let rafId = 0;
 let hostT0 = 0;          // 后端播放起始时刻（playback_start；含 start 偏移）
+let hostMode = 'host';   // S2.3：'live'=sidecar SSE 驱动；'wav'=旧阻塞路径（rAF 插值）
 let playGen = 0;         // E1 修复：起播代际——停止作废在途起播（加载中点⏹不再事后冒播）
 
 /* ---------------- E5 段2：电平表（试听通路；MediaElementSource 单次绑定） ---------------- */
@@ -181,7 +182,7 @@ function tick() {
       try { audio.currentTime = L.start; } catch (e) { /* 忽略 */ }
     }
     setPlayhead(audio.currentTime);
-  } else if (store.playing === 'host') {
+  } else if (store.playing === 'host' && hostMode !== 'live') {
     setPlayhead(loopedPos((performance.now() - hostT0) / 1000));
   }
   if (store.playing) metroTick();
@@ -200,6 +201,9 @@ export function seekTo(t) {
   mNext = 0;
   if (store.playing === 'wav' && audio) {
     try { audio.currentTime = v; } catch (e) { /* 忽略 */ }
+  } else if (store.playing === 'host' && hostMode === 'live' && store.project) {
+    /* S2.3：sidecar 定位（不等待；失败由 SSE/状态提示） */
+    api.seek(store.project, v).catch(() => {});
   }
 }
 
@@ -283,9 +287,13 @@ export async function playHost() {
     body.start = L.start;
   }
   try {
-    toast(body.loop ? (t('宿主播放中（循环 ') + L.start.toFixed(1) + '–' + L.end.toFixed(1) + t('s，⏹ 停止）…')) : t('宿主播放中（阻塞到播完）…'));
+    toast(t('实时播放中（sidecar；⏹ 停止）…'));
     const r = await api.play(store.project, body);
-    toast(t('宿主播放完毕（') + r.duration + 's）');
+    if (r && r.mode === 'live') {
+      toast(t('实时播放中（sidecar；⏹ 停止）'));
+    } else {
+      toast(t('宿主播放完毕（') + r.duration + 's）');
+    }
   } catch (e) {
     setError(e.message);
   }
@@ -375,11 +383,16 @@ export function init(opts) {
   /* SSE：后端播放事件驱动播放头动画 */
   bus.on('playback_start', (d) => {
     const st = (d && d.start) || 0;
+    hostMode = (d && d.mode) || 'host';
     hostT0 = performance.now() - st * 1000;
     mNext = 0;
     setPlaying('host');
     setPlayhead(st);
     ensureRaf();
+  });
+  bus.on('playhead', (d) => {
+    if (store.playing !== 'host' || hostMode !== 'live' || !d) return;
+    setPlayhead(Math.max(0, Number(d.playhead) || 0));
   });
   bus.on('playback_stop', () => {
     /* E1：停在原地（不再回零） */

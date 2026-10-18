@@ -50,6 +50,12 @@ class PlayIn(BaseModel):
     loop: list[float] | None = None     # [a, b] 秒——区间循环（阻塞直到 /play/stop）
 
 
+class SeekIn(BaseModel):
+    """S2.3：live sidecar 播放轴定位（秒）。"""
+
+    position: float = 0.0
+
+
 class ExportIn(BaseModel):
     """导出矩阵选项（修正轮2：UI 导出弹窗 → host export_matrix）。
 

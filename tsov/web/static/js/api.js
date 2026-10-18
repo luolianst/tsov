@@ -65,6 +65,7 @@ export const api = {
   /* P62b：插件编辑器状态（前端轮询；关窗后自动重渲） */
   editorStatus: (name) => req('/api/projects/' + encodeURIComponent(name) + '/instrument/editor-status'),
   play: (name, body) => post('/api/projects/' + encodeURIComponent(name) + '/play', body || {}),
+  seek: (name, position) => post('/api/projects/' + encodeURIComponent(name) + '/seek', { position: Number(position) || 0 }),
   /* M-V8 E1：停止宿主播放（打断 sounddevice；试听/宿主共用停止按钮） */
   playStop: (name) => post('/api/projects/' + encodeURIComponent(name) + '/play/stop', {}),
   chat: (project, message, baseRev, annotations, selection, userActions, refs) => post('/api/chat', { project, message, base_rev: baseRev || 'HEAD', annotations: annotations || null, selection: selection || null, user_actions: userActions || null, refs: refs || null }),

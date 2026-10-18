@@ -24,6 +24,10 @@ from .state import WebState
 async def _lifespan(_app: FastAPI):
     """批L L1-2：插件 worker 生命周期挂服务侧（懒启动；服务退出时收尾）。"""
     yield
+    try:
+        _app.state.tsov.live.close()
+    except Exception:  # noqa: BLE001
+        pass
     vst_worker.shutdown_global()
 
 
