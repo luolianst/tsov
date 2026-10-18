@@ -185,6 +185,11 @@ class Track:
     # ---- S3.1 P1：拥有型片段（additive；None=旧平铺 notes 未迁移）----
     parts: list[Part] | None = None
 
+    def __post_init__(self) -> None:
+        # 直接构造 Track(parts=...)、未给 notes 时，旧读侧从 Part 展开
+        if self.parts is not None and not self.notes:
+            self.notes = self.flat_notes()
+
     def to_dict(self) -> dict:
         data = asdict(self)
         if self.parts is not None:

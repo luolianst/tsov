@@ -43,6 +43,9 @@
   力度 = Note.velocity 派生 bars 视图，零新 op）
 - v0.2 批C 后段增补（2026-10-08 轨管理）：move_track（轨重排——移除后插入；书签 ref=轨名不受影响）
   / move_folder（文件夹成员整块移动 = 成员连续化，显示序随块序；P4/P5）
+- S3.2 增补（2026-10-18 Part）：add_part / move_part / copy_part / resize_part（loop 右拉延伸 / crop 裁剪 /
+  start 左拉 trim）/ delete_part / move_part_to_track（MIDI→MIDI）；set_notes 支持 part 级 local notes。
+  所有 op 仍走 EditBatch 事务 + 快照窗口；默认 Part 与旧平铺 notes 双读兼容。
 - 事务协议：EditBatch.apply(score) 在深拷贝上逐条执行——非法命令被拒绝并记录 error，
   合法命令全部生效（部分应用 + 错误清单）；apply 前不脏原 Score。
 - 该命令层 = M-V2 起 agent 工具与 Web UI 共用的编辑通道（docs/05 接口契约）。
@@ -53,7 +56,7 @@ from __future__ import annotations
 import copy
 import re
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -184,6 +187,10 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
     # M-V8 E3 段3：批量写音符（链产物落轨；轨级批量替换）
     if c.op == "set_notes":
         return _apply_set_notes(score, track, c)
+    # S3.2：Part 命令族（MIDI 轨；add/move/copy/resize/delete/cross-track）
+    if c.op in ("add_part", "move_part", "copy_part", "resize_part",
+                "delete_part", "move_part_to_track"):
+        return _apply_part_op(score, track, c)
     if c.op == "set_track_folder":
         return _apply_set_track_folder(score, track, c)
     # v0.2 批C2（工作台 v2）：自动化道实体（additive；首次显式管理时物化迁移）
@@ -1359,25 +1366,16 @@ def _apply_add_track(score: Score, c: EditCommand) -> str | None:
     return None
 
 
-def _apply_set_notes(score: Score, track, c: EditCommand) -> str | None:
-    """value = {notes: [...]}（或裸数组）；批量替换该轨全部音符（链产物落轨）。
-
-    - 音符字段：{start, end, pitch_midi, pitch_hz?, velocity?, confidence?, deviation_cents?, is_ornament?}
-    - 校验：start<end / 0≤pitch_midi≤127 / 数量 ≤ 20000（护栏）；pitch_hz 缺省按等分音律补齐
-    - 只作用于 MIDI 轨；落轨后按 start 排序（链产物通常已序）
-    """
-    if str(getattr(track, "kind", "midi") or "midi") != "midi":
-        return f"set_notes 只能写 MIDI 轨（track {c.track} kind={getattr(track, 'kind', 'midi')!r}）"
-    v = c.value
-    notes_raw = v.get("notes") if isinstance(v, dict) else v
-    if not isinstance(notes_raw, list):
-        return "set_notes value 需 {notes: [...]} 或音符数组"
-    if len(notes_raw) > 20000:
-        return f"set_notes 数量超限：{len(notes_raw)}（≤20000）"
+def _parse_notes(raw, label: str = "set_notes") -> tuple[list[Note] | None, str | None]:
+    """解析命令层音符数组（绝对/part-local 由调用方决定）。"""
+    if not isinstance(raw, list):
+        return None, f"{label} value 需 {{notes: [...]}} 或音符数组"
+    if len(raw) > 20000:
+        return None, f"{label} 数量超限：{len(raw)}（≤20000）"
     out: list[Note] = []
-    for k, item in enumerate(notes_raw):
+    for k, item in enumerate(raw):
         if not isinstance(item, dict) or "pitch_midi" not in item:
-            return f"set_notes 第 {k} 条缺 pitch_midi"
+            return None, f"{label} 第 {k} 条缺 pitch_midi"
         try:
             pm = int(item["pitch_midi"])
             start = float(item.get("start", 0.0))
@@ -1385,11 +1383,13 @@ def _apply_set_notes(score: Score, track, c: EditCommand) -> str | None:
             vel = round(float(item.get("velocity", 0.8)), 3)
             conf = round(float(item.get("confidence", 0.8)), 3)
         except (TypeError, ValueError):
-            return f"set_notes 第 {k} 条字段非法：{item!r}"
+            return None, f"{label} 第 {k} 条字段非法：{item!r}"
         if not (0 <= pm <= 127):
-            return f"set_notes 第 {k} 条 pitch_midi 非法：{pm}"
+            return None, f"{label} 第 {k} 条 pitch_midi 非法：{pm}"
+        if start < 0:
+            return None, f"{label} 第 {k} 条 start 不能为负：{start}"
         if start >= end:
-            return f"set_notes 第 {k} 条 start>=end：{start}/{end}"
+            return None, f"{label} 第 {k} 条 start>=end：{start}/{end}"
         try:
             hz = float(item.get("pitch_hz") or 0.0) or midi_to_hz(pm)
         except (TypeError, ValueError):
@@ -1406,7 +1406,239 @@ def _apply_set_notes(score: Score, track, c: EditCommand) -> str | None:
             note.is_ornament = True
         out.append(note)
     out.sort(key=lambda n: n.start)
-    track.assign_notes(out)
+    return out, None
+
+
+def _part_ref(track, value) -> tuple[object | None, int | None, str | None]:
+    """解析 part 引用：id 字符串或轨道内索引。"""
+    parts = getattr(track, "parts", None) or []
+    if isinstance(value, bool) or value is None:
+        return None, None, "缺 part（需 id 或索引）"
+    if isinstance(value, int) or (isinstance(value, str) and value.lstrip("-").isdigit()):
+        idx = int(value)
+        if not (0 <= idx < len(parts)):
+            return None, None, f"part 索引越界：{idx}（共 {len(parts)} 个）"
+        return parts[idx], idx, None
+    pid = str(value)
+    for idx, part in enumerate(parts):
+        if part.id == pid:
+            return part, idx, None
+    return None, None, f"part 不存在：{pid!r}"
+
+
+def _new_part_id(track) -> str:
+    used = {p.id for p in (getattr(track, "parts", None) or [])}
+    while True:
+        pid = "p" + uuid.uuid4().hex[:8]
+        if pid not in used:
+            return pid
+
+
+def _sync_parts(track) -> None:
+    """Part 变更后维护顺序 + 旧读侧绝对 notes。"""
+    if getattr(track, "parts", None) is not None:
+        track.parts.sort(key=lambda p: (float(p.start), p.id))
+        track.assign_notes(track.flat_notes())
+
+
+def _crop_notes(notes: list[Note], length: float) -> list[Note]:
+    out: list[Note] = []
+    for note in notes:
+        if note.start >= length:
+            continue
+        if note.end > length:
+            out.append(replace(note, end=length))
+        else:
+            out.append(note)
+    return out
+
+
+def _loop_notes(notes: list[Note], length: float) -> tuple[list[Note] | None, str | None]:
+    """右拉循环延伸：按原内容长度重复音符，裁到 length。"""
+    content = max((float(n.end) for n in notes), default=0.0)
+    if content <= 0:
+        return [], None
+    out: list[Note] = []
+    k = 0
+    while k * content < length - 1e-9:
+        for note in notes:
+            start = note.start + k * content
+            if start >= length:
+                continue
+            out.append(replace(note, start=start, end=min(note.end + k * content, length)))
+            if len(out) > 20000:
+                return None, "resize_part 循环后音符超限（≤20000）"
+        k += 1
+    out.sort(key=lambda n: n.start)
+    return out, None
+
+
+def _apply_part_op(score: Score, track, c: EditCommand) -> str | None:
+    """S3.2 Part 命令族：add/move/copy/resize/delete/cross-track。"""
+    if str(getattr(track, "kind", "midi") or "midi") != "midi":
+        return f"{c.op} 只能作用于 MIDI 轨（track {c.track} kind={getattr(track, 'kind', 'midi')!r}）"
+    ensure_parts(score)
+    if not isinstance(c.value, dict):
+        return f"{c.op} value 需对象"
+    v = c.value
+    op = c.op
+
+    if op == "add_part":
+        spec = v.get("part") if isinstance(v.get("part"), dict) else v
+        try:
+            start = float(spec.get("start") or 0.0)
+            length_raw = spec.get("length")
+            length = float(length_raw) if length_raw is not None else None
+        except (TypeError, ValueError):
+            return f"add_part start/length 非法：{spec.get('start')!r}/{spec.get('length')!r}"
+        if start < 0 or (length is not None and length < 0):
+            return "add_part start/length 不能为负"
+        notes, err = _parse_notes(spec.get("notes") or [], "add_part")
+        if err:
+            return err
+        content = max((float(n.end) for n in notes), default=0.0)
+        length = content if length is None else max(length, content)
+        pid = str(spec.get("id") or _new_part_id(track))
+        if any(p.id == pid for p in track.parts):
+            return f"add_part id 重复：{pid!r}"
+        from ..core.score import Part
+        track.parts.append(Part(id=pid, start=round(start, 6), length=round(length, 6), notes=notes))
+        _sync_parts(track)
+        return None
+
+    if op == "move_part_to_track":
+        part, _, err = _part_ref(track, v.get("part", v.get("part_id")))
+        if err:
+            return err
+        try:
+            target_i = int(v.get("target_track"))
+        except (TypeError, ValueError):
+            return f"move_part_to_track target_track 非法：{v.get('target_track')!r}"
+        if not (0 <= target_i < len(score.tracks)):
+            return f"move_part_to_track target_track 越界：{target_i}"
+        target = score.tracks[target_i]
+        if target is track:
+            return "move_part_to_track 目标轨相同；同轨移动请用 move_part"
+        if str(getattr(target, "kind", "midi") or "midi") != "midi":
+            return "move_part_to_track 目标必须是 MIDI 轨（audio→audio 不适用 Part）"
+        ensure_parts(score)
+        try:
+            start = float(v.get("start", part.start))
+        except (TypeError, ValueError):
+            return f"move_part_to_track start 非法：{v.get('start')!r}"
+        if start < 0:
+            return "move_part_to_track start 不能为负"
+        track.parts.remove(part)
+        if any(p.id == part.id for p in target.parts):
+            part.id = _new_part_id(target)
+        part.start = round(start, 6)
+        target.parts.append(part)
+        _sync_parts(track)
+        _sync_parts(target)
+        return None
+
+    part, _, err = _part_ref(track, v.get("part", v.get("part_id")))
+    if err:
+        return err
+
+    if op == "move_part":
+        try:
+            start = float(v.get("start"))
+        except (TypeError, ValueError):
+            return f"move_part start 非法：{v.get('start')!r}"
+        if start < 0:
+            return "move_part start 不能为负"
+        part.start = round(start, 6)
+        _sync_parts(track)
+        return None
+
+    if op == "copy_part":
+        try:
+            start = float(v.get("start", part.start + part.length))
+            length = float(v.get("length", part.length))
+        except (TypeError, ValueError):
+            return f"copy_part start/length 非法：{v.get('start')!r}/{v.get('length')!r}"
+        if start < 0 or length < 0:
+            return "copy_part start/length 不能为负"
+        from ..core.score import Part
+        copied = Part(id=_new_part_id(track), start=round(start, 6), length=round(length, 6),
+                      notes=copy.deepcopy(part.notes))
+        track.parts.append(copied)
+        _sync_parts(track)
+        return None
+
+    if op == "delete_part":
+        track.parts.remove(part)
+        _sync_parts(track)
+        return None
+
+    if op == "resize_part":
+        try:
+            new_length = float(v.get("length", part.length))
+            new_start = v.get("start")
+            new_start = float(new_start) if new_start is not None else None
+        except (TypeError, ValueError):
+            return f"resize_part length/start 非法：{v.get('length')!r}/{v.get('start')!r}"
+        if new_length < 0 or (new_start is not None and new_start < 0):
+            return "resize_part length/start 不能为负"
+        mode = str(v.get("mode") or ("loop" if new_length > part.length else "crop"))
+        if mode not in ("loop", "crop"):
+            return f"resize_part mode 非法：{mode!r}（loop/crop）"
+        notes = list(part.notes)
+        if new_length > part.length and mode == "loop":
+            notes, err = _loop_notes(notes, new_length)
+            if err:
+                return err
+        else:
+            notes = _crop_notes(notes, new_length)
+        if new_start is not None and new_start != part.start:
+            delta = new_start - part.start
+            shifted: list[Note] = []
+            for note in notes:
+                ns, ne = note.start - delta, note.end - delta
+                if ne <= 0:
+                    continue
+                shifted.append(replace(note, start=max(0.0, ns), end=ne))
+            notes = shifted
+            part.start = round(new_start, 6)
+        notes = _crop_notes(notes, new_length)
+        part.notes = notes
+        part.length = round(new_length, 6)
+        _sync_parts(track)
+        return None
+
+    return f"未知 Part op：{op!r}"
+
+
+def _apply_set_notes(score: Score, track, c: EditCommand) -> str | None:
+    """value = {notes: [...]}（或裸数组）；批量替换音符。
+
+    - v.part（id/索引）存在：只替换该 Part；输入音符为 **part-local** 时间
+    - 缺省：旧行为替换整轨绝对 notes（要求单默认 Part 或尚未迁移）
+    """
+    if str(getattr(track, "kind", "midi") or "midi") != "midi":
+        return f"set_notes 只能写 MIDI 轨（track {c.track} kind={getattr(track, 'kind', 'midi')!r}）"
+    v = c.value
+    notes_raw = v.get("notes") if isinstance(v, dict) else v
+    if isinstance(v, dict) and v.get("part", v.get("part_id")) is not None:
+        ensure_parts(score)
+        part, _, err = _part_ref(track, v.get("part", v.get("part_id")))
+        if err:
+            return err
+        notes, err = _parse_notes(notes_raw, "set_notes")
+        if err:
+            return err
+        part.notes = notes
+        part.length = max(float(part.length), max((float(n.end) for n in notes), default=0.0))
+        _sync_parts(track)
+        return None
+    if track.parts is not None and (len(track.parts) > 1 or
+                                    (track.parts and float(track.parts[0].start) != 0.0)):
+        return "set_notes 多 Part/偏移 Part 必须显式指定 part（id 或索引）"
+    notes, err = _parse_notes(notes_raw, "set_notes")
+    if err:
+        return err
+    track.assign_notes(notes)
     return None
 
 
