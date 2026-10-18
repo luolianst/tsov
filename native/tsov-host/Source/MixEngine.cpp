@@ -513,6 +513,20 @@ void MixEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
     actualSampleRate = device->getCurrentSampleRate();
     actualBlockSize = device->getCurrentBufferSizeSamples();
     prepareTracks(actualSampleRate.load(), actualBlockSize.load());
+
+    // Plugins often allocate/reset DSP state on their first processBlock. Do one
+    // silent block now, before the transport starts, so the first audible block
+    // does not overrun the device buffer (observed as a single xrun at ~90 ms).
+    if (! tracks.empty() && actualBlockSize.load() > 0)
+    {
+        juce::AudioBuffer<float> warmup(2, actualBlockSize.load());
+        const auto wasPlaying = playing.load();
+        playing = true;
+        renderBlock(warmup, actualBlockSize.load());
+        playing = wasPlaying;
+        playhead = 0;
+        resetEventCursorsTo(0);
+    }
 }
 
 void MixEngine::audioDeviceStopped()
