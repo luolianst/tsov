@@ -45,3 +45,13 @@ target_link_libraries(tsov_host PRIVATE
 set_target_properties(tsov_host PROPERTIES
     OUTPUT_NAME "tsov-host"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+# S6：最小 CTest 骨架（设备空模式 + selftest）；插件/黄金样本/崩溃注入沿用
+# Python/CDP 证据链，C++ 侧只保留可无设备运行的确定性 smoke。
+include(CTest)
+if(BUILD_TESTING)
+    add_test(NAME tsov_host_selftest_null
+             COMMAND tsov_host --selftest --device null)
+    add_test(NAME tsov_host_null_engine
+             COMMAND tsov_host --run --device null --duration 0.2 --tone 440 --sample-rate 48000 --block-size 128)
+endif()
