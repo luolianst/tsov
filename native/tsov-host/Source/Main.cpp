@@ -719,7 +719,9 @@ int runIpcServer(const juce::String& manifestPath,
                  const juce::String& deviceTypeSubstring,
                  double sampleRate,
                  int blockSize,
-                 double trackGain)
+                 double trackGain,
+                 int inputChannels,
+                 bool monitorInput)
 {
     juce::ScopedJuceInitialiser_GUI juceInit;
 
@@ -729,6 +731,8 @@ int runIpcServer(const juce::String& manifestPath,
     config.deviceTypeSubstring = deviceTypeSubstring;
     config.sampleRate = sampleRate;
     config.blockSize = blockSize;
+    config.inputChannels = juce::jlimit(0, 2, inputChannels);
+    config.monitorInput = monitorInput;
 
     std::vector<MixTrackSpec> specs;
     juce::String manifestError;
@@ -1025,6 +1029,9 @@ int runIpcServer(const juce::String& manifestPath,
                     result->setProperty("playhead", (juce::int64) engine.playheadSamples());
                     result->setProperty("playing", engine.isPlaying());
                     result->setProperty("xruns", engine.xrunCount());
+                    result->setProperty("recording", engine.isRecording());
+                    result->setProperty("recordedFrames", (juce::int64) engine.recordedFrames());
+                    result->setProperty("recordDropouts", engine.recordingDropouts());
                     result->setProperty("sampleRate", engine.sampleRate());
                     result->setProperty("blockSize", engine.blockSize());
                     result->setProperty("outputLatencySamples", engine.outputLatencySamples());
@@ -1140,6 +1147,44 @@ int runIpcServer(const juce::String& manifestPath,
                     if (response.isEmpty())
                         response = makeResponse(id, juce::var(result));
                 }
+                else if (method == "record_start")
+                {
+                    auto* result = new juce::DynamicObject();
+                    const auto path = params.getProperty("path", {}).toString();
+                    const auto channels = (int) params.getProperty("channels", 1);
+                    if (path.isEmpty())
+                    {
+                        response = makeError(id, -32602, "record path required");
+                    }
+                    else
+                    {
+                        juce::String error;
+                        const auto ok = engine.startRecording(juce::File(path), channels, error);
+                        result->setProperty("ok", ok);
+                        result->setProperty("path", path);
+                        if (! ok)
+                            result->setProperty("error", error);
+                        response = makeResponse(id, juce::var(result));
+                    }
+                }
+                else if (method == "record_stop")
+                {
+                    engine.stopRecording();
+                    auto* result = new juce::DynamicObject();
+                    result->setProperty("ok", true);
+                    result->setProperty("recordedFrames", (juce::int64) engine.recordedFrames());
+                    result->setProperty("dropouts", engine.recordingDropouts());
+                    response = makeResponse(id, juce::var(result));
+                }
+                else if (method == "record_status")
+                {
+                    auto* result = new juce::DynamicObject();
+                    result->setProperty("recording", engine.isRecording());
+                    result->setProperty("recordedFrames", (juce::int64) engine.recordedFrames());
+                    result->setProperty("dropouts", engine.recordingDropouts());
+                    result->setProperty("inputPeak", engine.inputPeak());
+                    response = makeResponse(id, juce::var(result));
+                }
                 else if (method == "shutdown")
                 {
                     auto* result = new juce::DynamicObject();
@@ -1199,6 +1244,7 @@ int main(int argc, char** argv)
     double gain = 0.02;
     double sampleRate = 48000.0;
     int blockSize = 128;
+    int inputChannels = 0;
     int testNote = 60;
 
     for (int i = 1; i < argc; ++i)
@@ -1227,6 +1273,7 @@ int main(int argc, char** argv)
         else if (arg == "--serve") serve = true;
         else if (arg == "--port" && i + 1 < argc) ipcPort = std::stoi(argv[++i]);
         else if (arg == "--monitor") monitorInput = true;
+        else if (arg == "--input-channels" && i + 1 < argc) inputChannels = std::stoi(argv[++i]);
         else if (arg == "--device" && i + 1 < argc)
         {
             const std::string value(argv[++i]);
@@ -1277,7 +1324,7 @@ int main(int argc, char** argv)
     if (mixTestPath.isNotEmpty() || mixManifestPath.isNotEmpty())
     {
         if (serve)
-            return runIpcServer(mixManifestPath, ipcPort, deviceSubstring, deviceTypeSubstring, sampleRate, blockSize, mixGain);
+            return runIpcServer(mixManifestPath, ipcPort, deviceSubstring, deviceTypeSubstring, sampleRate, blockSize, mixGain, inputChannels, monitorInput);
         return runMixEngine(nullDevice, deviceSubstring, deviceTypeSubstring, mixTestPath, mixManifestPath, duration, sampleRate, blockSize, mixTracks, monitorInput, recordPath, mixGain, crashAfter);
     }
     if (run)

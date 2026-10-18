@@ -33,6 +33,8 @@ class HostClient:
         device_type: str = "Exclusive",
         sample_rate: float = 48000.0,
         block_size: int = 128,
+        input_channels: int = 0,
+        monitor: bool = False,
     ) -> None:
         self.manifest = Path(manifest)
         self.port = port
@@ -40,6 +42,8 @@ class HostClient:
         self.device_type = device_type
         self.sample_rate = sample_rate
         self.block_size = block_size
+        self.input_channels = int(input_channels)
+        self.monitor = bool(monitor)
         self.root = Path(__file__).resolve().parents[2]
         self.host = Path(host) if host else self.root / "native" / "tsov-host" / "build" / "bin" / "Release" / "tsov-host.exe"
         self.proc: subprocess.Popen[str] | None = None
@@ -63,6 +67,10 @@ class HostClient:
             "--sample-rate", str(self.sample_rate),
             "--block-size", str(self.block_size),
         ]
+        if self.input_channels > 0:
+            cmd += ["--input-channels", str(self.input_channels)]
+        if self.monitor:
+            cmd += ["--monitor"]
         self.proc = subprocess.Popen(
             cmd,
             cwd=str(self.root),
@@ -140,6 +148,15 @@ class HostClient:
 
     def transport(self, action: str, **params: Any) -> dict[str, Any]:
         return self.request("transport", {"action": action, **params})
+
+    def record_start(self, path: str, channels: int = 1) -> dict[str, Any]:
+        return self.request("record_start", {"path": str(path), "channels": int(channels)})
+
+    def record_stop(self) -> dict[str, Any]:
+        return self.request("record_stop")
+
+    def record_status(self) -> dict[str, Any]:
+        return self.request("record_status")
 
     def shutdown(self) -> None:
         if self.sock is not None:
