@@ -28,6 +28,10 @@ async def _lifespan(_app: FastAPI):
         _app.state.tsov.live.close()
     except Exception:  # noqa: BLE001
         pass
+    try:
+        _app.state.tsov.record_sidecar.close()
+    except Exception:  # noqa: BLE001
+        pass
     vst_worker.shutdown_global()
 
 

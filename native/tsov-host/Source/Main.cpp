@@ -59,7 +59,8 @@ juce::File resolveMixPath(const juce::File& base, const juce::String& path, bool
 
 bool loadMixManifest(const juce::File& file,
                      std::vector<MixTrackSpec>& specs,
-                     juce::String& error)
+                     juce::String& error,
+                     bool allowEmpty = false)
 {
     if (! file.existsAsFile())
     {
@@ -127,7 +128,7 @@ bool loadMixManifest(const juce::File& file,
         ++index;
     }
 
-    if (specs.empty())
+    if (specs.empty() && ! allowEmpty)
     {
         error = "manifest has no tracks";
         return false;
@@ -736,12 +737,12 @@ int runIpcServer(const juce::String& manifestPath,
 
     std::vector<MixTrackSpec> specs;
     juce::String manifestError;
-    if (! loadMixManifest(juce::File(manifestPath), specs, manifestError))
+    if (! loadMixManifest(juce::File(manifestPath), specs, manifestError, true))
     {
         std::cerr << "manifest load failed: " << manifestError << std::endl;
         return 6;
     }
-    if (specs.empty() || specs.size() > 16)
+    if (specs.size() > 16)
     {
         std::cerr << "manifest track count invalid" << std::endl;
         return 6;

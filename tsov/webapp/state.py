@@ -85,8 +85,10 @@ class WebState:
         self.chains_lock = threading.Lock()
         self._engine = None  # HostEngine 懒加载（soundfont 依赖）
         from .live_transport import LiveTransport  # 延迟导入：避免 state ↔ live_transport 循环
+        from .record_sidecar import RecordSidecar
 
         self.live = LiveTransport(self.bus)  # S2.3：sidecar 实时播放/30Hz 播放头
+        self.record_sidecar = RecordSidecar()  # S2.9：录音也走 sidecar（旧 _recorder 兜底）
 
     # ---------------- 工程 ----------------
 

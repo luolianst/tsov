@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 import uuid
@@ -167,20 +168,56 @@ def register(app: FastAPI) -> None:
 
     @app.post("/api/projects/{name}/record/start")
     def record_start(name: str, body: dict | None = None) -> dict:
-        """开始录制（body: device/out_device/monitor/samplerate；一次一个）。"""
+        """开始录制（body: device/out_device/monitor/samplerate；一次一个）。
+
+        S2.9：优先 sidecar（输入+监听统一设备）；sidecar 启动失败时回退旧
+        Python `_recorder`。`TSOV_RECORD_SIDECAR=0` 可强制旧路径（测试/排障）。
+        """
         body = body or {}
-        st().get_project(name)  # 工程存在性校验（不存在 → 404）
+        proj = st().get_project(name)  # 工程存在性校验（不存在 → 404）
+        device = body.get("device")
+        out_device = body.get("out_device")
+        monitor = bool(body.get("monitor"))
+        samplerate = int(body.get("samplerate") or 48000)
+        incoming = proj.root / "audio" / ".incoming"
+        incoming.mkdir(parents=True, exist_ok=True)
+        tmp = incoming / f"rec-{time.strftime('%H%M%S')}-{uuid.uuid4().hex[:6]}.wav"
+
+        sidecar_enabled = os.environ.get("TSOV_RECORD_SIDECAR", "1").strip().lower() not in (
+            "0", "false", "off", "legacy",
+        )
+        if sidecar_enabled and not body.get("legacy"):
+            side = st().record_sidecar
+            with _recorder.lock:
+                if _recorder.thread is not None and _recorder.thread.is_alive():
+                    raise HTTPException(409, "已有录音进行中（先停止）")
+            if side.active:
+                raise HTTPException(409, "已有录音进行中（先停止）")
+            try:
+                side_info = side.start(proj, tmp, device=device, monitor=monitor, samplerate=samplerate)
+                with _recorder.lock:
+                    _recorder.project = name
+                    _recorder.started_at = time.time()
+                    _recorder.report = None
+                    _recorder.error = None
+                    _recorder.thread = None
+                    _recorder.stop_event = None
+                return {"recording": True, "monitor": monitor, "device": device,
+                        "out_device": out_device, "samplerate": samplerate,
+                        "started_at": _recorder.started_at, "mode": "sidecar",
+                        "path": side_info.get("path")}
+            except Exception as exc:  # noqa: BLE001 sidecar 设备/启动失败 → 旧路径兜底
+                try:
+                    tmp.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                sidecar_error = f"{type(exc).__name__}: {exc}"
+        else:
+            sidecar_error = ""
+
         with _recorder.lock:
             if _recorder.thread is not None and _recorder.thread.is_alive():
                 raise HTTPException(409, "已有录音进行中（先停止）")
-            device = body.get("device")
-            out_device = body.get("out_device")
-            monitor = bool(body.get("monitor"))
-            samplerate = int(body.get("samplerate") or 48000)
-            proj = st().get_project(name)
-            incoming = proj.root / "audio" / ".incoming"
-            incoming.mkdir(parents=True, exist_ok=True)
-            tmp = incoming / f"rec-{time.strftime('%H%M%S')}-{uuid.uuid4().hex[:6]}.wav"
             stop_event = threading.Event()
             _recorder.stop_event = stop_event
             _recorder.project = name
@@ -204,12 +241,26 @@ def register(app: FastAPI) -> None:
             th.start()
         return {"recording": True, "monitor": monitor, "device": device,
                 "out_device": out_device, "samplerate": samplerate,
-                "started_at": _recorder.started_at}
+                "started_at": _recorder.started_at, "mode": "legacy",
+                "sidecar_error": sidecar_error or None}
 
     @app.get("/api/projects/{name}/record/status")
     def record_status(name: str) -> dict:
         """录音状态（前端计时/轮询）。"""
         st().get_project(name)
+        side = st().record_sidecar
+        if side.active:
+            s = side.status()
+            return {
+                "project": _recorder.project,
+                "recording": bool(s.get("active")),
+                "elapsed": s.get("elapsed"),
+                "error": s.get("error"),
+                "mode": "sidecar",
+                "frames": s.get("recordedFrames"),
+                "dropouts": s.get("dropouts"),
+                "inputPeak": s.get("inputPeak"),
+            }
         th = _recorder.thread
         alive = th is not None and th.is_alive()
         return {
@@ -218,6 +269,7 @@ def register(app: FastAPI) -> None:
             "elapsed": round(time.time() - _recorder.started_at, 2)
             if alive and _recorder.started_at else None,
             "error": _recorder.error,
+            "mode": "legacy",
         }
 
     @app.post("/api/projects/{name}/record/stop")
@@ -225,6 +277,54 @@ def register(app: FastAPI) -> None:
         """停止录音 → 入库（44.1k flac + 去重）→ 命令层 add_audio_track（默认加轨）。"""
         body = body or {}
         proj = st().get_project(name)
+
+        def _finish(rep: dict) -> dict:
+            if int(rep.get("frames") or rep.get("recordedFrames") or 0) <= 0:
+                raise HTTPException(400, "没录到音频（设备无信号或权限被拒）")
+            src = Path(str(rep.get("path")))
+            try:
+                info = proj.import_audio(src, name=body.get("name"))
+            except ValueError as e:
+                raise HTTPException(400, str(e)) from e
+            finally:
+                try:
+                    src.unlink(missing_ok=True)  # 临时 wav 用完即删（内容已转 flac 入库）
+                except OSError:
+                    pass
+
+            result = None
+            if body.get("add_track", True):
+                batch = EditBatch(label="录音入库").add(
+                    "add_audio_track",
+                    value={"file": info["file"], "name": body.get("name") or "录音"})
+                result = proj.apply_batch(batch, commit_message="录音入库", source="user")
+                if result.get("applied"):
+                    st().bus.publish(name, "diff_applied",
+                                     {**result["diff"], "commit": result.get("commit"),
+                                      "seq": result.get("seq")})
+                    st().bus.publish(name, "state_updated", project_state(proj))
+            with _recorder.lock:
+                _recorder.thread = None  # 释放（可再次录制）
+                _recorder.project = None
+                _recorder.stop_event = None
+                _recorder.started_at = None
+            return {"recorded": rep, "file": info["file"], "seconds": info["seconds"],
+                    "deduped": info["deduped"],
+                    "added": bool(result and result.get("applied")), "batch": result}
+
+        side = st().record_sidecar
+        if side.active:
+            if _recorder.project and _recorder.project != name:
+                raise HTTPException(409, f"当前录音属于工程 {_recorder.project!r}——请到该工程停止（防串工程入库）")
+            try:
+                rep = side.stop()
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(500, f"录音停止失败：{type(exc).__name__}: {exc}") from exc
+            rep["frames"] = int(rep.get("recordedFrames") or 0)
+            payload = _finish(rep)
+            payload["mode"] = "sidecar"
+            return payload
+
         with _recorder.lock:
             if _recorder.project and _recorder.project != name:
                 raise HTTPException(409, f"当前录音属于工程 {_recorder.project!r}——请到该工程停止（防串工程入库）")
@@ -241,34 +341,6 @@ def register(app: FastAPI) -> None:
             _recorder.thread = None
             raise HTTPException(500, f"录制失败：{err}")
         rep = _recorder.report or {}
-        if int(rep.get("frames") or 0) <= 0:
-            _recorder.thread = None
-            raise HTTPException(400, "没录到音频（设备无信号或权限被拒）")
-
-        src = Path(str(rep.get("path")))
-        try:
-            info = proj.import_audio(src, name=body.get("name"))
-        except ValueError as e:
-            raise HTTPException(400, str(e)) from e
-        finally:
-            try:
-                src.unlink(missing_ok=True)  # 临时 wav 用完即删（内容已转 flac 入库）
-            except OSError:
-                pass
-
-        result = None
-        if body.get("add_track", True):
-            batch = EditBatch(label="录音入库").add(
-                "add_audio_track",
-                value={"file": info["file"], "name": body.get("name") or "录音"})
-            result = proj.apply_batch(batch, commit_message="录音入库", source="user")
-            if result.get("applied"):
-                st().bus.publish(name, "diff_applied",
-                                 {**result["diff"], "commit": result.get("commit"),
-                                  "seq": result.get("seq")})
-                st().bus.publish(name, "state_updated", project_state(proj))
-        with _recorder.lock:
-            _recorder.thread = None  # 释放（可再次录制）
-        return {"recorded": rep, "file": info["file"], "seconds": info["seconds"],
-                "deduped": info["deduped"],
-                "added": bool(result and result.get("applied")), "batch": result}
+        payload = _finish(rep)
+        payload["mode"] = "legacy"
+        return payload

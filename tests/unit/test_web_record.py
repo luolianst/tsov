@@ -26,6 +26,7 @@ def env(monkeypatch):
     d = Path("output") / f"webrectest-{uuid.uuid4().hex[:10]}"
     d.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr("tsov.webapp.config.AGENT_SESSION_DIR", str(d / "agent-sessions"))
+    monkeypatch.setenv("TSOV_RECORD_SIDECAR", "0")  # 这些用例验证旧 _recorder 路径
     app = create_app(output_dir=d)
     client = TestClient(app)
     try:

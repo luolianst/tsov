@@ -128,7 +128,7 @@ tsov is young, and honest about it. The full pipeline already runs end to end (h
 - **Prototype quality.** Expect rough edges; breaking changes are possible before v1.0.
 - **The agent needs an LLM key.** Everything else runs offline.
 - **v0.2 in progress.** Batch E landed: finished-song decomposition — segment 1 (grid detection → 4-stem separation → vocal transcription → quantize/scale-snap → one-click multi-track placement) and **segment 2** (drums via ADTOF, bass/others via MT3/YourMT3 — full 4-stem transcription, 13-step chain, per-step addressing) — alongside the humming quick-lane, all driven from the same chain panel.
-- **Realtime host (v0.2, S2.4).** The JUCE sidecar now plays VST3 and GM SoundFont tracks through one transport, with sample-accurate looping and output-latency-compensated playhead; the Web play button uses the sidecar for these projects (audio/unknown sources still fall back to the legacy path).
+- **Realtime host (v0.2, S2.9).** The JUCE sidecar now plays VST3 and GM SoundFont tracks through one transport, with sample-accurate looping, output-latency-compensated playhead, editor-state reload, and sidecar recording/monitoring; the Web play button uses the sidecar for these projects and the Web record button uses the sidecar first (legacy `_recorder` fallback; audio/unknown sources still fall back to the legacy path).
 - **MCP interface (experimental).** `tsov mcp` runs a stdio MCP server: external agents (Claude Code, Hermes, Codex, …) can list, read, edit, render and export projects through the same action layer the built-in agent uses — edits stay reviewable and reversible.
 
 ## Contributing
