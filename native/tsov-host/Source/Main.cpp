@@ -9,6 +9,8 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <thread>
+#include <chrono>
 #include <vector>
 
 #if defined(_WIN32)
@@ -156,6 +158,7 @@ void printUsage()
     line("  tsov-host --plugin-editor <path.vst3> [--device <name>] [--duration <sec>] [--note <midi>] [--state <file>]");
     line("  tsov-host --mix-test <path.vst3> [--tracks <n>] [--mix-gain <g>] [--device <name|null>] [--monitor] [--record <out.wav>]");
     line("  tsov-host --mix-manifest <tracks.json> [--device <name|null>] [--duration <sec>]");
+    line("  tsov-host --mix-manifest <tracks.json> --crash-after <sec>   # watchdog test only");
     line("  tsov-host --version");
     line("  tsov-host --help");
 }
@@ -486,8 +489,22 @@ int runMixEngine(bool nullDevice,
                  int requestedTracks,
                  bool monitorInput,
                  const juce::String& recordPath,
-                 double trackGain)
+                 double trackGain,
+                 double crashAfterSeconds)
 {
+    if (crashAfterSeconds > 0.0)
+    {
+        std::thread([crashAfterSeconds]
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds((long long) std::lround(crashAfterSeconds * 1000.0)));
+#if defined(_WIN32)
+            ::TerminateProcess(::GetCurrentProcess(), 0xC0000005);
+#else
+            std::abort();
+#endif
+        }).detach();
+    }
+
     juce::ScopedJuceInitialiser_GUI juceInit;
 
     tsov::MixEngine engine;
@@ -655,6 +672,7 @@ int main(int argc, char** argv)
     juce::String statePath;
     int mixTracks = 2;
     double mixGain = 0.55;
+    double crashAfter = 0.0;
     bool monitorInput = false;
     juce::String deviceSubstring;
     juce::String deviceTypeSubstring;
@@ -687,6 +705,7 @@ int main(int argc, char** argv)
         else if (arg == "--state" && i + 1 < argc) statePath = juce::String(argv[++i]);
         else if (arg == "--tracks" && i + 1 < argc) mixTracks = std::stoi(argv[++i]);
         else if (arg == "--mix-gain" && i + 1 < argc) mixGain = std::stod(argv[++i]);
+        else if (arg == "--crash-after" && i + 1 < argc) crashAfter = std::stod(argv[++i]);
         else if (arg == "--monitor") monitorInput = true;
         else if (arg == "--device" && i + 1 < argc)
         {
@@ -736,7 +755,7 @@ int main(int argc, char** argv)
     if (pluginEditorPath.isNotEmpty())
         return runPluginEditor(pluginEditorPath, deviceSubstring, deviceTypeSubstring, duration, sampleRate, blockSize, testNote, statePath);
     if (mixTestPath.isNotEmpty() || mixManifestPath.isNotEmpty())
-        return runMixEngine(nullDevice, deviceSubstring, deviceTypeSubstring, mixTestPath, mixManifestPath, duration, sampleRate, blockSize, mixTracks, monitorInput, recordPath, mixGain);
+        return runMixEngine(nullDevice, deviceSubstring, deviceTypeSubstring, mixTestPath, mixManifestPath, duration, sampleRate, blockSize, mixTracks, monitorInput, recordPath, mixGain, crashAfter);
     if (run)
         return runEngine(nullDevice, deviceSubstring, deviceTypeSubstring, pluginLivePath, duration, toneHz, gain, sampleRate, blockSize, testNote, statePath);
 

@@ -42,6 +42,7 @@ native/tsov-host/build/bin/Release/tsov-host.exe --version
 
 - `MixEngine` 已支持 N 轨 VST3、每轨 gain/pan/mute、采样级 MIDI 事件、master 总线；`--mix-test` 用同一插件起多实例验证。
 - `--mix-manifest <tracks.json>`：每轨独立 `plugin` / `state` / `gain` / `pan` / `note`；实测 Kontakt + SSD5 两轨、再加 Surge XT 三轨均 **0 xrun**，各轨 peak 独立。
+- `--watchdog`（Python）：`python native/tsov-host/watchdog.py --manifest ... --duration 5`；子进程异常退出会按同一 manifest 重启并恢复各轨 state。测试注入 `--crash-first 2` 验证（首次崩溃、第二次 0 xrun）。
 - 监听/录音输入请用 **Windows Audio（共享）**：GP-50 在 Exclusive 下「输入+输出」同时开会周期性 xrun（实测 10s 24 次）；共享模式 10s 仅 1 次。纯播放仍用 Exclusive。
 - 输入峰值见 `input_peak`；无输入信号时为 0 属正常。
 
