@@ -111,6 +111,8 @@ class Instrument:
     # ---- 批L L1-3/L1-4（additive；SF2/SFZ 轨忽略）----
     params: dict = field(default_factory=dict)  # VST3 参数 diff：{参数名: 归一 0..1}（预设之上叠加）
     preset: dict | None = None  # VST3 预设引用：{"kind": "vstpreset|fxp|state", "path": "工程内相对路径或绝对路径"}
+    # ---- S4.1（additive）：全局音源库稳定 id（VST3 class id / SFZ/SF2 内容哈希）----
+    source_id: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -124,6 +126,7 @@ class Instrument:
             effects=[Effect.from_dict(e) for e in data["effects"]],
             params=dict(data.get("params") or {}),
             preset=dict(data["preset"]) if data.get("preset") else None,
+            source_id=str(data.get("source_id") or ""),
         )
 
 

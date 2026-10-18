@@ -63,6 +63,24 @@ class ReloadStateIn(BaseModel):
     state_path: str
 
 
+class SourceScanIn(BaseModel):
+    """S4.1：扫描音源库；roots 缺省 = sources.json / 内置默认。"""
+
+    roots: list[str] | None = None
+    force: bool = False
+
+
+class SourceRelinkIn(BaseModel):
+    """S4.1：把缺失音源绑到新路径（身份校验在库层）。"""
+
+    source_id: str
+    path: str
+
+
+class SourceFavoriteIn(BaseModel):
+    on: bool = True
+
+
 class ExportIn(BaseModel):
     """导出矩阵选项（修正轮2：UI 导出弹窗 → host export_matrix）。
 

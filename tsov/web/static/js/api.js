@@ -31,6 +31,17 @@ function post(path, data) {
 export const api = {
   health: () => req('/api/health'),
   meta: () => req('/api/meta'),
+  sources: (params) => {
+    const qs = new URLSearchParams();
+    if (params && params.q) qs.set('q', params.q);
+    if (params && params.kind) qs.set('kind', params.kind);
+    if (params && params.favorites) qs.set('favorites', '1');
+    return req('/api/sources' + (qs.toString() ? '?' + qs.toString() : ''));
+  },
+  scanSources: (roots) => post('/api/sources/scan', { roots: roots || null, force: false }),
+  relinkSource: (sourceId, path) => post('/api/sources/relink', { source_id: sourceId, path }),
+  favoriteSource: (sourceId, on) => post('/api/sources/' + encodeURIComponent(sourceId) + '/favorite', { on: !!on }),
+  recentSource: (sourceId) => post('/api/sources/' + encodeURIComponent(sourceId) + '/recent', {}),
   listProjects: () => req('/api/projects'),
   createProject: (name, score) => post('/api/projects', { name, score: score || null }),
   importCandidates: () => req('/api/import-candidates'),

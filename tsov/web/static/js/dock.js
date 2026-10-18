@@ -14,6 +14,11 @@ let recPane = null;
 let chainPane = null;
 let meta = { programs: [], effect_kinds: [] };
 let metaLoaded = false;
+/* S4.1：全局音源库（懒加载；扫描/挂载/重链只在源面板发生） */
+let srcLib = null;
+let srcLibLoading = false;
+let srcLibBusy = false;
+let srcLibQuery = '';
 /* M-V8 E5 段2：效果目标（当前轨 / 各总线 / master） */
 let fxTarget = { mode: 'track', ref: '' };
 let fxEdit = null;   // v0.2 批C 后段（P26）：效果参数编辑器槽位（null = 关闭）
@@ -259,6 +264,170 @@ function renderFx() {
 }
 
 /* ---------------- 音源 tab ---------------- */
+
+/* S4.1：全局音源库（懒加载；scan 可能较慢，用户点按钮才跑） */
+async function loadSourceLibrary() {
+  if (srcLibLoading) return;
+  srcLibLoading = true;
+  try {
+    srcLib = await api.sources();
+  } catch (e) {
+    srcLib = { sources: [], summary: null, error: e.message };
+    setError(t('音源库：') + e.message);
+  } finally {
+    srcLibLoading = false;
+    if (srcPane) renderSrc();
+  }
+}
+
+async function scanSourceLibrary() {
+  if (srcLibBusy) return;
+  srcLibBusy = true;
+  try {
+    const r = await api.scanSources();
+    bus.dispatch('toast', t('音源库扫描完成：') + (r.total || 0) + t(' 件'));
+    srcLib = await api.sources();
+  } catch (e) {
+    setError(t('音源库扫描：') + e.message);
+  } finally {
+    srcLibBusy = false;
+    if (srcPane) renderSrc();
+  }
+}
+
+function _sourceRows() {
+  const q = srcLibQuery.trim().toLowerCase();
+  const rows = (srcLib && srcLib.sources) || [];
+  if (!q) return rows;
+  return rows.filter((s) => (s.name + ' ' + s.path + ' ' + (s.class_id || '')).toLowerCase().includes(q));
+}
+
+function fillSourceRows(listEl) {
+  if (!listEl) return;
+  listEl.innerHTML = '';
+  const rows = _sourceRows();
+  if (!rows.length) {
+    const none = document.createElement('div');
+    none.className = 'src-lib-empty';
+    none.textContent = srcLibLoading ? t('正在载入音源库…')
+      : ((srcLib && srcLib.sources && srcLib.sources.length) ? t('没有匹配的音源')
+        : t('音源库为空——点「扫描音源库」'));
+    listEl.appendChild(none);
+    return;
+  }
+  const cur = selectedTrack();
+  for (const s of rows) {
+    const row = document.createElement('div');
+    row.className = 'src-lib-item' + (s.missing ? ' missing' : '');
+
+    const fav = document.createElement('button');
+    fav.className = 'src-fav' + (s.favorite ? ' on' : '');
+    fav.title = t('收藏');
+    fav.textContent = s.favorite ? '★' : '☆';
+    fav.onclick = async (ev) => {
+      ev.stopPropagation();
+      try {
+        await api.favoriteSource(s.id, !s.favorite);
+        s.favorite = !s.favorite;
+        fillSourceRows(listEl);
+      } catch (e) { setError(e.message); }
+    };
+
+    const kind = document.createElement('span');
+    kind.className = 'src-kind';
+    kind.textContent = s.kind.toUpperCase();
+
+    const body = document.createElement('span');
+    body.className = 'src-lib-name';
+    const nm = document.createElement('b');
+    nm.textContent = s.name || s.id;
+    const pth = document.createElement('span');
+    pth.className = 'src-lib-path';
+    pth.textContent = s.missing ? t('缺失：') + s.path : s.path;
+    pth.title = s.path;
+    body.appendChild(nm);
+    body.appendChild(pth);
+
+    const act = document.createElement('span');
+    act.className = 'src-lib-act';
+    if (s.missing) {
+      const rl = document.createElement('button');
+      rl.textContent = t('重链');
+      rl.onclick = async () => {
+        const p = prompt(t('输入新路径（VST3 bundle / SFZ / SF2）'), s.path);
+        if (!p) return;
+        try {
+          await api.relinkSource(s.id, p);
+          bus.dispatch('toast', t('已重链：') + s.name);
+          await loadSourceLibrary();
+        } catch (e) { setError(t('重链：') + e.message); }
+      };
+      act.appendChild(rl);
+    } else {
+      const mount = document.createElement('button');
+      mount.textContent = t('挂载');
+      mount.disabled = !cur || !['vst3', 'sfz'].includes(s.kind);
+      mount.title = !cur ? t('先选一条轨道')
+        : (s.kind === 'sf2' ? t('SF2 轨道级挂载后续')
+          : t('把此音源挂到当前轨'));
+      mount.onclick = async (ev) => {
+        ev.stopPropagation();
+        if (!cur) return;
+        const r = await post(t('挂载音源 '), [{ op: 'mount_source', track: cur.index,
+          value: { source_id: s.id } }]);
+        if (r && r.applied) await loadSourceLibrary();
+      };
+      act.appendChild(mount);
+    }
+    row.appendChild(fav);
+    row.appendChild(kind);
+    row.appendChild(body);
+    row.appendChild(act);
+    listEl.appendChild(row);
+  }
+}
+
+function renderSourceLib(host) {
+  const head = document.createElement('div');
+  head.className = 'src-lib-head';
+  const title = document.createElement('span');
+  title.className = 'src-lib-title';
+  const sum = (srcLib && srcLib.summary) || {};
+  const counts = sum.counts || {};
+  title.textContent = t('音源库') + (srcLib && srcLib.sources
+    ? (' · ' + (sum.total || srcLib.sources.length) + t(' 件') + ' · VST3 ' + (counts.vst3 || 0)
+       + ' / SFZ ' + (counts.sfz || 0) + ' / SF2 ' + (counts.sf2 || 0)
+       + (sum.missing ? (' · ' + t('缺失 ') + sum.missing) : ''))
+    : '');
+  const scan = document.createElement('button');
+  scan.textContent = srcLibBusy ? t('扫描中…') : t('扫描音源库');
+  scan.disabled = srcLibBusy;
+  scan.onclick = scanSourceLibrary;
+  head.appendChild(title);
+  head.appendChild(scan);
+
+  const search = document.createElement('input');
+  search.className = 'src-search';
+  search.placeholder = t('搜索名称 / 路径');
+  search.value = srcLibQuery;
+  search.oninput = () => { srcLibQuery = search.value; fillSourceRows(list); };
+
+  const list = document.createElement('div');
+  list.className = 'src-lib-list';
+  fillSourceRows(list);
+
+  host.appendChild(head);
+  host.appendChild(search);
+  host.appendChild(list);
+  if (srcLib && srcLib.error) {
+    const err = document.createElement('div');
+    err.className = 'src-note';
+    err.textContent = srcLib.error;
+    host.appendChild(err);
+  }
+  if (srcLib == null && !srcLibLoading) loadSourceLibrary();
+}
+
 function renderSrc() {
   if (!srcPane) return;
   srcPane.innerHTML = '';
@@ -315,6 +484,12 @@ function renderSrc() {
   form.appendChild(row2);
   form.appendChild(note);
   srcPane.appendChild(form);
+
+  /* S4.1：全局音源库浏览器（懒加载；挂载走命令层） */
+  const libHost = document.createElement('div');
+  libHost.className = 'src-lib';
+  srcPane.appendChild(libHost);
+  renderSourceLib(libHost);
 }
 
 /* ---------------- 通道 tab（修正轮2：总谱=项目 profile ｜ 单轨=该轨通道条） ---------------- */

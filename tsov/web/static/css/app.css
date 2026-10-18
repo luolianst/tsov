@@ -699,6 +699,26 @@ body.chat-resizing { cursor: col-resize; user-select: none; }
 .src-row select, .src-row input { flex: 1; min-width: 0; font-family: var(--font-mono); }
 .src-note { color: var(--faint); font-size: var(--fs-xs); }
 
+/* S4.1 音源库浏览器 */
+.src-lib { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; max-width: 720px; border-left: 1px solid var(--border); padding-left: 12px; }
+.src-lib-head { display: flex; align-items: center; gap: 8px; }
+.src-lib-title { color: var(--muted); font-size: var(--fs-sm); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.src-lib-head button { flex: none; }
+.src-search { width: 100%; font-family: var(--font-mono); }
+.src-lib-list { display: flex; flex-direction: column; gap: 3px; max-height: 160px; overflow-y: auto; }
+.src-lib-item { display: flex; align-items: center; gap: 6px; padding: 3px 4px; border-radius: 3px; }
+.src-lib-item:hover { background: var(--hover); }
+.src-lib-item.missing { opacity: 0.55; }
+.src-fav { border: 0; background: transparent; color: var(--faint); cursor: pointer; padding: 0 2px; }
+.src-fav.on { color: var(--accent); }
+.src-kind { flex: none; font-size: 9px; color: var(--muted); border: 1px solid var(--border); border-radius: 2px; padding: 0 3px; }
+.src-lib-name { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.src-lib-name b { font-size: var(--fs-md); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.src-lib-path { color: var(--faint); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.src-lib-act { flex: none; display: flex; gap: 4px; }
+.src-lib-act button { font-size: var(--fs-xs); }
+.src-lib-empty { color: var(--faint); font-size: var(--fs-xs); padding: 4px 0; }
+
 /* 混音台（推子） */
 .mix-strip { display: flex; gap: 14px; align-items: stretch; flex: 1; overflow-x: auto; }
 .fader { width: 56px; display: flex; flex-direction: column; align-items: center; gap: 5px; }

@@ -205,6 +205,9 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
         return _apply_move_folder(score, c)
     if c.op == "set_instrument":
         return _apply_set_instrument(track, c)
+    # S4.2：全局音源库挂载（VST3 / SFZ；SF2 待引擎级 soundfont 字段）
+    if c.op == "mount_source":
+        return _apply_mount_source(track, c)
     if c.op == "add_effect":
         return _apply_add_effect(score, track, c)
     if c.op == "remove_effect":
@@ -574,10 +577,52 @@ def _apply_set_instrument(track, c: EditCommand) -> str | None:
         if program not in GM_PROGRAMS:
             return f"未知音色名 {program!r}（GM 名 / vst3:<路径> / sfz:<路径>，或空串=默认）"
     track.instrument.program = program
+    # S4.1：手动改 program = 脱离全局库身份；清掉旧 source_id，避免工程指向错误音源
+    track.instrument.source_id = ""
     return None
 
 
-# ---- 批L L1-3：VST3 参数 / 预设（仅 vst3: 音源轨）----
+def _apply_mount_source(track, c: EditCommand) -> str | None:
+    """S4.2：按全局音源库稳定 id 挂载 VST3 / SFZ 到轨。
+
+    value = {"source_id": str, "path"?: str(仅 relink 后旧工程使用)}
+      - source_id 必须在 sources.json 中且非 missing；
+      - VST3 → program="vst3:<bundle path>"，清除旧 params/preset（换源不是换预设）；
+      - SFZ  → program="sfz:<sfz path>"；
+      - SF2  → 暂不支持（引擎 soundfont 是全局的；S4 后续加轨级 soundfont 字段）。
+    """
+    v = c.value if isinstance(c.value, dict) else {}
+    sid = str(v.get("source_id") or "").strip()
+    if not sid:
+        return "mount_source value 需 {source_id}"
+    from ..sources import SourceError, SourceLibrary
+
+    try:
+        lib = SourceLibrary()
+        src = lib.get(sid)
+    except SourceError as exc:
+        return str(exc)
+    if src.missing:
+        return f"音源已缺失：{src.name}（{src.id}）——先 relink 再挂载"
+    if src.kind == "vst3":
+        program = f"vst3:{src.path}"
+    elif src.kind == "sfz":
+        program = f"sfz:{src.path}"
+    else:
+        return f"SF2 音源暂不支持按轨挂载：{src.name}（S4 后续）"
+    track.instrument.program = program
+    track.instrument.source_id = src.id
+    track.instrument.params = {}
+    track.instrument.preset = None
+    try:
+        lib.mark_recent(src.id)
+        lib.save()
+    except OSError:
+        pass
+    return None
+
+
+
 
 _PRESET_KINDS = ("vstpreset", "fxp", "state")
 
