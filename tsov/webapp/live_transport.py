@@ -19,6 +19,7 @@ from typing import Any
 
 from ..host.host_client import HostClient
 from ..host.live import score_to_graph
+from ..host.vst_worker import editor_state_path
 from ..midi.export import DRUM_BANK, GM_PROGRAMS
 from .helpers import score_duration
 from .state import EventBus
@@ -69,6 +70,8 @@ class LiveTransport:
         self._project = None
         self._project_name = ""
         self._manifest: Path | None = None
+        self._manifest_tracks: list[dict[str, Any]] = []
+        self._selected: list[int] = []
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._loop: tuple[float, float] | None = None
@@ -108,6 +111,10 @@ class LiveTransport:
                 plugin = _resolve_plugin(program)
                 if plugin is None or not plugin.exists():
                     raise LiveUnsupported(f"VST3 插件不存在：{track.name} / {program}")
+                if state_path is None:
+                    saved = editor_state_path(str(plugin))
+                    if saved.is_file():
+                        state_path = str(saved)
                 item.update({"type": "vst3", "plugin": str(plugin)})
                 if state_path:
                     item["state"] = state_path
@@ -115,6 +122,10 @@ class LiveTransport:
                 plugin = _resolve_plugin(f"vst3:{_DEFAULT_SFIZZ}")
                 if plugin is None or not plugin.exists():
                     raise LiveUnsupported("sfizz VST3 不可用，无法实时播放 SFZ 轨")
+                if state_path is None:
+                    saved = editor_state_path(str(plugin))
+                    if saved.is_file():
+                        state_path = str(saved)
                 if state_path is None:
                     raise LiveUnsupported(f"SFZ 轨缺少 sfizz 状态：{track.name}")
                 item.update({"type": "vst3", "plugin": str(plugin), "state": state_path})
@@ -181,6 +192,8 @@ class LiveTransport:
         self._project = project
         self._project_name = project.name
         self._manifest = manifest
+        self._manifest_tracks = tracks
+        self._selected = selected
         return client
 
     def _shutdown_client(self) -> None:
@@ -189,6 +202,8 @@ class LiveTransport:
         self._client = None
         self._project = None
         self._project_name = ""
+        self._manifest_tracks = []
+        self._selected = []
         self._loop = None
         self._stop.set()
         if self._thread is not None and self._thread.is_alive():
@@ -269,6 +284,71 @@ class LiveTransport:
             sample_rate = float(client.info.get("sampleRate", 44100.0))
             client.transport("seek", position=max(0, int(round(float(position) * sample_rate))))
         return {"ok": True}
+
+    def reload_editor_state(self, project_name: str, plugin: str, state_path: str) -> dict:
+        """G1：编辑器关窗 state → 更新 manifest 并重启 sidecar 重新加载。
+
+        编辑器仍由 Python vst_worker 持有（P62b）；sidecar 是独立插件实例，
+        因此关窗保存 state 后必须重启 sidecar 才能听到同一插件状态。
+        """
+        with self._lock:
+            client = self._client
+            if client is None or self._project_name != project_name:
+                return {"ok": False, "reason": "not_started"}
+            source = Path(state_path)
+            if not source.is_file():
+                return {"ok": False, "reason": "state_missing", "state_path": str(source)}
+            if self._manifest is None or not self._manifest.is_file():
+                return {"ok": False, "reason": "manifest_missing"}
+
+            tracks = json.loads(self._manifest.read_text(encoding="utf-8"))
+            target = Path(plugin)
+            targets = {str(target.resolve())}
+            if target.is_dir():
+                targets |= {str(p.resolve()) for p in target.glob("Contents/*/*.vst3") if p.is_file()}
+            changed = False
+            for item in tracks:
+                candidate = item.get("plugin")
+                if not candidate:
+                    continue
+                if str(Path(str(candidate)).resolve()) in targets:
+                    item["state"] = str(source.resolve())
+                    changed = True
+            if not changed:
+                return {"ok": False, "reason": "track_not_found", "plugin": plugin}
+            self._manifest.write_text(json.dumps(tracks, ensure_ascii=False, indent=2), encoding="utf-8")
+            self._manifest_tracks = tracks
+
+            try:
+                previous = client.state()
+                was_playing = bool(previous.get("playing"))
+                playhead = int(previous.get("playhead", 0) or 0)
+            except Exception:  # noqa: BLE001
+                was_playing, playhead = False, 0
+
+            try:
+                client.restart()
+                graph = score_to_graph(
+                    self._project.score,
+                    sample_rate=float(client.info.get("sampleRate", 44100.0)),
+                )
+                graph["tracks"] = [graph["tracks"][index] for index in self._selected]
+                client.load_graph(graph, revision=0)
+                loop = self._loop
+                if loop is not None:
+                    sample_rate = float(client.info.get("sampleRate", 44100.0))
+                    client.transport("loop", start=int(round(loop[0] * sample_rate)),
+                                     end=int(round(loop[1] * sample_rate)))
+                if was_playing:
+                    client.transport("seek", position=max(0, playhead))
+                    client.transport("play")
+                self._project.attach_live(client)
+            except Exception as exc:  # noqa: BLE001
+                self._last_error = f"{type(exc).__name__}: {exc}"
+                return {"ok": False, "reason": "restart_failed", "error": self._last_error}
+
+            return {"ok": True, "reloaded": True, "revision": int(getattr(client, "revision", 0)),
+                    "playing": was_playing, "state_path": str(source.resolve())}
 
     def state(self) -> dict:
         with self._lock:

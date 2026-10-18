@@ -120,7 +120,12 @@ function startEditorWatch(isSettled) {
       if (!isSettled()) return;   /* C1：落定前 open=false 是「加载中」正常态，不得判关窗 */
       if (!r.open) {
         stopEditorWatch();
-        bus.dispatch('editor_closed', {});   /* playback.js 监听 → 自动重渲 */
+        const payload = { plugin: r.plugin || null, state_path: r.state_path || null };
+        /* S2.7 G1：P62b 关窗已保存 state；若 live sidecar 在跑，重启并加载同一 state。 */
+        if (payload.plugin && payload.state_path && store.project) {
+          try { await api.reloadLiveState(store.project, payload.plugin, payload.state_path); } catch (e) { /* 静默：旧路径仍可重渲 */ }
+        }
+        bus.dispatch('editor_closed', payload);   /* playback.js 监听 → 自动重渲 */
       }
     } catch (e) { /* 静默重试（服务重启等瞬时） */ }
   }, 1500);

@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from .. import config
 from ..helpers import score_duration
 from ..live_transport import LiveUnsupported
-from ..models import PlayIn, SeekIn
+from ..models import PlayIn, ReloadStateIn, SeekIn
 from ..state import WebState
 
 
@@ -80,6 +80,12 @@ def register(app: FastAPI) -> None:
         """播放轴定位（live sidecar；未启动时回 not_started，前端仍更新本地轴）。"""
         st().get_project(name)
         return st().live.seek(name, float(body.position))
+
+    @app.post("/api/projects/{name}/live/reload-state")
+    def reload_state(name: str, body: ReloadStateIn) -> dict:
+        """G1：插件编辑器关窗保存的 state → 更新 manifest 并重启 sidecar。"""
+        st().get_project(name)
+        return st().live.reload_editor_state(name, body.plugin, body.state_path)
 
     @app.post("/api/projects/{name}/play/stop")
     def play_stop(name: str) -> dict:

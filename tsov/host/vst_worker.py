@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import atexit
+import hashlib
 import json
 import os
 import queue
@@ -42,8 +43,17 @@ START_TIMEOUT = 60.0      # worker 启动（含 dawdreamer 导入）超时
 
 _ROOT = Path(__file__).resolve().parents[2]            # 仓库根（tsov/host/ → 上两级）
 _SCRATCH = _ROOT / "output" / ".vst-worker"            # 渲染音频交换目录 + worker 日志（临时产物）
+_EDITOR_STATE_DIR = _ROOT / "output" / ".tsov-editor"  # P62b G1：关窗保存的插件 state（sidecar 重载用）
 
 _CRASH = object()  # 队列哨兵：worker 崩溃（EOF/异常）时投给所有等待者
+
+
+def editor_state_path(plugin_path: str) -> Path:
+    """G1：编辑器关窗 state 的确定性路径（同一插件路径稳定复用）。"""
+    resolved = Path(plugin_path).resolve()
+    digest = hashlib.sha1(str(resolved).encode("utf-8")).hexdigest()[:12]
+    stem = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in resolved.stem)[:48] or "plugin"
+    return _EDITOR_STATE_DIR / f"{stem}-{digest}.state"
 
 
 class VstWorkerError(RuntimeError):
@@ -191,6 +201,8 @@ class VstWorker:
         self._loaded: dict[str, dict] = {}     # 请求侧记账（绝对路径 → load 结果；崩溃后清空）
         self._editor_open: str | None = None   # P62b：编辑器窗口打开中的插件路径（关窗事件清除）
         self._editor_epochs: dict[str, int] = {}  # P62b：插件「编辑器代际」（关窗 +1——解锁可能改变渲染输出）
+        self._editor_state_paths: dict[str, str] = {}  # G1：关窗 state 路径（插件路径→文件）
+        self._editor_last_plugin: str | None = None
         self._noise: list[str] = []            # 子进程 stdout 非协议行 / 事件（诊断）
         self._log_path = _SCRATCH / "worker.log"
 
@@ -373,7 +385,8 @@ class VstWorker:
                     self._ready.set()
                     continue
                 if msg.get("event") == "editor_closed":
-                    self._on_editor_closed(str(msg.get("plugin") or ""))
+                    self._on_editor_closed(str(msg.get("plugin") or ""),
+                                           str(msg.get("state_path") or "") or None)
                     continue
                 if msg.get("event") == "editor_error":
                     self._noise = (self._noise + [f"[editor_error] {msg.get('plugin')}: {msg.get('error')}"])[-50:]
@@ -386,11 +399,14 @@ class VstWorker:
                 self._dead_reason = f"worker 进程已退出（code={proc.poll()}）"
                 self._crash_pending()
 
-    def _on_editor_closed(self, plugin: str) -> None:
+    def _on_editor_closed(self, plugin: str, state_path: str | None = None) -> None:
         """P62b：worker 关窗事件 → 清编辑器状态 + 插件代际 +1（解锁可能改变渲染输出→失效 stem 缓存）。"""
         self._noise = (self._noise + [f"[editor_closed] {plugin} (epoch={self._editor_epochs.get(plugin, 0) + 1})"])[-50:]
         if plugin:
             self._editor_epochs[plugin] = self._editor_epochs.get(plugin, 0) + 1
+            self._editor_last_plugin = plugin
+            if state_path:
+                self._editor_state_paths[plugin] = state_path
         if not plugin or plugin == self._editor_open:
             self._editor_open = None
 
@@ -484,21 +500,30 @@ class VstWorker:
 
     # ---------------- P62b：插件编辑器过桥 ----------------
 
-    def open_editor(self, path: str, sr: int = 44100) -> dict:
-        """打开插件编辑器窗口（worker 级单窗口；立即返回；关窗由事件清状态）。"""
+    def open_editor(self, path: str, sr: int = 44100, state_path: str | None = None) -> dict:
+        """打开插件编辑器窗口（worker 级单窗口；立即返回；关窗由事件清状态）。
+
+        G1：关窗后子进程把插件 state 保存到 ``state_path``（缺省为确定性缓存路径），
+        供 sidecar 重新加载（LiveTransport.reload_editor_state）。
+        """
         apath = str(Path(path).resolve())
         if self._editor_open is not None:
             raise VstWorkerError(f"已有插件编辑器打开中：{self._editor_open}（单窗口——先关闭它）")
         if apath not in self._loaded:
             self.load(apath, sr=sr)
+        state = Path(state_path) if state_path else editor_state_path(apath)
+        state.parent.mkdir(parents=True, exist_ok=True)
         # C2（P62b-6）：置位前比对代际——「打开瞬败/秒关」时 editor_closed 可能在 ack 前已被
         # 读线程处理（彼时 _editor_open 尚为 None，清点路径不匹配）；若期间代际已 +1，不得置位
         # （否则状态永久「打开中」、后续开窗被单窗锁拒，需 worker/服务重启自愈）。
         epoch_before = self._editor_epochs.get(apath, 0)
-        res = self._request("open_editor", timeout=LOAD_TIMEOUT, path=apath, sr=int(sr))
+        res = self._request("open_editor", timeout=LOAD_TIMEOUT, path=apath, sr=int(sr),
+                            state_path=str(state))
         if self._editor_epochs.get(apath, 0) != epoch_before:
             raise VstWorkerError("编辑器已关闭（打开瞬败/秒关）——请重试")
         self._editor_open = apath
+        self._editor_last_plugin = apath
+        self._editor_state_paths[apath] = str(state)
         return res
 
     @property
@@ -555,12 +580,12 @@ def shutdown_global() -> None:
 atexit.register(shutdown_global)
 
 
-def open_editor(plugin_path: str, sr: int = 44100) -> dict:
-    """打开插件编辑器窗口（P62b 过桥入口）——需常驻 worker；关窗后重渲恢复出声。"""
+def open_editor(plugin_path: str, sr: int = 44100, state_path: str | None = None) -> dict:
+    """打开插件编辑器窗口（P62b 过桥入口）——关窗后保存 state 供 sidecar 重载。"""
     w = get_worker()
     if w is None:
         raise VstWorkerError("插件编辑器需要常驻 worker（当前 TSOV_VST_INPROC=1，不可用）")
-    return w.open_editor(plugin_path, sr=sr)
+    return w.open_editor(plugin_path, sr=sr, state_path=state_path)
 
 
 def editor_status() -> dict:
@@ -568,8 +593,15 @@ def editor_status() -> dict:
     w = _GLOBAL
     if w is None:
         return {"open": False, "path": None, "worker_pid": None}
-    return {"open": w._editor_open is not None, "path": w._editor_open,
-            "worker_pid": w.worker_pid}
+    out = {"open": w._editor_open is not None, "path": w._editor_open,
+           "worker_pid": w.worker_pid}
+    plugin = w._editor_open or getattr(w, "_editor_last_plugin", None)
+    if plugin:
+        out["plugin"] = plugin
+        state = getattr(w, "_editor_state_paths", {}).get(plugin)
+        if state:
+            out["state_path"] = state
+    return out
 
 
 def plugin_epoch(plugin_path: str) -> int:
@@ -611,6 +643,7 @@ class _ChildState:
         self._seq = 0
         self._editors_lock = threading.Lock()
         self._editor_path: str | None = None   # P62b：打开中的编辑器插件路径（worker 级单窗口）
+        self._editor_state_path: str | None = None  # G1：关窗时保存 state 的目标文件
         self._io_lock = threading.Lock()       # P62b-5b：引擎操作互斥（跨线程并发防护）
         self._names_cache: dict[str, dict[str, int]] = {}   # P62b-6（C3）：参数名→索引（path 级
                                                           # 预缓存——弹窗期禁读参数表，见 _render）
@@ -745,25 +778,37 @@ class _ChildState:
             if self._editor_path is not None:
                 raise RuntimeError(f"已有插件编辑器打开中：{self._editor_path}（单窗口）")
             self._editor_path = path
-        return {"opened": True, "path": path}
+            self._editor_state_path = str(msg.get("state_path") or "") or None
+        return {"opened": True, "path": path, "state_path": self._editor_state_path}
 
     def _editor_pump(self, path: str) -> None:
         """P62b：在主线程阻塞弹窗（``openWindowAndWait`` 语义——返回即关窗），随后发事件。"""
         err: str | None = None
+        state_path: str | None = None
         try:
             ent = self._plugins.get(path)   # 只读缓存（建实例在 _open_editor 已完成，带锁）
             if ent is None:
                 raise RuntimeError(f"插件未加载：{path}")
             ent["proc"].open_editor()   # 主线程；阻塞到用户关窗
+            with self._editors_lock:
+                state_path = self._editor_state_path
+            if state_path:
+                target = Path(state_path)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                ent["proc"].save_state(str(target))   # G1：整包 state → sidecar/离线重载
+                _emit({"event": "editor_state_saved", "plugin": path,
+                       "state_path": str(target)})
         except Exception as exc:  # noqa: BLE001 窗口异常不许杀 worker
             err = f"{type(exc).__name__}: {exc}"
         finally:
             with self._editors_lock:
                 if self._editor_path == path:
                     self._editor_path = None
+                self._editor_state_path = None
             if err:
                 _emit({"event": "editor_error", "plugin": path, "error": err})
-            _emit({"event": "editor_closed", "plugin": path})
+            _emit({"event": "editor_closed", "plugin": path,
+                   "state_path": state_path if err is None else None})
 
     def _render(self, msg: dict) -> dict:
         path = str(msg["path"])

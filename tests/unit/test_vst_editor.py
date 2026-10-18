@@ -43,6 +43,9 @@ class _FakeProc:
     def get_latency_samples(self):
         return 0
 
+    def save_state(self, path):
+        Path(path).write_bytes(b"fake-state")
+
     def clear_midi(self):
         pass
 
@@ -182,6 +185,22 @@ def test_client_render_passes_while_editor_open(monkeypatch):
     monkeypatch.setattr(w, "_request", fake_request)
     arr = w.render(ap, [], 44100, 441)          # 不抛（旧 Q3 秒拒已撤）
     assert arr.shape[0] == 441 and "render" in seen
+
+
+def test_child_editor_saves_state_on_close(outdir, monkeypatch):
+    """G1：关窗时把插件 state 保存到指定文件，并在 editor_closed 事件带路径。"""
+    events: list[dict] = []
+    monkeypatch.setattr(vst_worker, "_emit", lambda obj: events.append(obj))
+    gate = threading.Event()
+    st = _state(_FakeEngine(gate))
+    path = "C:/fake/A.vst3"
+    state = outdir / "A.state"
+    st.handle("open_editor", {"path": path, "sr": 44100, "state_path": str(state)})
+    gate.set()
+    st._editor_pump(path)
+    assert state.read_bytes() == b"fake-state"
+    closed = [e for e in events if e.get("event") == "editor_closed"]
+    assert closed and closed[0].get("state_path") == str(state)
 
 
 def test_module_helpers(monkeypatch):

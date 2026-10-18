@@ -23,7 +23,7 @@ from .webapp.agent_session import (_load_session_messages, _read_json_safe,  # n
 from .webapp.app import create_app
 from .webapp.helpers import _resolve_project_audio, _score_from_dict, project_state, score_duration  # noqa: F401
 from .webapp.models import (BatchIn, ChatIn, ChatResetIn, ExportIn, ImportIn, PlayIn,  # noqa: F401
-                            ProjectCreate, RenderIn, RollbackIn, SessionLoadIn, SettingsIn,
+                            ProjectCreate, ReloadStateIn, RenderIn, RollbackIn, SessionLoadIn, SettingsIn,
                             TitleIn, WindowJumpIn)
 from .webapp.record import _Recorder, _recorder  # noqa: F401
 from .webapp.state import (EventBus, WebState, _default_project_name,  # noqa: F401

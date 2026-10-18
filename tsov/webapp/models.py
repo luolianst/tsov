@@ -56,6 +56,13 @@ class SeekIn(BaseModel):
     position: float = 0.0
 
 
+class ReloadStateIn(BaseModel):
+    """S2.7 G1：插件编辑器关窗 state → sidecar 重载。"""
+
+    plugin: str
+    state_path: str
+
+
 class ExportIn(BaseModel):
     """导出矩阵选项（修正轮2：UI 导出弹窗 → host export_matrix）。
 

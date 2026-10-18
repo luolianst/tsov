@@ -64,6 +64,9 @@ export const api = {
   render: (name, out) => post('/api/projects/' + encodeURIComponent(name) + '/render', { out: out || null }),
   /* P62b：插件编辑器状态（前端轮询；关窗后自动重渲） */
   editorStatus: (name) => req('/api/projects/' + encodeURIComponent(name) + '/instrument/editor-status'),
+  /* S2.7 G1：编辑器关窗 state → sidecar 重载（未启动返回 not_started） */
+  reloadLiveState: (name, plugin, statePath) => post('/api/projects/' + encodeURIComponent(name) + '/live/reload-state',
+    { plugin, state_path: statePath }),
   play: (name, body) => post('/api/projects/' + encodeURIComponent(name) + '/play', body || {}),
   seek: (name, position) => post('/api/projects/' + encodeURIComponent(name) + '/seek', { position: Number(position) || 0 }),
   /* M-V8 E1：停止宿主播放（打断 sounddevice；试听/宿主共用停止按钮） */

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,9 @@ class _Project:
         self.name = "p"
         self.root = root
         self.score = score
+
+    def attach_live(self, client) -> None:
+        self._live_client = client
 
 
 def _note(pitch=60):
@@ -65,3 +69,59 @@ def test_manifest_rejects_unknown_program_with_notes(tmp_path):
     )
     with pytest.raises(LiveUnsupported):
         transport._manifest_for(project)
+
+
+class _ReloadClient:
+    info = {"sampleRate": 44100.0}
+    revision = 1
+
+    def __init__(self):
+        self.restarted = False
+        self.loaded = None
+        self.transports = []
+
+    def state(self):
+        return {"playing": False, "playhead": 0}
+
+    def restart(self):
+        self.restarted = True
+        self.revision = 0
+        return {"sampleRate": 44100.0}
+
+    def load_graph(self, graph, revision=0):
+        self.loaded = graph
+        self.revision = 1
+        return {"ok": True, "revision": 1}
+
+    def transport(self, action, **params):
+        self.transports.append((action, params))
+        return {"ok": True}
+
+
+def test_reload_editor_state_updates_manifest_and_restarts(tmp_path):
+    plugin = tmp_path / "A.vst3"
+    plugin.write_bytes(b"plugin")
+    state = tmp_path / "A.state"
+    state.write_bytes(b"state")
+    project = _Project(
+        Score(tracks=[Track(name="lead", instrument=Instrument(program=f"vst3:{plugin}"),
+                            notes=[_note()])]),
+        tmp_path,
+    )
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps([{"name": "lead", "plugin": str(plugin), "state": ""}]),
+                        encoding="utf-8")
+    client = _ReloadClient()
+    transport = LiveTransport(EventBus())
+    transport._client = client
+    transport._project = project
+    transport._project_name = "p"
+    transport._manifest = manifest
+    transport._selected = [0]
+
+    result = transport.reload_editor_state("p", str(plugin), str(state))
+
+    assert result["ok"] is True
+    assert client.restarted is True
+    assert client.loaded is not None
+    assert json.loads(manifest.read_text(encoding="utf-8"))[0]["state"] == str(state.resolve())
