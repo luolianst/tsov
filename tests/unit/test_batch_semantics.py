@@ -56,6 +56,9 @@ def _mk_project(root: Path, name: str, score: dict) -> Path:
     subprocess.run(["git", "init", "-q"], cwd=pdir, check=True)
     subprocess.run(["git", "config", "user.email", "p62b6@local"], cwd=pdir, check=True)
     subprocess.run(["git", "config", "user.name", "p62b6"], cwd=pdir, check=True)
+    # S3.1：先跑一次 Project.open，让旧平铺 score 完成 Part 迁移；后续断言基于稳定形态
+    from tsov.host import Project
+    Project.open(pdir)
     return pdir
 
 

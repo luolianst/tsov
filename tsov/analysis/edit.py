@@ -551,7 +551,7 @@ def edit_score(
         return EditResult(score, [], f"编辑结果为空（拒绝）——非空输入不允许清空，防误删已有谱"
                           f"（作用轨 track[{ti}] {target.name!r}）", llm_used, track_index=ti)
 
-    target.notes = result_notes
+    target.assign_notes(result_notes)
     # M-V2.2：动作路径用意图级摘要（动作即 diff），legacy 整谱路径仍位置对齐
     if actions is not None:
         diff = build_intent_summary(actions, ann_notes)

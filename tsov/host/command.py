@@ -58,7 +58,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from ..core.notes import Note
-from ..core.score import Bookmark, Bus, Effect, Score, Track
+from ..core.score import Bookmark, Bus, Effect, Score, Track, ensure_parts
 from ..core.snap import snap_out_of_key
 from ..core.units import midi_to_hz
 from .params import curve_specs
@@ -1355,6 +1355,7 @@ def _apply_add_track(score: Score, c: EditCommand) -> str | None:
     if folder:
         tr.folder = folder[:64]
     score.tracks.insert(at, tr)
+    ensure_parts(score)  # S3.1：新轨也带默认 Part
     return None
 
 
@@ -1405,7 +1406,7 @@ def _apply_set_notes(score: Score, track, c: EditCommand) -> str | None:
             note.is_ornament = True
         out.append(note)
     out.sort(key=lambda n: n.start)
-    track.notes = out
+    track.assign_notes(out)
     return None
 
 
@@ -1437,6 +1438,7 @@ def _apply_add_audio_track(score: Score, c: EditCommand) -> str | None:
         name = f"{base} {i}"
         i += 1
     score.tracks.append(Track(name=name, kind="audio", audio={"file": rel, "offset": round(offset, 6)}))
+    ensure_parts(score)  # S3.1：新轨也带默认 Part（音频轨 parts 为空音符）
     return None
 
 

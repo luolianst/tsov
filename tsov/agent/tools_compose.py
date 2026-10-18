@@ -197,7 +197,7 @@ def tool_write_notes(args: dict) -> str:
         hi = bar_hi * bar_sec - 1e-6          # [bar_lo 起, bar_hi 末) 区间
         kept = [n for n in tr.notes if not (lo <= n.start < hi)]
         removed = len(tr.notes) - len(kept)
-        tr.notes = kept
+        tr.assign_notes(kept)
     added = 0
     for bar, grid, ln, spec in parsed:
         pm = _pitch_of(spec)

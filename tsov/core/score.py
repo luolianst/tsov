@@ -15,7 +15,7 @@ v0.2 批C2 增补（additive + 缺省旧数据同构）：
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 
 from .notes import Note
 
@@ -128,6 +128,38 @@ class Instrument:
 
 
 @dataclass
+class Part:
+    """片段（S3.1 P1 拥有型 Part）：一段可移动/复制/循环延伸的音符块。
+
+    - ``start`` / ``length``：时间线秒；notes 为 **part-local** 时间（0 = part 起点）。
+    - 默认迁移 Part start=0，此时 local == absolute，旧 Track.notes 与 part.notes 可共享同一列表。
+    - ``id`` 在 track 内唯一；持久化时写入 ``Track.parts``。
+    """
+
+    id: str
+    start: float = 0.0
+    length: float = 0.0
+    notes: list[Note] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "start": self.start,
+            "length": self.length,
+            "notes": [n.to_dict() for n in self.notes],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Part":
+        return cls(
+            id=str(data.get("id") or ""),
+            start=float(data.get("start") or 0.0),
+            length=float(data.get("length") or 0.0),
+            notes=[Note.from_dict(n) for n in data.get("notes") or []],
+        )
+
+
+@dataclass
 class Track:
     name: str = ""
     instrument: Instrument = field(default_factory=Instrument)
@@ -150,17 +182,60 @@ class Track:
     # [{"id": "l1", "param": "volume"[, "name"]}, …] = 显式道列表（求值范围以此为准；
     # 曲线数据仍保留在 automation dict 中，非破坏——移除道即失活，重绑即复活）
     lanes: list[dict] | None = None
+    # ---- S3.1 P1：拥有型片段（additive；None=旧平铺 notes 未迁移）----
+    parts: list[Part] | None = None
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        data = asdict(self)
+        if self.parts is not None:
+            data["parts"] = [p.to_dict() for p in self.parts]
+            # 旧读侧兼容：Track.notes 始终是 part 展开后的绝对时间
+            data["notes"] = [n.to_dict() for n in self.flat_notes()]
+        return data
+
+    def flat_notes(self) -> list[Note]:
+        """把 parts 展开成绝对时间 notes（旧代码/旧读侧兼容）。"""
+        if self.parts is None:
+            return list(self.notes)
+        out: list[Note] = []
+        for part in self.parts:
+            for note in part.notes:
+                if part.start == 0.0:
+                    out.append(note)
+                else:
+                    out.append(replace(note, start=note.start + part.start,
+                                       end=note.end + part.start))
+        return out
+
+    def assign_notes(self, notes: list[Note]) -> None:
+        """替换平铺 notes，并同步默认 Part（S3.1 兼容旧编辑路径）。"""
+        self.notes = notes
+        if self.parts is not None and len(self.parts) == 1 and float(self.parts[0].start) == 0.0:
+            self.parts[0].notes = notes
+            self.parts[0].length = max((float(n.end) for n in notes), default=0.0)
 
     @classmethod
     def from_dict(cls, data: dict) -> "Track":
         lanes_raw = data.get("lanes")
+        parts_raw = data.get("parts")
+        parts: list[Part] | None = None
+        if isinstance(parts_raw, list):
+            parts = [Part.from_dict(p) for p in parts_raw if isinstance(p, dict)]
+            if len(parts) == 1 and parts[0].start == 0.0:
+                # 默认 Part：local == absolute，保持旧代码对同一 notes 列表的原地编辑
+                notes = parts[0].notes
+            else:
+                notes = []
+                for part in parts:
+                    for note in part.notes:
+                        notes.append(note if part.start == 0.0 else replace(
+                            note, start=note.start + part.start, end=note.end + part.start))
+        else:
+            notes = [Note.from_dict(n) for n in data["notes"]]
         return cls(
             name=data["name"],
             instrument=Instrument.from_dict(data["instrument"]),
-            notes=[Note.from_dict(n) for n in data["notes"]],
+            notes=notes,
             bus=data.get("bus", "master") or "master",
             pan=float(data["pan"]) if data.get("pan") is not None else 0.0,
             mute=bool(data.get("mute", False)),
@@ -171,6 +246,7 @@ class Track:
             audio=dict(data.get("audio") or {}),
             sends={str(k): float(v) for k, v in (data.get("sends") or {}).items()},
             lanes=([dict(x) for x in lanes_raw if isinstance(x, dict)] if isinstance(lanes_raw, list) else None),
+            parts=parts,
         )
 
     def audio_clips(self) -> list[dict]:
@@ -285,3 +361,52 @@ class Score:
             bookmarks=[Bookmark.from_dict(b) for b in data.get("bookmarks") or []],
             folders=dict(data.get("folders") or {}),
         )
+
+
+SCHEMA_VERSION = 2
+
+
+def _part_id(track: Track, index: int) -> str:
+    """默认 Part 的确定性 id（同轨同序跨加载稳定）。"""
+    import hashlib
+
+    blob = f"{index}|{track.name}".encode("utf-8")
+    return "p" + hashlib.sha1(blob).hexdigest()[:8]
+
+
+def ensure_parts(score: Score) -> bool:
+    """旧 score → 每轨一个默认 Part；幂等；写 schema_version=2。
+
+    返回是否发生了结构迁移。默认 Part 的 notes 与 Track.notes 共享同一列表，
+    因此在 S3.2 命令层落地前，旧编辑路径仍能保持一致（part.start=0 时 local==absolute）。
+    """
+    changed = False
+    for index, track in enumerate(score.tracks):
+        if track.parts is not None:
+            continue
+        length = max((float(n.end) for n in track.notes), default=0.0)
+        track.parts = [Part(id=_part_id(track, index), start=0.0, length=length, notes=track.notes)]
+        changed = True
+    if score.meta.get("schema_version") != SCHEMA_VERSION:
+        score.meta["schema_version"] = SCHEMA_VERSION
+        changed = True
+    return changed
+
+
+def needs_parts_migration(data: dict) -> bool:
+    """JSON 层判断：旧平铺 tracks 尚无 parts，或 schema_version < 2。"""
+    if not isinstance(data, dict):
+        return False
+    meta = data.get("meta")
+    version = meta.get("schema_version") if isinstance(meta, dict) else None
+    try:
+        if version is not None and int(version) >= SCHEMA_VERSION:
+            pass
+        else:
+            return True
+    except (TypeError, ValueError):
+        return True
+    for track in data.get("tracks") or []:
+        if not isinstance(track, dict) or track.get("parts") is None:
+            return True
+    return False

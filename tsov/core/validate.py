@@ -45,8 +45,8 @@ def validate_score(score: Score) -> list[str]:
     errors: list[str] = []
 
     meta = getattr(score, "meta", None)
-    if isinstance(meta, dict) and meta.get("schema_version") not in (None, "", 1, "1"):
-        errors.append(f"meta.schema_version 不支持：{meta.get('schema_version')!r}（本版支持 1）")
+    if isinstance(meta, dict) and meta.get("schema_version") not in (None, "", 1, "1", 2, "2"):
+        errors.append(f"meta.schema_version 不支持：{meta.get('schema_version')!r}（本版支持 1/2）")
 
     tempo = getattr(score, "tempo", None)
     if not _finite(tempo) or float(tempo) <= 0:
@@ -101,6 +101,36 @@ def validate_score(score: Score) -> list[str]:
             dev = getattr(n, "deviation_cents", 0.0)
             if not _finite(dev):
                 errors.append(f"{nw}: deviation_cents 非有限数")
+
+        parts = getattr(track, "parts", None)
+        if parts is not None:
+            seen_ids: set[str] = set()
+            for pi, part in enumerate(parts):
+                pw = f"{w}.part[{pi}]"
+                pid = str(getattr(part, "id", "") or "")
+                if not pid:
+                    errors.append(f"{pw}: id 不能为空")
+                elif pid in seen_ids:
+                    errors.append(f"{pw}: id 重复：{pid!r}")
+                else:
+                    seen_ids.add(pid)
+                pstart = getattr(part, "start", None)
+                plen = getattr(part, "length", None)
+                if not _finite(pstart) or float(pstart) < 0:
+                    errors.append(f"{pw}: start 非法：{pstart!r}（≥0）")
+                if not _finite(plen) or float(plen) < 0:
+                    errors.append(f"{pw}: length 非法：{plen!r}（≥0）")
+                for ni, n in enumerate(getattr(part, "notes", []) or []):
+                    nw = f"{pw}.note[{ni}]"
+                    p = getattr(n, "pitch_midi", None)
+                    if isinstance(p, bool) or not isinstance(p, int) or not (0 <= p <= 127):
+                        errors.append(f"{nw}: pitch_midi 越界：{p!r}（0~127 整数）")
+                    start = getattr(n, "start", None)
+                    end = getattr(n, "end", None)
+                    if not _finite(start) or float(start) < 0:
+                        errors.append(f"{nw}: start 非法：{start!r}（part-local ≥0）")
+                    if not _finite(end) or (_finite(start) and float(end) <= float(start)):
+                        errors.append(f"{nw}: end 必须大于 start（{start!r} → {end!r}）")
 
     for bi, bus in enumerate([getattr(score, "master", None)] + list(getattr(score, "buses", []) or [])):
         if bus is None:

@@ -120,5 +120,7 @@ def test_schema_version_gate():
     data["meta"] = {"schema_version": 1}
     assert validate_score(Score.from_dict(data)) == []
     data["meta"] = {"schema_version": 2}
+    assert validate_score(Score.from_dict(data)) == []  # S3.1：Part 形态
+    data["meta"] = {"schema_version": 3}
     errs = validate_score(Score.from_dict(data))
     assert any("schema_version" in e for e in errs)

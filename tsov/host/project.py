@@ -22,7 +22,7 @@ from ..core.atomic import write_text_atomic
 from ..core.names import midi_to_note_name
 from ..core.validate import validate_score
 from ..core.key import detect_key  # 2026-09-22 F1：下沉 core（命令层编辑后调性同步）
-from ..core.score import Score
+from ..core.score import Score, ensure_parts, needs_parts_migration
 from .command import EditBatch
 from .diff import diff_notes
 from .journal import ActionJournal
@@ -66,6 +66,7 @@ class Project:
         self._live_client = None                     # S2.2：可选 sidecar IPC 客户端
         self._live_bridge = None                     # S2.5：增量活图桥（E1 ops）
         self._lock = threading.RLock()               # P0 A2：写路径互斥
+        ensure_parts(self.score)                       # S3.1：统一默认 Part（幂等）
         self.root.mkdir(parents=True, exist_ok=True)
         self._ensure_git()
         if not (self.root / "score.json").exists():
@@ -85,10 +86,19 @@ class Project:
 
     @classmethod
     def open(cls, root: str | Path) -> "Project":
-        """打开已有工程目录（读 score.json）。"""
+        """打开已有工程目录（读 score.json；旧平铺 tracks 自动迁 Part + .bak）。"""
         root = Path(root)
-        score = Score.from_dict(json.loads((root / "score.json").read_text(encoding="utf-8")))
-        return cls(score=score, root=root, name=root.name)
+        path = root / "score.json"
+        text = path.read_text(encoding="utf-8")
+        data = json.loads(text)
+        migrated = needs_parts_migration(data)
+        if migrated:
+            write_text_atomic(root / "score.json.bak", text)
+        score = Score.from_dict(data)
+        project = cls(score=score, root=root, name=root.name)
+        if migrated:
+            project.save()
+        return project
 
     def attach_live(self, client) -> "Project":
         """绑定 sidecar IPC 客户端；之后每次 apply_batch/apply_score/undo/redo 同步活图。"""
@@ -345,6 +355,7 @@ class Project:
         - 无实际改动时：返回 {ok: False, applied: 0, ...}，工程不变、不产生空条目
         """
         old_notes = self.score.tracks[0].notes if self.score.tracks else []
+        ensure_parts(new_score)  # S3.1：入站整谱也统一到 Part 形态，避免结构差异被当成编辑
         new_notes = new_score.tracks[0].notes if new_score.tracks else []
         note_diff = diff_notes(old_notes, new_notes)
         # P0 A3：入站校验（apply_score 是 agent/导入/采用的整谱入口，必须过同一闸门）
