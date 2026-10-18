@@ -455,12 +455,15 @@ def _step_index(key, n: int) -> int:
 
 def apply_config(proj, *, mute: dict | None = None, overrides: dict | None = None,
                  step_mute: dict | None = None, step_overrides: dict | None = None,
-                 source_track: int | None = None, preset_id: str | None = None) -> dict:
+                 source_track: int | None = None, preset_id: str | None = None,
+                 apply_mount: dict | None = None) -> dict:
     """把 mute/参数/源 合并进 chain.json（不动 score）；返回更新后的配置。
 
     - 工具名寻址（mute/overrides）：作用于该工具的**全部出现**（段2 重复工具语义）。
     - 步序寻址（step_mute/step_overrides，段2）：键=步序（int/数字字符串），精确指到某一步。
     - 步表骨架：与当前预设不同序（换预设/首用）→ 按预设重建（旧步不回填——防跨预设串参）。
+    - S4.2 apply_mount：{"source_id": "..."} 或 {"source_id": "...", "preset_id": "..."}；
+      存 chain.json 的 apply.mount，链产物进工程时在产轨后挂载。
     """
     data = load_chain_json(proj.root)
     cur_preset = str(preset_id or data.get("preset") or "humming-quicklane")
@@ -488,6 +491,15 @@ def apply_config(proj, *, mute: dict | None = None, overrides: dict | None = Non
         data["source_track"] = int(source_track)
     if preset_id:
         data["preset"] = str(preset_id)
+    if apply_mount is not None:
+        mount = dict(apply_mount) if isinstance(apply_mount, dict) else {}
+        sid = str(mount.get("source_id") or "").strip()
+        if sid:
+            data["apply"] = {"mount": {"source_id": sid}}
+            if mount.get("preset_id"):
+                data["apply"]["mount"]["preset_id"] = str(mount["preset_id"])
+        else:
+            data.pop("apply", None)
     data["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     save_chain_json(proj.root, data)
     return data

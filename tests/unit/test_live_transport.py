@@ -76,6 +76,18 @@ def test_manifest_uses_track_soundfont_override(tmp_path):
     assert tracks[0]["soundfont"] == str(sf2)
 
 
+def test_manifest_rejects_vst2_with_clear_hint(tmp_path):
+    transport = LiveTransport(EventBus())
+    project = _Project(
+        Score(tracks=[
+            Track(name="old", instrument=Instrument(program="vst2:legacy.dll"), notes=[_note()]),
+        ]),
+        tmp_path,
+    )
+    with pytest.raises(LiveUnsupported, match="VST2.*不支持实时"):
+        transport._manifest_for(project)
+
+
 def test_manifest_rejects_unknown_program_with_notes(tmp_path):
     transport = LiveTransport(EventBus())
     project = _Project(

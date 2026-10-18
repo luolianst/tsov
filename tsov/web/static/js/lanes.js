@@ -11,7 +11,7 @@ import { pal, trackColors } from './theme.js';
 import { seekTo } from './playback.js';
 import { api } from './api.js';
 import { xOf, tOf } from './geom.js';   /* v0.2 批C 前段（R2 地基件）：时间↔x 几何共享 */
-import { clipHitBand, beginAudioDrag, updateAudioDrag, finishAudioDrag, isDragging, dragPreviewOf, selOf, clearSel, splitClipAt, drawClipBlocks } from './audio_edit.js';   /* E6 段1 补：音频 clip 手势引擎（总谱/单轨共用） */
+import { clipHitBand, beginAudioDrag, updateAudioDrag, finishAudioDrag, isDragging, dragPreviewOf, setAudioDragTarget, selOf, clearSel, splitClipAt, drawClipBlocks } from './audio_edit.js';   /* E6 段1 补：音频 clip 手势引擎（总谱/单轨共用） */
 import { partsOf, partPreviewFor, partHitBand, beginPartDrag, updatePartDrag, isPartDragging, partSelOf, clearPartSel, drawPartBands, partStripH } from './parts_edit.js';   /* S3.3：Part 顶条手势（与单轨共用） */
 
 const KEYS = 56;   // 左侧标签槽（与卷帘 KEYS_W 对齐）
@@ -388,7 +388,10 @@ export function init(el, opts) {
       canvas.style.cursor = 'grabbing';
       return;
     }
-    if (isDragging()) {   /* M-V8 E6：音频手势（预览跟手，松手提交） */
+    if (isDragging()) {   /* M-V8 E6：音频手势（预览跟手，松手提交；S3 残留：可跨音频轨） */
+      const t2 = laneAt(e.offsetY);
+      const tr2 = (t2 >= 0 && store.score) ? store.score.tracks[t2] : null;
+      setAudioDragTarget(tr2 && tr2.kind === 'audio' ? t2 : -1);
       updateAudioDrag(e);
       return;
     }
@@ -439,7 +442,11 @@ export function init(el, opts) {
   canvas.addEventListener('drop', (e) => {
     e.preventDefault();
     const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-    if (f && onDropAudio) onDropAudio(f);
+    if (f && onDropAudio) {
+      const ti = laneAt(e.offsetY);
+      const at = Math.max(0, tOf(e.offsetX));
+      onDropAudio(f, ti, at);
+    }
   });
 
   for (const topic of ['state', 'view', 'selection', 'viewmode', 'playhead', 'playing', 'agenttracks', 'markers', 'peaks']) {

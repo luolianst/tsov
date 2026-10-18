@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import abc
+import os
 import re
 import threading
 from pathlib import Path
@@ -52,10 +53,16 @@ _FLUID_BLOCK = 64  # FluidSynth 内部渲染块的样本数（实测：音符事
 
 # ---- P0 B1：SF2 Synth 池（跨会话复用已加载 SoundFont）----
 # 键 = (soundfont 绝对路径, program, gain, samplerate, fx)；close() 归池而非 delete。
-# 渲染前 SF2Source.render → reset() 会 system_reset + 相位补齐，池化不破坏确定性。
+# ⚠️ S5 定案：**默认关闭**。FluidSynth 的 system_reset 不清内部振荡器/效果缓冲，
+# 复用池化 synth 会让同工程两次导出出现可闻/可测差异（实测 diff 0.20）。
+# 需要性能时用 TSOV_SF2_POOL=1 显式开启，但该模式不承诺逐样本确定性。
 _SF2_POOL: dict[tuple, list["SF2Source"]] = {}
 _SF2_POOL_LOCK = threading.Lock()
 _SF2_POOL_MAX = 3           # 每键最多留 3 个（并发渲染上限；再多直接销毁）
+
+
+def _sf2_pool_enabled() -> bool:
+    return os.environ.get("TSOV_SF2_POOL") == "1"
 
 
 def _sf2_key(soundfont, program, gain, samplerate, fx) -> tuple:
@@ -67,6 +74,8 @@ def _sf2_key(soundfont, program, gain, samplerate, fx) -> tuple:
 
 
 def _sf2_take(key: tuple) -> "SF2Source | None":
+    if not _sf2_pool_enabled():
+        return None
     with _SF2_POOL_LOCK:
         lst = _SF2_POOL.get(key)
         if lst:
@@ -75,6 +84,8 @@ def _sf2_take(key: tuple) -> "SF2Source | None":
 
 
 def _sf2_put(key: tuple, src: "SF2Source") -> bool:
+    if not _sf2_pool_enabled():
+        return False
     with _SF2_POOL_LOCK:
         lst = _SF2_POOL.setdefault(key, [])
         if len(lst) >= _SF2_POOL_MAX:

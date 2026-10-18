@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-import threading
-
 from fastapi import FastAPI, HTTPException
 
-from .. import config
-from ..helpers import score_duration
 from ..live_transport import LiveUnsupported
 from ..models import PlayIn, ReloadStateIn, SeekIn
 from ..state import WebState
@@ -25,7 +21,6 @@ def register(app: FastAPI) -> None:
         （循环时阻塞直到 `/play/stop`）。
         """
         proj = st().get_project(name)
-        duration = score_duration(proj.score, proj.root)
         start = float(body.start or 0.0) if body else 0.0
         loop = None
         if body and body.loop is not None:
@@ -38,42 +33,9 @@ def register(app: FastAPI) -> None:
 
         try:
             return st().live.play(proj, start=start, loop=loop)
-        except LiveUnsupported:
-            pass
-
-        if not st().play_lock.acquire(blocking=False):
-            raise HTTPException(409, "已有播放在进行中")
-        bus = st().bus
-        st().play_stop = threading.Event()
-        try:
-            bus.publish(name, "playback_start", {"duration": duration, "start": start,
-                                                 "loop": list(loop) if loop else None,
-                                                 "mode": "wav"})
-            engine = st().engine()
-            # B3：新鲜 render.wav 直接播（免整谱重混）；过期/缺失才走宿主实时混音
-            wav_path = proj.root / config.RENDER_WAV_NAME
-            fresh = False
-            try:
-                fresh = (wav_path.is_file()
-                         and (proj.root / "score.json").stat().st_mtime_ns <= wav_path.stat().st_mtime_ns)
-            except OSError:
-                fresh = False
-            if fresh:
-                engine.play_wav(wav_path, blocking=True, start=start, loop=loop,
-                                stop_event=st().play_stop)
-            else:
-                session = engine.load(proj.score, base_dir=proj.root)
-                try:
-                    engine.play(session, blocking=True, start=start, loop=loop,
-                                stop_event=st().play_stop)
-                finally:
-                    session.close()
-            bus.publish(name, "playback_stop", {"duration": duration, "mode": "wav"})
-            return {"ok": True, "mode": "wav", "duration": duration, "start": start,
-                    "loop": list(loop) if loop else None}
-        finally:
-            st().play_stop = None
-            st().play_lock.release()
+        except LiveUnsupported as exc:
+            # S2 收口：旧 wav/sounddevice 播放路径退出主链——不再回退
+            raise HTTPException(409, f"实时引擎不支持该工程：{exc}（旧 wav 播放已停用）") from exc
 
     @app.post("/api/projects/{name}/seek")
     def seek(name: str, body: SeekIn) -> dict:
@@ -98,10 +60,4 @@ def register(app: FastAPI) -> None:
         ev = st().play_stop
         if ev is not None:
             ev.set()
-        try:
-            import sounddevice as sd
-
-            sd.stop()
-        except Exception:  # noqa: BLE001 —— 无设备/未装时静默（无播放可停）
-            pass
         return {"ok": True}

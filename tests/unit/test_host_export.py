@@ -87,6 +87,27 @@ def test_export_mono_and_minimal():
         shutil.rmtree(out, ignore_errors=True)
 
 
+def test_export_is_deterministic_two_runs():
+    """S5：同工程两次离线导出 PCM 逐样本差 ≤1e-6（无随机/时间戳污染）。"""
+    outs = [Path("output") / f"expdet-{uuid.uuid4().hex[:8]}" for _ in range(2)]
+    try:
+        engine = HostEngine()
+        mixes = []
+        for out in outs:
+            session = engine.load(_score())
+            try:
+                report = export_matrix(session, out, stems=False, buses=False, midi=False)
+            finally:
+                session.close()
+            audio, _sr = sf.read(report["mix"], dtype="float64")
+            mixes.append(audio)
+        assert mixes[0].shape == mixes[1].shape
+        assert float(np.max(np.abs(mixes[0] - mixes[1]))) <= 1e-6
+    finally:
+        for out in outs:
+            shutil.rmtree(out, ignore_errors=True)
+
+
 # ---------------- M-V8 E6 段2：位深 / 选段导出 ----------------
 
 def test_write_wav_subtype_param():

@@ -33,6 +33,7 @@ TOOL_LABELS: dict[str, str] = {
     "write_notes": "写音符",
     "duplicate_bars": "复制小节",
     "set_track_mix": "调音量/声像",
+    "mount_source": "挂载音源",
     "remove_track": "删除轨",
     "rename_track": "重命名轨",
     "apply_effect": "加效果",
@@ -55,7 +56,7 @@ READ_TOOLS: frozenset[str] = frozenset({
 # 会写 score（产生新 JSON 落盘）的工具——动作级撤销的适用范围
 SCORE_WRITING_TOOLS: frozenset[str] = frozenset({
     "edit_score", "set_tempo", "voice_to_score", "create_track", "write_notes",
-    "duplicate_bars", "set_track_mix", "remove_track", "rename_track", "apply_effect", "apply_pattern",
+    "duplicate_bars", "set_track_mix", "mount_source", "remove_track", "rename_track", "apply_effect", "apply_pattern",
     "set_instrument_param", "load_instrument_preset",
 })
 
@@ -106,6 +107,8 @@ def summarize_args(tool: str, args: dict | None) -> str:
             if a.get("pan") is not None:
                 bits.append(f"声像 {a['pan']}")
             return " · ".join(bits)
+        if tool == "mount_source":
+            return f"轨 {a.get('track', 0)} · {_short(a.get('source_id'), 32)}"
         if tool == "remove_track":
             return f"轨 {a.get('track', '?')}"
         if tool == "rename_track":

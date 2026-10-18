@@ -1,9 +1,7 @@
-"""P0 B1/B2/B3：懒音源（缓存命中零装载）+ 播放走新鲜 wav。"""
+"""P0 B1/B2：懒音源（缓存命中零装载）；S2 收口：旧 wav 播放不再回退。"""
 
 from __future__ import annotations
 
-import os
-import time
 import uuid
 from pathlib import Path
 
@@ -57,30 +55,8 @@ def test_lazy_source_not_created_when_stem_cached():
         rmtree_force(root)
 
 
-class _Sess:
-    def close(self):
-        pass
-
-
-class _Engine:
-    samplerate = 44100
-
-    def __init__(self):
-        self.wav_calls = []
-        self.play_calls = []
-
-    def load(self, score, base_dir=None, **kw):
-        return _Sess()
-
-    def play(self, session, **kw):
-        self.play_calls.append(kw)
-
-    def play_wav(self, path, **kw):
-        self.wav_calls.append({"path": str(path), **kw})
-
-
 class _NoLive:
-    """Force these fastpath tests through the legacy engine path."""
+    """S2：实时引擎不可用 → /play 必须拒绝，不再回退旧 wav。"""
 
     def play(self, *args, **kwargs):
         raise LiveUnsupported("test stub")
@@ -109,33 +85,11 @@ def env(monkeypatch):
         rmtree_force(d)
 
 
-def test_play_uses_fresh_wav(env):
+def test_play_rejects_when_live_unsupported(env):
+    """S2 收口：sidecar 不支持时直接 409；不回退 sounddevice/wav。"""
     env["client"].post("/api/projects", json={"name": "p", "score": _payload()})
     root = env["dir"] / "p"
-    wav = root / "render.wav"
-    wav.write_bytes(b"RIFF-dummy")
-    # 确保 wav 比 score.json 新
-    future = time.time() + 5
-    os.utime(wav, (future, future))
-
-    eng = _Engine()
-    env["app"].state.tsov._engine = eng
+    (root / "render.wav").write_bytes(b"RIFF-dummy")
     r = env["client"].post("/api/projects/p/play", json={})
-    assert r.status_code == 200
-    assert eng.wav_calls and not eng.play_calls
-    assert eng.wav_calls[0]["path"].endswith("render.wav")
-
-
-def test_play_falls_back_to_session_when_stale(env):
-    env["client"].post("/api/projects", json={"name": "p", "score": _payload()})
-    root = env["dir"] / "p"
-    wav = root / "render.wav"
-    wav.write_bytes(b"RIFF-dummy")
-    old = time.time() - 100
-    os.utime(wav, (old, old))          # wav 比 score.json 旧 → 走宿主混音
-
-    eng = _Engine()
-    env["app"].state.tsov._engine = eng
-    r = env["client"].post("/api/projects/p/play", json={})
-    assert r.status_code == 200
-    assert eng.play_calls and not eng.wav_calls
+    assert r.status_code == 409
+    assert "旧 wav 播放已停用" in r.json()["error"]

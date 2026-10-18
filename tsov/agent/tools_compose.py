@@ -271,6 +271,30 @@ def tool_set_track_mix(args: dict) -> str:
     return f"track[{ti}] {tr.name}：{'、'.join(parts)} ｜ 写回：{out}"
 
 
+def tool_mount_source(args: dict) -> str:
+    """把全局音源库条目挂到指定轨（S4.2；命令层 mount_source）。
+
+    VST3/SFZ → program + source_id；SF2 → 轨级 soundfont。轨选择同 set_track_mix。
+    """
+    from ..host.command import EditBatch
+
+    score = _load(args["score_path"])
+    ti = _resolve_track(score, args.get("track", 0))
+    sid = str(args.get("source_id") or "").strip()
+    if not sid:
+        raise ValueError("source_id 必填（音源库稳定 id，如 vst3:… / sfz:… / sf2:…）")
+    batch = EditBatch(label="mount_source")
+    batch.add("mount_source", track=ti, value={"source_id": sid})
+    new_score, result = batch.apply(score)
+    if not result.ok:
+        raise ValueError("；".join(result.errors))
+    out = _save(new_score, _out_path(args, args["score_path"]))
+    tr = new_score.tracks[ti]
+    sfx = f"，soundfont={tr.instrument.soundfont!r}" if tr.instrument.soundfont else ""
+    return (f"track[{ti}] {tr.name}：已挂载 {sid}（program={tr.instrument.program!r}{sfx}）"
+            f" ｜ 写回：{out}")
+
+
 def tool_remove_track(args: dict) -> str:
     """删除轨道（track = 轨索引或轨名，必填）；该轨书签引用同步清理（经命令层 remove_track）。"""
     from ..host.command import EditBatch
@@ -829,6 +853,18 @@ def register_compose_tools(registry: ToolRegistry) -> None:
             "solo": {"type": "boolean"},
         }, "required": ["score_path"]},
         handler=tool_set_track_mix))
+
+    registry.register(ToolSpec(
+        name="mount_source",
+        description=("把全局音源库条目挂到指定轨（S4.2）：VST3/SFZ → program+source_id，"
+                     "SF2 → 轨级 soundfont；source_id 来自音源库稳定 id"),
+        parameters={"type": "object", "properties": {
+            "score_path": {"type": "string"},
+            "track": {"description": "轨索引或轨名（缺省 0）"},
+            "source_id": {"type": "string", "description": "vst3:… / sfz:… / sf2:…"},
+            "output": {"type": "string"},
+        }, "required": ["score_path", "source_id"]},
+        handler=tool_mount_source))
 
     registry.register(ToolSpec(
         name="remove_track",

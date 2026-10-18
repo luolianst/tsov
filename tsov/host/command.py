@@ -35,6 +35,8 @@
 - M-V8 E6 段1 增补（2026-09-27 音频编辑刀）：set_audio_clips（音频轨 clip 组整替——切片/修剪/
   移动/淡入淡出/伸缩统一原子落点；src_len=null 表示到文件尾；stretch∈[0.5,2]；fade_in/fade_out 秒）
   / split_audio_clip（时间线 at 秒切分指定 clip：左段保原 id、右段新 id、接缝零间隙）——与 UI 手势同径
+  / add_audio_clip（S4.2：同一音频轨追加一条 clip——多音频片段导入/落位同一命令路径）
+  / move_audio_clip_to_track（S3 残留：音频 clip 跨音频轨移动；target_track + 可选 start）
 - v0.2 批C2 增补（2026-10-08 工作台 v2）：add_lane / remove_lane（Track.lanes 显式道实体：
   param∈注册表 automation 域、重复绑定拒绝；首次显式管理把 automation 现存键**全量物化**；
   移除即失活——曲线数据保留在 dict，非破坏）
@@ -180,6 +182,10 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
     # M-V8 E6 段1：音频编辑刀（clip 组整替 / 语义切分——只作用于音频轨）
     if c.op == "set_audio_clips":
         return _apply_set_audio_clips(score, track, c)
+    if c.op == "add_audio_clip":
+        return _apply_add_audio_clip(score, track, c)
+    if c.op == "move_audio_clip_to_track":
+        return _apply_move_audio_clip_to_track(score, track, c)
     if c.op == "split_audio_clip":
         return _apply_split_audio_clip(score, track, c)
     if c.op == "set_track_mix":
@@ -566,7 +572,10 @@ def _apply_set_track_mix(score: Score, track, c: EditCommand) -> str | None:
 
 
 def _apply_set_instrument(track, c: EditCommand) -> str | None:
-    """value = {"program": str}；空串=默认音色；GM 名 / vst3:<路径> / sfz:<路径>。"""
+    """value = {"program": str, "soundfont"?: str}；空串=默认音色。
+
+    program 为 GM 名 / vst3:<路径> / sfz:<路径>；soundfont 仅对 SF2 轨有意义（S4.2 模板应用）。
+    """
     v = c.value
     if not isinstance(v, dict) or v.get("program") is None:
         return "set_instrument value 需 {program}"
@@ -577,6 +586,8 @@ def _apply_set_instrument(track, c: EditCommand) -> str | None:
         if program not in GM_PROGRAMS:
             return f"未知音色名 {program!r}（GM 名 / vst3:<路径> / sfz:<路径>，或空串=默认）"
     track.instrument.program = program
+    if "soundfont" in v:
+        track.instrument.soundfont = str(v.get("soundfont") or "").strip()
     # S4.1：手动改 program = 脱离全局库身份；清掉旧 source_id，避免工程指向错误音源
     track.instrument.source_id = ""
     # S4.2：切到 VST3/SFZ 时 SF2 soundfont 不再适用；GM 程序保留轨级 soundfont
@@ -1848,6 +1859,72 @@ def _validate_clip(v: dict, idx: int) -> tuple[dict | None, str | None]:
         },
         None,
     )
+
+
+def _apply_add_audio_clip(score: Score, track, c: EditCommand) -> str | None:
+    """track=索引；value=单条 clip（字段同 set_audio_clips）——追加到该音频轨末尾（S4.2 多片段）。
+
+    clip_id 缺省自动生成；不要求与已有 clip 时间不重叠（DAW 同轨叠放由渲染层决定优先级）。
+    """
+    if str(getattr(track, "kind", "midi") or "midi") != "audio":
+        return f"add_audio_clip 只作用于音频轨（track {c.track} 是 MIDI 轨）"
+    v = c.value
+    if not isinstance(v, dict):
+        return "add_audio_clip value 需 clip 对象"
+    clip, err = _validate_clip(v, len(track.audio_clips()))
+    if err:
+        return f"add_audio_clip {err}"
+    clips = track.audio_clips()
+    if not clip["clip_id"]:
+        clip["clip_id"] = uuid.uuid4().hex[:8]
+    if any(x.get("clip_id") == clip["clip_id"] for x in clips):
+        return f"add_audio_clip clip_id 重复：{clip['clip_id']!r}"
+    clips.append(clip)
+    track.audio = {"clips": clips}
+    return None
+
+
+def _apply_move_audio_clip_to_track(score: Score, track, c: EditCommand) -> str | None:
+    """track=源轨；value={clip_id, target_track, start?}——音频 clip 跨音频轨移动（S3 残留）。
+
+    同轨/不存在/目标非音频轨均拒绝；clip 保留 id/修剪/淡化/伸缩，start 给了则改时间线位置。
+    """
+    if str(getattr(track, "kind", "midi") or "midi") != "audio":
+        return f"move_audio_clip_to_track 只作用于音频轨（track {c.track} 是 MIDI 轨）"
+    v = c.value if isinstance(c.value, dict) else {}
+    try:
+        target = int(v.get("target_track"))
+    except (TypeError, ValueError):
+        return "move_audio_clip_to_track value 需 {clip_id, target_track}"
+    if not (0 <= target < len(score.tracks)):
+        return f"move_audio_clip_to_track target_track 越界：{target}"
+    if target == c.track:
+        return "move_audio_clip_to_track 目标轨与源轨相同"
+    dst = score.tracks[target]
+    if str(getattr(dst, "kind", "midi") or "midi") != "audio":
+        return f"move_audio_clip_to_track 目标轨不是音频轨：track {target}"
+    clip_id = str(v.get("clip_id") or "").strip()
+    src_clips = track.audio_clips()
+    idx = next((i for i, x in enumerate(src_clips) if x.get("clip_id") == clip_id), None)
+    if idx is None:
+        return f"move_audio_clip_to_track 源轨找不到 clip：{clip_id!r}"
+    clip = dict(src_clips[idx])
+    if v.get("start") is not None:
+        try:
+            start = float(v["start"])
+        except (TypeError, ValueError):
+            return f"move_audio_clip_to_track start 非法：{v.get('start')!r}"
+        if start < 0:
+            return f"move_audio_clip_to_track start 越界（≥0）：{start}"
+        clip["start"] = round(start, 6)
+    dst_clips = dst.audio_clips()
+    if any(x.get("clip_id") == clip["clip_id"] for x in dst_clips):
+        return f"move_audio_clip_to_track 目标轨已有同 id clip：{clip['clip_id']!r}"
+    src_clips.pop(idx)
+    dst_clips.append(clip)
+    track.audio = {"clips": src_clips}
+    dst.audio = {"clips": dst_clips}
+    return None
 
 
 def _apply_set_audio_clips(score: Score, track, c: EditCommand) -> str | None:

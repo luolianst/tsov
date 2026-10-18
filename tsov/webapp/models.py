@@ -165,3 +165,17 @@ class LlmTestIn(BaseModel):
     api_key: str | None = None
     endpoint: str | None = None
     model: str | None = None
+
+
+class TrackTemplateSaveIn(BaseModel):
+    """S4.2：保存当前工程轨布局为全局模板（不存音符）。"""
+
+    name: str
+    title: str = ""
+    overwrite: bool = False
+
+
+class TrackTemplateApplyIn(BaseModel):
+    """S4.2：应用全局轨模板（追加到工程末尾）。"""
+
+    name: str

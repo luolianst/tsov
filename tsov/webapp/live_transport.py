@@ -118,6 +118,9 @@ class LiveTransport:
                 item.update({"type": "vst3", "plugin": str(plugin)})
                 if state_path:
                     item["state"] = state_path
+            elif program.startswith("vst2:") or program.lower().endswith(".dll"):
+                raise LiveUnsupported(
+                    f"VST2 轨不支持实时播放（数据保留，可离线导出）：{track.name} / {program}")
             elif program.startswith("sfz:"):
                 plugin = _resolve_plugin(f"vst3:{_DEFAULT_SFIZZ}")
                 if plugin is None or not plugin.exists():

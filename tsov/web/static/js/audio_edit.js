@@ -26,7 +26,21 @@ let lastDraw = () => {};
 export function selOf() { return selClip; }
 export function clearSel() { selClip = null; }
 export function isDragging() { return !!drag; }
-export function dragPreviewOf(ti) { return (drag && drag.ti === ti) ? drag.preview : null; }
+export function dragPreviewOf(ti) {
+  if (!drag) return null;
+  if (drag.targetTi != null && drag.targetTi !== drag.ti) {
+    if (ti === drag.targetTi) return drag.preview;
+    if (ti === drag.ti) return drag.base.filter((_, i) => i !== drag.idx);
+    return null;
+  }
+  return drag.ti === ti ? drag.preview : null;
+}
+
+/** S3 残留：音频 clip 纵向拖到另一条音频轨（targetTi = 源轨 = 取消跨轨）。 */
+export function setAudioDragTarget(ti) {
+  if (!drag) return;
+  drag.targetTi = (Number.isInteger(ti) && ti >= 0) ? ti : drag.ti;
+}
 
 export function r6(x) { return Math.round(Number(x) * 1e6) / 1e6; }
 
@@ -109,7 +123,7 @@ export function beginAudioDrag(ti, hit, e, drawFn) {
   const base = audioClipsOf(trk).map((c) => Object.assign({}, c));
   const mode = (e.altKey && hit.zone === 'trim-out') ? 'stretch' : hit.zone;
   drag = { ti, mode, idx: hit.idx, startX: e.clientX, alt: !!e.altKey,
-           base, preview: base.map((c) => Object.assign({}, c)), moved: false };
+           base, preview: base.map((c) => Object.assign({}, c)), moved: false, targetTi: ti };
   selClip = { ti, idx: hit.idx };
   if (typeof drawFn === 'function') lastDraw = drawFn;
 }
@@ -170,9 +184,19 @@ export async function finishAudioDrag() {
     'fade-in': t('调整淡入淡出'), 'fade-out': t('调整淡入淡出'), stretch: t('伸缩音频片段'),
   };
   try {
-    const r = await api.postBatch(store.project, LABEL[d.mode] || t('编辑音频片段'),
-      [{ op: 'set_audio_clips', track: d.ti, value: { clips } }], null);
-    if (!r.applied) setError(t('被拒：') + (r.errors || []).join('；'));
+    const cross = d.targetTi != null && d.targetTi !== d.ti && d.mode === 'move';
+    if (cross) {
+      const c = d.preview[d.idx] || {};
+      const r = await api.postBatch(store.project, t('移动音频片段到另一轨'),
+        [{ op: 'move_audio_clip_to_track', track: d.ti,
+           value: { clip_id: c.clip_id || '', target_track: d.targetTi,
+                    start: r6(c.start) } }], null);
+      if (!r.applied) setError(t('被拒：') + (r.errors || []).join('；'));
+    } else {
+      const r = await api.postBatch(store.project, LABEL[d.mode] || t('编辑音频片段'),
+        [{ op: 'set_audio_clips', track: d.ti, value: { clips } }], null);
+      if (!r.applied) setError(t('被拒：') + (r.errors || []).join('；'));
+    }
   } catch (e) { setError(e.message); }
   fn();
 }

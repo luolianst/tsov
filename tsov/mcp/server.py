@@ -89,6 +89,7 @@ READ_REGISTRY_TOOLS = ("load_score", "list_dir", "read_text", "detect_key", "lis
 WRITE_REGISTRY_TOOLS = (
     "edit_score", "set_tempo", "create_track", "write_notes", "duplicate_bars",
     "set_track_mix", "apply_effect", "apply_pattern", "remove_track", "rename_track",
+    "mount_source",
     "set_instrument_param", "load_instrument_preset", "open_instrument_editor",
 )
 HEAVY_REGISTRY_TOOLS = (

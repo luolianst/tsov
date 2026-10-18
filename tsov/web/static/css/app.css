@@ -702,6 +702,10 @@ body.chat-resizing { cursor: col-resize; user-select: none; }
 /* S4.1 音源库浏览器 */
 .src-lib { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; max-width: 720px; border-left: 1px solid var(--border); padding-left: 12px; }
 .src-lib-head { display: flex; align-items: center; gap: 8px; }
+.src-template-bar { display: flex; align-items: center; gap: 5px; padding: 3px 0; }
+.src-template-label { color: var(--muted); font-size: var(--fs-xs); flex: none; }
+.src-template-select { min-width: 0; flex: 1; font-size: var(--fs-xs); }
+.src-template-bar button { flex: none; font-size: var(--fs-xs); }
 .src-lib-title { color: var(--muted); font-size: var(--fs-sm); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .src-lib-head button { flex: none; }
 .src-search { width: 100%; font-family: var(--font-mono); }

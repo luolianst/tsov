@@ -562,6 +562,27 @@ def test_build_apply_first_run():
     assert plan["meta"]["notes"] == 1
 
 
+def test_build_apply_mount_source():
+    tracks = [{"name": "melody", "kind": "midi"}, {"name": "录音", "kind": "audio"}]
+    plan = build_apply_commands(tracks, source_track=1, notes=[3],
+                                mount={"source_id": "sf2:0123456789abcdef"})
+    assert plan["meta"]["mount_source"] == "sf2:0123456789abcdef"
+    assert plan["commands"][-1] == {
+        "op": "mount_source", "track": 2,
+        "value": {"source_id": "sf2:0123456789abcdef"},
+    }
+
+
+def test_build_apply_source_clip_start():
+    tracks = [{"name": "录音", "kind": "audio",
+               "audio": {"clips": [{"file": "audio/take.wav", "start": 4.25,
+                                     "src_offset": 0.0, "src_len": None}]}}]
+    plan = build_apply_commands(tracks, source_track=0, notes=[{"pitch_midi": 60,
+                                                               "start": 0.5, "end": 1.0}])
+    move = next(c for c in plan["commands"] if c["op"] == "move_part")
+    assert move["track"] == 1 and move["value"]["start"] == 4.25
+
+
 def test_build_apply_rerun_idempotent():
     tracks = [{"name": "melody", "kind": "midi"}, {"name": "录音", "kind": "audio"},
               {"name": "录音", "kind": "midi"}, {"name": "录音 · 处理", "kind": "midi"}]
@@ -1389,6 +1410,16 @@ def test_apply_config_step_addressing(env):
     assert not data2["steps"][2].get("mute")
     with pytest.raises(ValueError):
         apply_config(proj, step_mute={99: True})
+
+
+def test_apply_config_mount_persists(env):
+    _make_project(env)
+    proj = _proj(env)
+    data = apply_config(proj, apply_mount={"source_id": "vst3:abc", "preset_id": "p1"})
+    assert data["apply"]["mount"] == {"source_id": "vst3:abc", "preset_id": "p1"}
+    assert load_chain_json(proj.root)["apply"]["mount"]["source_id"] == "vst3:abc"
+    data2 = apply_config(proj, apply_mount={})
+    assert "apply" not in data2
 
 
 @pytest.mark.skipif(not _HAS_FFMPEG, reason="需要 ffmpeg")

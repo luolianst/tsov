@@ -47,7 +47,8 @@ def apply_chain_run(ws: WebState, proj, *, run_ts=None, source_track=None) -> di
         raise HTTPException(409, "链未记录源轨（先运行一次链或显式给 source_track）")
     try:
         plan = build_apply_commands(list(proj.score.tracks), source_track=int(source_track),
-                                    notes=got["processed"])
+                                    notes=got["processed"],
+                                    mount=(saved.get("apply") or {}).get("mount"))
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     batch = EditBatch(label="转谱进工程（处理版）")
@@ -262,12 +263,14 @@ def register(app: FastAPI) -> None:
         - 慢档改参：{"needs_apply": 步序}（前端亮该步「应用」按钮）
         """
         body = body or {}
+        apply_body = body.get("apply") if isinstance(body.get("apply"), dict) else {}
         proj = st().get_project(name)
         try:
             data = apply_config(proj, mute=body.get("mute"), overrides=body.get("overrides"),
                                 step_mute=body.get("step_mute"),
                                 step_overrides=body.get("step_overrides"),
-                                source_track=body.get("source_track"), preset_id=body.get("preset"))
+                                source_track=body.get("source_track"), preset_id=body.get("preset"),
+                                apply_mount=body.get("apply_mount", apply_body.get("mount")))
         except (ValueError, KeyError) as e:
             raise HTTPException(400, str(e)) from e
         resp = {"ok": True, "config": data}

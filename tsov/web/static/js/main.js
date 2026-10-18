@@ -215,21 +215,28 @@ async function importAudioByPath(path) {
   } catch (e) { setError(t('导入失败：') + e.message); }
 }
 
-async function importAudioFile(file) {
+async function importAudioFile(file, track, at) {
   if (!store.project) { setError(t('先打开一个工程')); return; }
   try {
     const info = await api.importAudioUpload(store.project, file);
-    await attachAudio(info, file.name);
+    await attachAudio(info, file.name, track, at);
   } catch (e) { setError(t('导入失败：') + e.message); }
 }
 
-/** 入库成功后接命令层：add_audio_track 追加音频轨（与 agent 同一动作路径）。 */
-async function attachAudio(info, fallbackName) {
+/** 入库成功后接命令层：音频轨上拖入 = add_audio_clip（同轨多片段）；否则 add_audio_track。 */
+async function attachAudio(info, fallbackName, track, at) {
   const nm = String(info.title || fallbackName || '').replace(/\.[^.]+$/, '');
-  const r = await api.postBatch(store.project, t('导入音频'),
-    [{ op: 'add_audio_track', value: { file: info.file, name: nm || null } }], t('素材：') + info.file);
+  const ti = Number.isInteger(track) ? track : -1;
+  const trk = (ti >= 0 && store.score && store.score.tracks[ti]) || null;
+  const append = !!(trk && trk.kind === 'audio');
+  const cmd = append
+    ? { op: 'add_audio_clip', track: ti,
+        value: { file: info.file, start: Math.max(0, Number(at) || 0), src_len: info.seconds } }
+    : { op: 'add_audio_track', value: { file: info.file, name: nm || null } };
+  const r = await api.postBatch(store.project, t(append ? '追加音频片段' : '导入音频'), [cmd],
+    t('素材：') + info.file);
   if (!r.applied) { setError(t('被拒：') + (r.errors || []).join('；')); return; }
-  bus.dispatch('toast', t('已导入素材「') + (nm || info.file) + '」' +
+  bus.dispatch('toast', t(append ? '已追加音频片段「' : '已导入素材「') + (nm || info.file) + '」' +
     (info.deduped ? t('（复用已有文件）') : '') + ' · ' + Number(info.seconds).toFixed(2) + 's');
 }
 
@@ -567,8 +574,8 @@ function boot() {
     if (e.key === ' ') {
       if (tag === 'BUTTON') return;
       e.preventDefault();
-      if (store.playing === 'wav') playback.stopAll();
-      else playback.playWav();
+      if (store.playing) playback.stopAll();
+      else playback.playHost();
     } else if (e.key === 'Home') {
       e.preventDefault();
       playback.rewind();

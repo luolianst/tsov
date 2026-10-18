@@ -27,10 +27,10 @@ def _score(volume: float = 0.8, notes: list[Note] | None = None, tempo: float = 
 
 
 def test_labels_cover_all_registered_tools():
-    """27/27：每个注册工具都有中文标签（含批L 三件 + P62b 过桥）；只读/写集都是注册工具的子集。"""
+    """28/28：每个注册工具都有中文标签（含批L 三件 + P62b 过桥 + S4.2 挂载）；只读/写集都是注册工具的子集。"""
     reg = build_default_registry()
     names = {s.name for s in reg.specs()}
-    assert len(names) == 27
+    assert len(names) == 28
     assert names - set(TOOL_LABELS) == set(), f"缺标签：{sorted(names - set(TOOL_LABELS))}"
     assert READ_TOOLS <= names and SCORE_WRITING_TOOLS <= names
     assert not (READ_TOOLS & SCORE_WRITING_TOOLS)

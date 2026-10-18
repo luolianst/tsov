@@ -113,6 +113,46 @@ def test_set_audio_clips_replaces_and_normalizes():
     assert c0["clip_id"] and c1["clip_id"] and c0["clip_id"] != c1["clip_id"]
 
 
+def test_add_audio_clip_appends_to_existing_track():
+    new, res = EditBatch().add(
+        "add_audio_clip", track=1,
+        value=_clip(start=2.0, src_offset=0.1, src_len=1.25),
+    ).apply(_clip_score())
+    assert res.ok and res.applied == 1
+    clips = new.tracks[1].audio_clips()
+    assert len(clips) == 2
+    assert clips[1]["start"] == 2.0 and clips[1]["src_offset"] == 0.1
+    assert clips[1]["src_len"] == 1.25 and clips[1]["clip_id"]
+
+
+def test_add_audio_clip_guards():
+    _, res = EditBatch().add("add_audio_clip", track=0, value=_clip()).apply(_clip_score())
+    assert not res.ok and "音频轨" in res.errors[0]
+    _, res2 = EditBatch().add("add_audio_clip", track=1, value={"file": ""}).apply(_clip_score())
+    assert not res2.ok and "为空" in res2.errors[0]
+
+
+def test_move_audio_clip_across_audio_tracks():
+    score = Score(title="t", tracks=[Track(name="melody"),
+                                     _audio_track(clips=[_clip(clip_id="x", start=1.0)]),
+                                     _audio_track(clips=[])])
+    new, res = EditBatch().add(
+        "move_audio_clip_to_track", track=1,
+        value={"clip_id": "x", "target_track": 2, "start": 3.5},
+    ).apply(score)
+    assert res.ok and res.applied == 1
+    assert new.tracks[1].audio_clips() == []
+    moved = new.tracks[2].audio_clips()
+    assert len(moved) == 1 and moved[0]["clip_id"] == "x" and moved[0]["start"] == 3.5
+
+
+def test_move_audio_clip_target_guards():
+    score = _clip_score()
+    _, res = EditBatch().add("move_audio_clip_to_track", track=1,
+                             value={"clip_id": "nope", "target_track": 0}).apply(score)
+    assert not res.ok and "目标轨不是音频轨" in res.errors[0]
+
+
 def test_set_audio_clips_clears_to_silent():
     new, res = EditBatch().add("set_audio_clips", track=1, value={"clips": []}).apply(_clip_score())
     assert res.ok and new.tracks[1].audio == {"clips": []}

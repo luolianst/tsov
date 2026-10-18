@@ -8,7 +8,7 @@ chain（E3）/ staging、agents（E4 段1）/ tune（E4 段2）/ arrange（E4 �
 from __future__ import annotations
 
 from . import (agents, arrange, audio, basic, chain, chat, events, playback, projects, render,
-               retention, sources, staging, tune)
+               retention, sources, staging, templates, tune)
 
 ROUTE_MODULES = (basic, projects, render, audio, retention, playback, events, chat, chain, staging,
-                 agents, tune, arrange, sources)
+                 agents, tune, arrange, sources, templates)

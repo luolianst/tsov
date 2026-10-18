@@ -20,7 +20,7 @@ SF2 = ROOT / "vendor" / "soundfonts" / "FluidR3_GM.sf2"
 
 NEW_TOOLS = {
     "voice_to_score", "detect_key", "create_track", "write_notes", "duplicate_bars",
-    "set_track_mix", "remove_track", "rename_track", "apply_effect", "apply_pattern",
+    "set_track_mix", "mount_source", "remove_track", "rename_track", "apply_effect", "apply_pattern",
     "analyze_levels", "export_audio", "export_midi",
     "read_text",
     "open_instrument_editor",   # P62b：插件编辑器过桥
@@ -167,6 +167,26 @@ def test_set_track_mix_and_effect(tmp_path):
     assert effects and "reverb" in {e["type"] for e in effects}
     with pytest.raises(ValueError):
         tc.tool_apply_effect({"score_path": str(sp), "output": str(sp), "track": 0, "preset": "no-such-preset"})
+
+
+def test_mount_source_tool(tmp_path, monkeypatch):
+    from tsov.sources import SourceLibrary
+
+    root = tmp_path / "sources"
+    root.mkdir()
+    (root / "kit.sf2").write_bytes(b"fake-sf2")
+    lib = SourceLibrary(tmp_path / "sources.json", roots=[str(root)])
+    lib.scan()
+    sid = next(s.id for s in lib.sources.values() if s.kind == "sf2")
+    monkeypatch.setenv("TSOV_SOURCES_PATH", str(tmp_path / "sources.json"))
+
+    sp = _save_score(tmp_path / "score.json", _base([_melody()]))
+    msg = tc.tool_mount_source({"score_path": str(sp), "output": str(sp), "track": 0,
+                                "source_id": sid})
+    assert "已挂载" in msg and sid in msg
+    data = _load(sp)
+    assert data["tracks"][0]["instrument"]["source_id"] == sid
+    assert data["tracks"][0]["instrument"]["soundfont"].endswith("kit.sf2")
 
 
 def test_remove_rename_track_tools(tmp_path):

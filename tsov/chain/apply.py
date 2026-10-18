@@ -46,11 +46,26 @@ def _track_attr(t, key: str, default=None):
     return getattr(t, key, default)
 
 
-def build_apply_commands(score_tracks: list, *, source_track: int, notes: list) -> dict:
+def _source_audio_start(t) -> float:
+    """源轨若为音频轨：取首个 clip 的时间线起点；无 clip/非音频 → 0。"""
+    if str(_track_attr(t, "kind", "midi") or "midi") != "audio":
+        return 0.0
+    getter = getattr(t, "audio_clips", None)
+    if callable(getter):
+        clips = getter()
+    else:
+        from ..core.score import normalize_audio_clips
+        clips = normalize_audio_clips(_track_attr(t, "audio", None))
+    return float(clips[0].get("start") or 0.0) if clips else 0.0
+
+
+def build_apply_commands(score_tracks: list, *, source_track: int, notes: list,
+                         mount: dict | None = None) -> dict:
     """组装「进工程」命令序列（单轨·处理版；索引全部按「执行到该命令时」的轨道表算出）。
 
     返回 {"commands": [...], "meta": {...}}；commands 为命令层 dict
     （{op, track?, value?}），按序执行即得处理版单轨进工程。
+    S4.2：``mount={"source_id": ...}`` 时在产轨后追加 ``mount_source``（快车道 apply.mount）。
     """
     names = [str(_track_attr(t, "name", "") or "") for t in score_tracks]
     kinds = [str(_track_attr(t, "kind", "midi") or "midi") for t in score_tracks]
@@ -75,6 +90,16 @@ def build_apply_commands(score_tracks: list, *, source_track: int, notes: list) 
     commands.append({"op": "add_track", "track": 0,
                      "value": {"name": proc_name, "at": at1, "unique": False}})
     commands.append({"op": "set_notes", "track": at1, "value": {"notes": notes}})
+    source_start = _source_audio_start(score_tracks[source_track])
+    if source_start > 0:
+        # 转录落点 = 源音频 clip 起点（Part 整体平移；音符保持链产物绝对时间）
+        commands.append({"op": "move_part", "track": at1,
+                         "value": {"part": 0, "start": round(source_start, 6)}})
+    mount = mount if isinstance(mount, dict) else {}
+    mount_sid = str(mount.get("source_id") or "").strip()
+    if mount_sid:
+        commands.append({"op": "mount_source", "track": at1,
+                         "value": {"source_id": mount_sid}})
 
     return {
         "commands": commands,
@@ -84,6 +109,7 @@ def build_apply_commands(score_tracks: list, *, source_track: int, notes: list) 
             "inserted": [at1],
             "removed": sorted(olds),
             "notes": len(notes or []),
+            "mount_source": mount_sid,
         },
     }
 

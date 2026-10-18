@@ -19,6 +19,9 @@ let srcLib = null;
 let srcLibLoading = false;
 let srcLibBusy = false;
 let srcLibQuery = '';
+let tplLib = null;
+let tplLoading = false;
+let tplName = '';
 /* M-V8 E5 段2：效果目标（当前轨 / 各总线 / master） */
 let fxTarget = { mode: 'track', ref: '' };
 let fxEdit = null;   // v0.2 批C 后段（P26）：效果参数编辑器槽位（null = 关闭）
@@ -295,6 +298,83 @@ async function scanSourceLibrary() {
   }
 }
 
+/* S4.2：全局轨模板（只存轨布局；应用走 /template/apply → 命令层） */
+async function loadTemplates() {
+  if (tplLoading) return;
+  tplLoading = true;
+  try {
+    tplLib = await api.templates();
+  } catch (e) {
+    tplLib = { templates: [], errors: [e.message] };
+    setError(t('模板库：') + e.message);
+  } finally {
+    tplLoading = false;
+    if (srcPane) renderSrc();
+  }
+}
+
+async function saveCurrentTemplate() {
+  if (!store.project) return;
+  const name = prompt(t('模板名称（只存轨布局，不存音符）'), tplName || (store.project + '-layout'));
+  if (!name) return;
+  try {
+    const r = await api.saveTemplate(store.project, { name, title: name, overwrite: false });
+    tplName = name;
+    bus.dispatch('toast', t('已保存轨模板：') + (r.template?.name || name));
+    await loadTemplates();
+  } catch (e) { setError(t('保存模板：') + e.message); }
+}
+
+async function applySelectedTemplate() {
+  if (!store.project || !tplName) return;
+  try {
+    const r = await api.applyTemplate(store.project, tplName);
+    if (r.applied) bus.dispatch('toast', t('已应用轨模板：') + tplName);
+    else setError(t('模板应用被拒：') + (r.errors || []).join('；'));
+    await loadTemplates();
+  } catch (e) { setError(t('应用模板：') + e.message); }
+}
+
+function renderTemplateBar() {
+  const bar = document.createElement('div');
+  bar.className = 'src-template-bar';
+  const lab = document.createElement('span');
+  lab.className = 'src-template-label';
+  lab.textContent = t('轨模板');
+  const sel = document.createElement('select');
+  sel.className = 'src-template-select';
+  const rows = (tplLib && tplLib.templates) || [];
+  for (const row of rows) {
+    const o = document.createElement('option');
+    o.value = row.name;
+    o.textContent = row.name + (row.tracks ? ' · ' + row.tracks + t(' 轨') : '');
+    sel.appendChild(o);
+  }
+  if (!rows.length) {
+    const o = document.createElement('option');
+    o.value = '';
+    o.textContent = tplLoading ? t('载入中…') : t('（暂无模板）');
+    sel.appendChild(o);
+  }
+  if (!rows.some((x) => x.name === tplName)) tplName = rows[0]?.name || '';
+  sel.value = tplName;
+  sel.onchange = () => { tplName = sel.value; };
+  const save = document.createElement('button');
+  save.textContent = t('存为模板');
+  save.disabled = !store.project;
+  save.onclick = saveCurrentTemplate;
+  const apply = document.createElement('button');
+  apply.textContent = t('应用');
+  apply.disabled = !store.project || !sel.value;
+  apply.onclick = applySelectedTemplate;
+  bar.appendChild(lab);
+  bar.appendChild(sel);
+  bar.appendChild(save);
+  bar.appendChild(apply);
+  if (tplLib == null && !tplLoading) loadTemplates();
+  return bar;
+}
+
 function _sourceRows() {
   const q = srcLibQuery.trim().toLowerCase();
   const rows = (srcLib && srcLib.sources) || [];
@@ -424,6 +504,7 @@ function renderSourceLib(host) {
   fillSourceRows(list);
 
   host.appendChild(head);
+  host.appendChild(renderTemplateBar());
   host.appendChild(search);
   host.appendChild(list);
   if (srcLib && srcLib.error) {
