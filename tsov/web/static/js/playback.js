@@ -304,7 +304,8 @@ export async function playHost() {
     toast(t('实时播放中（sidecar；⏹ 停止）…'));
     const r = await api.play(store.project, body);
     if (r && r.mode === 'live') {
-      toast(t('实时播放中（sidecar；⏹ 停止）'));
+      if (r.device_fallback) toast(t('独占模式不可用，已用共享模式播放（延迟可能略高）'));
+      else toast(t('实时播放中（sidecar；⏹ 停止）…'));
     } else {
       toast(t('宿主播放完毕（') + r.duration + 's）');
     }

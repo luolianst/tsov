@@ -76,6 +76,7 @@ class LiveTransport:
         self._stop = threading.Event()
         self._loop: tuple[float, float] | None = None
         self._last_error = ""
+        self._device_type = ""
 
     # ---------------- lifecycle ----------------
 
@@ -159,6 +160,19 @@ class LiveTransport:
             raise LiveUnsupported("工程没有可实时播放的 MIDI 轨")
         return tracks, selected
 
+    def _device_types(self) -> list[str]:
+        """首选设备类型 + 可选共享模式兜底（S6：独占被浏览器/其他流占用时不静默失败）。
+
+        默认 Exclusive；`TSOV_LIVE_DEVICE_FALLBACK=0` 可禁用兜底。兜底只在启动失败时尝试，
+        成功后 `play` payload 带 `device_type`，前端提示「共享模式」。
+        """
+        primary = os.environ.get("TSOV_LIVE_DEVICE_TYPE", "Exclusive")
+        fallback = os.environ.get("TSOV_LIVE_DEVICE_FALLBACK", "Windows Audio")
+        out = [primary]
+        if fallback and fallback != primary and os.environ.get("TSOV_LIVE_DEVICE_FALLBACK", "") != "0":
+            out.append(fallback)
+        return out
+
     def _ensure_client(self, project) -> HostClient:
         if self._client is not None and self._project_name == project.name:
             return self._client
@@ -171,27 +185,42 @@ class LiveTransport:
         manifest.write_text(json.dumps(tracks, ensure_ascii=False, indent=2), encoding="utf-8")
 
         device = os.environ.get("TSOV_LIVE_DEVICE", "GP-50")
-        device_type = os.environ.get("TSOV_LIVE_DEVICE_TYPE", "Exclusive")
         sample_rate = float(os.environ.get("TSOV_LIVE_SAMPLE_RATE", "44100"))
         block_size = int(os.environ.get("TSOV_LIVE_BLOCK_SIZE", "132"))
-        client = HostClient(
-            manifest,
-            port=_free_port(),
-            device=device,
-            device_type=device_type,
-            sample_rate=sample_rate,
-            block_size=block_size,
-        )
-        try:
-            client.start()
-            graph = score_to_graph(project.score, sample_rate=float(client.info.get("sampleRate", 44100.0)))
-            graph["tracks"] = [graph["tracks"][i] for i in selected]
-            client.load_graph(graph, revision=0)
-        except Exception:
-            client.stop()
+        last_exc: Exception | None = None
+        client = None
+        used_type = ""
+        for device_type in self._device_types():
+            client = HostClient(
+                manifest,
+                port=_free_port(),
+                device=device,
+                device_type=device_type,
+                sample_rate=sample_rate,
+                block_size=block_size,
+            )
+            try:
+                client.start()
+                graph = score_to_graph(project.score, sample_rate=float(client.info.get("sampleRate", 44100.0)))
+                graph["tracks"] = [graph["tracks"][i] for i in selected]
+                client.load_graph(graph, revision=0)
+                used_type = device_type
+                last_exc = None
+                break
+            except Exception as exc:  # noqa: BLE001 —— 换设备类型重试；最终仍失败再抛原异常
+                last_exc = exc
+                try:
+                    client.stop()
+                except Exception:  # noqa: BLE001
+                    pass
+                client = None
+        if client is None or last_exc is not None:
             manifest.unlink(missing_ok=True)
-            raise
+            raise last_exc or RuntimeError("live sidecar 启动失败")
 
+        self._device_type = used_type
+        if len(self._device_types()) > 1 and used_type != self._device_types()[0]:
+            self._last_error = f"独占设备不可用，已回退 {used_type}（共享模式）"
         if len(selected) == len(project.score.tracks):
             project.attach_live(client)
         self._client = client
@@ -261,6 +290,8 @@ class LiveTransport:
                 "start": float(start),
                 "loop": list(loop) if loop else None,
                 "outputLatencySamples": latency_samples,
+                "device_type": self._device_type,
+                "device_fallback": bool(self._device_type and self._device_type != self._device_types()[0]),
             }
             self.bus.publish(project.name, "playback_start", {
                 "duration": duration, "start": float(start),
@@ -272,12 +303,18 @@ class LiveTransport:
         with self._lock:
             self._stop.set()
             client = self._client
-            if client is not None:
+            self._loop = None
+        if client is not None:
+            # S6：host 卡死时 stop 不能把 Web 请求一起拖住——发送线程限时 1s，超时丢弃。
+            def _send() -> None:
                 try:
                     client.transport("stop")
                 except Exception:  # noqa: BLE001
                     pass
-            self._loop = None
+
+            th = threading.Thread(target=_send, name="tsov-live-stop", daemon=True)
+            th.start()
+            th.join(timeout=1.0)
         if project_name:
             self.bus.publish(project_name, "playback_stop", {"mode": "live"})
         return {"ok": True}

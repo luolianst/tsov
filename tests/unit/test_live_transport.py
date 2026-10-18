@@ -88,6 +88,58 @@ def test_manifest_rejects_vst2_with_clear_hint(tmp_path):
         transport._manifest_for(project)
 
 
+def test_device_fallback_to_shared(tmp_path, monkeypatch):
+    """S6：Exclusive 启动失败 → 自动尝试 Windows Audio 共享，并标记 device_fallback。"""
+    import tsov.webapp.live_transport as lt
+
+    class _FakeClient:
+        attempts: list[str] = []
+
+        def __init__(self, manifest, *, port, device, device_type, sample_rate, block_size):
+            self.device_type = device_type
+            self.info = {"sampleRate": 44100.0, "outputLatencySamples": 132}
+
+        def start(self):
+            _FakeClient.attempts.append(self.device_type)
+            if self.device_type == "Exclusive":
+                raise RuntimeError("device busy")
+
+        def stop(self):
+            pass
+
+        def load_graph(self, graph, revision=0):
+            self.revision = revision
+
+    monkeypatch.setattr(lt, "HostClient", _FakeClient)
+    _FakeClient.attempts = []
+    transport = lt.LiveTransport(EventBus())
+    project = _Project(
+        Score(tracks=[Track(name="piano", instrument=Instrument(program="piano"), notes=[_note()])]),
+        tmp_path,
+    )
+    client = transport._ensure_client(project)
+    assert _FakeClient.attempts == ["Exclusive", "Windows Audio"]
+    assert transport._device_type == "Windows Audio"
+    assert client.revision == 0
+
+
+def test_stop_times_out_on_hung_host():
+    """S6：sidecar 无响应时 /play/stop 不能无限阻塞 Web 请求。"""
+    import time
+    import tsov.webapp.live_transport as lt
+
+    class _Hang:
+        def transport(self, *args, **kwargs):
+            time.sleep(5)
+
+    transport = lt.LiveTransport(EventBus())
+    transport._client = _Hang()
+    t0 = time.monotonic()
+    r = transport.stop("p")
+    assert r["ok"] is True
+    assert time.monotonic() - t0 < 1.8
+
+
 def test_manifest_rejects_unknown_program_with_notes(tmp_path):
     transport = LiveTransport(EventBus())
     project = _Project(

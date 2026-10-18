@@ -1012,6 +1012,7 @@ export const EN = {
   '宿主播放中（循环 ': 'Host playback (loop ',
   '实时播放中（sidecar；⏹ 停止）…': 'Live playback (sidecar; ⏹ stop)…',
   '实时播放中（sidecar；⏹ 停止）': 'Live playback (sidecar; ⏹ stop)',
+  '独占模式不可用，已用共享模式播放（延迟可能略高）': 'Exclusive mode unavailable; playing in shared mode (latency may be higher)',
   's，⏹ 停止）…': 's, ⏹ to stop)…',
   '宿主播放中（阻塞到播完）…': 'Host playback (blocking until it ends)…',
   '宿主播放完毕（': 'Host playback finished (',
