@@ -5,7 +5,7 @@ S0 骨架：JUCE 8.0.9 控制台宿主，负责实时音频/插件（后续 S1 �
 ## 构建（Windows x64）
 
 ```bash
-cd "D:/My Project/the shape of voice"
+cd "<仓库根目录>"
 
 # 首次配置会下载 JUCE 8.0.9 到 build/_deps/juce-src
 tsov/.venv/Scripts/cmake.exe -S native/tsov-host -B native/tsov-host/build \
