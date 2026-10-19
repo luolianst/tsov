@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
 import socket
 import threading
 import time
@@ -17,6 +18,12 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+import soundfile as sf
+
+from ..host.audio_source import AudioClipSource
+from ..host.cache import StemStore
+from ..host.freeze import freeze_state
 from ..host.host_client import HostClient
 from ..host.live import score_to_graph
 from ..host.vst_worker import editor_state_path
@@ -62,6 +69,39 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def _audio_asset_for(project, track, index: int, samplerate: int) -> Path:
+    """普通音频轨：用现有 AudioClipSource（含 stretch/fade/多 clip）预拼装成单资产。
+
+    P83 AU1 的 sidecar 音频源当前消费「一条整轨资产」；音频 clip 的伸缩/淡化语义
+    仍由 Python 侧唯一实现保证，避免 C++ 再实现一套时间伸缩。
+    """
+    clips = track.audio_clips()
+    if not clips:
+        raise LiveUnsupported(f"音频轨没有 clip：{track.name}")
+    resolved = []
+    for cl in clips:
+        rel = str(cl.get("file") or "")
+        path = Path(rel)
+        if path.is_absolute() or ".." in path.parts:
+            raise LiveUnsupported(f"音频轨路径非法：{track.name} / {rel!r}")
+        abs_path = project.root / path
+        if not abs_path.is_file():
+            raise LiveUnsupported(f"音频文件不存在：{track.name} / {rel}")
+        resolved.append({**cl, "path": abs_path})
+    source = AudioClipSource(clips=resolved, samplerate=samplerate)
+    duration = float(score_duration(project.score, project.root))
+    n_frames = max(1, int(round((duration + 1.0) * samplerate)))
+    audio = np.asarray(source.render([], samplerate, n_frames), dtype=np.float32)
+    digest = hashlib.sha256(
+        json.dumps(clips, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:12]
+    out_dir = project.root.parent / ".tsov-live"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{project.name}-audio-{index}-{digest}.wav"
+    sf.write(str(path), audio, int(samplerate), subtype="FLOAT", format="WAV")
+    return path.resolve()
+
+
 class LiveTransport:
     def __init__(self, bus: EventBus) -> None:
         self.bus = bus
@@ -83,11 +123,43 @@ class LiveTransport:
     def _manifest_for(self, project) -> tuple[list[dict[str, Any]], list[int]]:
         tracks: list[dict[str, Any]] = []
         selected: list[int] = []
+        sample_rate = int(float(os.environ.get("TSOV_LIVE_SAMPLE_RATE", "44100")))
         for index, track in enumerate(project.score.tracks):
             kind = str(getattr(track, "kind", "midi") or "midi")
+            if kind == "audio":
+                if not track.audio_clips():
+                    continue
+                asset = _audio_asset_for(project, track, index, sample_rate)
+                tracks.append({
+                    "type": "audio",
+                    "path": str(asset.resolve()),
+                    "name": track.name or f"audio {index + 1}",
+                    "gain": float(getattr(track.instrument, "volume", 1.0)),
+                    "pan": float(track.pan),
+                    "note": 60,
+                })
+                selected.append(index)
+                continue
             if kind != "midi":
-                if track.audio_clips():
-                    raise LiveUnsupported(f"音频轨暂不支持实时播放：{track.name}")
+                continue
+            if getattr(track, "freeze", None):
+                store = StemStore(project.root)
+                status = freeze_state(track, project.score, store, sample_rate)
+                if status.get("state") != "frozen":
+                    reason = "资产缺失" if status.get("state") == "missing" else "资产已过期"
+                    raise LiveUnsupported(f"冻结轨「{track.name}」{reason}：请重新冻结或解冻")
+                asset = store.path_for(str(status["asset_id"]))
+                if not asset.is_file():
+                    raise LiveUnsupported(f"冻结轨「{track.name}」资产不存在：{asset.name}")
+                tracks.append({
+                    "type": "audio",
+                    "path": str(asset.resolve()),
+                    "name": track.name or f"track {index + 1}",
+                    "gain": float(track.instrument.volume),
+                    "pan": float(track.pan),
+                    "note": 60,
+                })
+                selected.append(index)
                 continue
             if not track.notes:
                 continue
@@ -173,8 +245,28 @@ class LiveTransport:
             out.append(fallback)
         return out
 
+    def _validate_live_sources(self, project) -> None:
+        """播放前复核磁盘源（P83 STL1）：冻结资产缺失/过期、音频 clip 被删都要显式失败。"""
+        sample_rate = int(float(os.environ.get("TSOV_LIVE_SAMPLE_RATE", "44100")))
+        store = StemStore(project.root)
+        for track in project.score.tracks:
+            if str(getattr(track, "kind", "midi") or "midi") == "audio":
+                for clip in track.audio_clips():
+                    raw = str(clip.get("file") or "")
+                    path = Path(raw)
+                    if not path.is_absolute():
+                        path = project.root / raw
+                    if not path.is_file():
+                        raise LiveUnsupported(f"音频轨「{track.name}」素材不存在：{raw}")
+            if getattr(track, "freeze", None):
+                status = freeze_state(track, project.score, store, sample_rate)
+                if status.get("state") != "frozen":
+                    reason = "资产缺失" if status.get("state") == "missing" else "资产已过期"
+                    raise LiveUnsupported(f"冻结轨「{track.name}」{reason}：请重新冻结或解冻")
+
     def _ensure_client(self, project) -> HostClient:
         if self._client is not None and self._project_name == project.name:
+            self._validate_live_sources(project)
             return self._client
         self._shutdown_client()
 
@@ -317,6 +409,17 @@ class LiveTransport:
             th.join(timeout=1.0)
         if project_name:
             self.bus.publish(project_name, "playback_stop", {"mode": "live"})
+        return {"ok": True}
+
+    def invalidate(self, project_name: str = "") -> dict:
+        """冻结/解冻后丢弃 sidecar：manifest 已变化，下一次 /play 重建。
+
+        调用方应先 stop；这里保留「只影响指定工程」的护栏，避免误杀别的工程。
+        """
+        with self._lock:
+            if project_name and self._project_name not in ("", project_name):
+                return {"ok": False, "reason": "other_project"}
+            self._shutdown_client()
         return {"ok": True}
 
     def seek(self, project_name: str, position: float) -> dict:

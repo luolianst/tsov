@@ -40,6 +40,39 @@ function snapT(t, e) {
   return Math.max(0, Math.round(t / b) * b);
 }
 
+/* P83：单轨显式冻结（UI1）——服务层停播/渲染/命令落库，前端只触发与提示。 */
+function canFreezeTrack(tr) {
+  if (!tr || tr.kind === 'audio') return false;
+  const p = String((tr.instrument && tr.instrument.program) || '');
+  return !(p.startsWith('vst2:') || p.toLowerCase().endsWith('.dll'));
+}
+function freezeTrack(ti, force) {
+  const tr = store.score && store.score.tracks[ti];
+  if (!tr || !store.project) return;
+  const name = tr.name || ('track ' + ti);
+  bus.dispatch('toast', t('冻结中（会先停止播放）…'));
+  api.freeze(store.project, ti, !!force)
+    .then((r) => {
+      bus.dispatch('toast', t('已冻结「') + name + t('」：轨道源侧锁定，混音仍可调'));
+      if (r && r.resumed) bus.dispatch('toast', t('已恢复播放'));
+      else if (r && r.was_playing) bus.dispatch('toast', t('原播放已停止；按播放键从当前位置继续'));
+      /* 不依赖 SSE 时序：拉一次全量 state，确保徽章/锁定立即反映 */
+      api.getState(store.project).then((s) => bus.dispatch('state_updated', s)).catch(() => {});
+    })
+    .catch((e) => setError(t('冻结失败：') + e.message));
+}
+function unfreezeTrack(ti) {
+  const tr = store.score && store.score.tracks[ti];
+  if (!tr || !store.project) return;
+  const name = tr.name || ('track ' + ti);
+  api.unfreeze(store.project, ti)
+    .then(() => {
+      bus.dispatch('toast', t('已解冻「') + name + t('」'));
+      api.getState(store.project).then((s) => bus.dispatch('state_updated', s)).catch(() => {});
+    })
+    .catch((e) => setError(t('解冻失败：') + e.message));
+}
+
 export function draw() {
   if (!ctx) return;
   ctx.clearRect(0, 0, W, H);
@@ -547,6 +580,13 @@ function renderTracks(el) {
     top.appendChild(m);
     top.appendChild(s);
     top.appendChild(eye);
+    if (tr.freeze) {
+      const fr = document.createElement('span');
+      fr.className = 'track-freeze';
+      fr.textContent = '❄';
+      fr.title = t('已冻结：源侧锁定，混音仍可调（右键解冻/重冻）');
+      top.appendChild(fr);
+    }
 
     const sub = document.createElement('div');
     sub.className = 'track-sub';
@@ -592,6 +632,12 @@ function renderTracks(el) {
           label: t('转乐谱…（实验性）'),
           fn: () => bus.dispatch('voice2score', { track: ti }),
         }] : []),
+        ...(canFreezeTrack(tr) ? (tr.freeze ? [
+          { label: t('解冻此轨'), fn: () => unfreezeTrack(ti) },
+          { label: t('重新冻结（修复过期资产）'), fn: () => freezeTrack(ti, true) },
+        ] : [
+          { label: t('冻结此轨'), fn: () => freezeTrack(ti, false) },
+        ]) : []),
         {
           label: t('文件夹归属…'),
           fn: () => {

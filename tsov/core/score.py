@@ -190,6 +190,9 @@ class Track:
     lanes: list[dict] | None = None
     # ---- S3.1 P1：拥有型片段（additive；None=旧平铺 notes 未迁移）----
     parts: list[Part] | None = None
+    # ---- P83（additive）：显式冻结状态；None=未冻结 ----
+    # {asset_id, content_hash, sample_rate, length, rendered_at}
+    freeze: dict | None = None
 
     def __post_init__(self) -> None:
         # 直接构造 Track(parts=...)、未给 notes 时，旧读侧从 Part 展开
@@ -258,6 +261,7 @@ class Track:
             sends={str(k): float(v) for k, v in (data.get("sends") or {}).items()},
             lanes=([dict(x) for x in lanes_raw if isinstance(x, dict)] if isinstance(lanes_raw, list) else None),
             parts=parts,
+            freeze=(dict(data["freeze"]) if isinstance(data.get("freeze"), dict) else None),
         )
 
     def audio_clips(self) -> list[dict]:

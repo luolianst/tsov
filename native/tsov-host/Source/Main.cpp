@@ -36,6 +36,7 @@ struct MixTrackSpec
     juce::String plugin;
     juce::String state;
     juce::String soundfont;
+    juce::String audio;
     int bank = 0;
     int program = 0;
     double gain = 0.55;
@@ -102,6 +103,15 @@ bool loadMixManifest(const juce::File& file,
             spec.bank = object->hasProperty("bank") ? (int) object->getProperty("bank") : 0;
             spec.program = object->hasProperty("program") ? (int) object->getProperty("program") : 0;
         }
+        else if (spec.type == "audio")
+        {
+            spec.audio = resolveMixPath(base, object->getProperty("path").toString(), true).getFullPathName();
+            if (spec.audio.isEmpty())
+            {
+                error = "manifest item " + juce::String(index) + " has no audio path";
+                return false;
+            }
+        }
         else
         {
             spec.plugin = resolveMixPath(base, object->getProperty("plugin").toString(), false).getFullPathName();
@@ -136,12 +146,51 @@ bool loadMixManifest(const juce::File& file,
     return true;
 }
 
+std::unique_ptr<juce::AudioBuffer<float>> loadAudioAsset(const juce::File& file, juce::String& error)
+{
+    if (! file.existsAsFile())
+    {
+        error = "audio file not found: " + file.getFullPathName();
+        return nullptr;
+    }
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file));
+    if (reader == nullptr || reader->lengthInSamples <= 0)
+    {
+        error = "cannot read audio file: " + file.getFullPathName();
+        return nullptr;
+    }
+
+    const auto samples = (int) juce::jmin<juce::int64>(reader->lengthInSamples, (juce::int64) INT_MAX);
+    auto buffer = std::make_unique<juce::AudioBuffer<float>>(2, samples);
+    buffer->clear();
+    reader->read(buffer.get(), 0, samples, 0, true, reader->numChannels > 1);
+    if (reader->numChannels == 1)
+        buffer->copyFrom(1, 0, *buffer, 0, 0, samples);
+    return buffer;
+}
+
 bool addMixSpecToEngine(tsov::MixEngine& engine,
                         const MixTrackSpec& spec,
                         double sampleRate,
                         int blockSize,
                         juce::String& error)
 {
+    if (spec.type == "audio")
+    {
+        auto audio = loadAudioAsset(juce::File(spec.audio), error);
+        if (audio == nullptr)
+            return false;
+        if (engine.addAudioTrack(std::move(audio), spec.name,
+                                 (float) spec.gain, (float) spec.pan) < 0)
+        {
+            error = "addAudioTrack failed";
+            return false;
+        }
+        return true;
+    }
+
     if (spec.type == "sf2")
     {
         auto synth = std::make_unique<tsov::SF2Synth>();

@@ -295,6 +295,43 @@ def tool_mount_source(args: dict) -> str:
             f" ｜ 写回：{out}")
 
 
+def tool_freeze_track(args: dict) -> str:
+    """显式冻结一条 MIDI/插件轨（P83：BK1 资产 + 命令层状态）。"""
+    from types import SimpleNamespace
+
+    from ..host.command import EditBatch
+    from ..host.freeze import render_freeze_asset
+
+    score = _load(args["score_path"])
+    ti = _resolve_track(score, args.get("track", 0))
+    root = Path(args["score_path"]).parent
+    fake_project = SimpleNamespace(score=score, root=root)
+    meta = render_freeze_asset(fake_project, ti, samplerate=44100)
+    batch = EditBatch(label="freeze_track")
+    batch.add("freeze_track", track=ti, value={**meta, "force": bool(args.get("force", True))})
+    new_score, result = batch.apply(score)
+    if not result.ok:
+        raise ValueError("；".join(result.errors))
+    out = _save(new_score, _out_path(args, args["score_path"]))
+    return (f"track[{ti}] {new_score.tracks[ti].name}：已冻结（asset={meta['asset_id']}，"
+            f"{meta['length']:.2f}s）｜ 写回：{out}")
+
+
+def tool_unfreeze_track(args: dict) -> str:
+    """解除显式冻结（P83；资产只解 pin，物理删除交 cache/gc）。"""
+    from ..host.command import EditBatch
+
+    score = _load(args["score_path"])
+    ti = _resolve_track(score, args.get("track", 0))
+    batch = EditBatch(label="unfreeze_track")
+    batch.add("unfreeze_track", track=ti)
+    new_score, result = batch.apply(score)
+    if not result.ok:
+        raise ValueError("；".join(result.errors))
+    out = _save(new_score, _out_path(args, args["score_path"]))
+    return f"track[{ti}] {new_score.tracks[ti].name}：已解冻 ｜ 写回：{out}"
+
+
 def tool_remove_track(args: dict) -> str:
     """删除轨道（track = 轨索引或轨名，必填）；该轨书签引用同步清理（经命令层 remove_track）。"""
     from ..host.command import EditBatch
@@ -865,6 +902,28 @@ def register_compose_tools(registry: ToolRegistry) -> None:
             "output": {"type": "string"},
         }, "required": ["score_path", "source_id"]},
         handler=tool_mount_source))
+
+    registry.register(ToolSpec(
+        name="freeze_track",
+        description=("显式冻结一条 MIDI/插件轨（P83）：渲染 BK1 资产到工程 stem 库并落冻结状态；"
+                     "冻结后源侧锁定、混音仍可调；VST2/音频轨不支持"),
+        parameters={"type": "object", "properties": {
+            "score_path": {"type": "string"},
+            "track": {"description": "轨索引或轨名（缺省 0）"},
+            "force": {"type": "boolean", "description": "已冻结时是否重冻（修复 stale）"},
+            "output": {"type": "string"},
+        }, "required": ["score_path"]},
+        handler=tool_freeze_track))
+
+    registry.register(ToolSpec(
+        name="unfreeze_track",
+        description="解除显式冻结（P83）：恢复插件轨；冻结资产只解 pin，物理清理交 cache/gc",
+        parameters={"type": "object", "properties": {
+            "score_path": {"type": "string"},
+            "track": {"description": "轨索引或轨名（缺省 0）"},
+            "output": {"type": "string"},
+        }, "required": ["score_path"]},
+        handler=tool_unfreeze_track))
 
     registry.register(ToolSpec(
         name="remove_track",

@@ -7,6 +7,8 @@ import pytest
 
 from tsov.core.notes import Note
 from tsov.core.score import Instrument, Score, Track
+from tsov.host.cache import StemStore, track_key
+from tsov.host.freeze import freeze_fingerprint
 from tsov.webapp.live_transport import LiveTransport, LiveUnsupported
 from tsov.webapp.state import EventBus
 
@@ -86,6 +88,92 @@ def test_manifest_rejects_vst2_with_clear_hint(tmp_path):
     )
     with pytest.raises(LiveUnsupported, match="VST2.*不支持实时"):
         transport._manifest_for(project)
+
+
+def test_manifest_uses_frozen_asset(tmp_path):
+    import numpy as np
+
+    from tsov.host.freeze import freeze_fingerprint
+
+    track = Track(name="frozen", instrument=Instrument(program="piano"), notes=[_note()])
+    score = Score(tracks=[track])
+    store = StemStore(tmp_path)
+    asset_id = track_key(track, 44100)
+    store.save(asset_id, np.zeros((44100, 2), dtype=np.float32), 44100)
+    track.freeze = {
+        "asset_id": asset_id,
+        "content_hash": freeze_fingerprint(track, score, 44100),
+        "sample_rate": 44100,
+        "length": 1.0,
+        "rendered_at": "",
+    }
+    tracks, selected = LiveTransport(EventBus())._manifest_for(_Project(score, tmp_path))
+    assert selected == [0]
+    assert tracks[0]["type"] == "audio"
+    assert Path(tracks[0]["path"]) == store.path_for(asset_id)
+
+
+def test_manifest_rejects_stale_frozen_asset(tmp_path):
+    import numpy as np
+
+    from tsov.host.freeze import freeze_fingerprint
+
+    track = Track(name="frozen", instrument=Instrument(program="piano"), notes=[_note()])
+    score = Score(tracks=[track])
+    store = StemStore(tmp_path)
+    asset_id = track_key(track, 44100)
+    store.save(asset_id, np.zeros((44100, 2), dtype=np.float32), 44100)
+    track.freeze = {
+        "asset_id": asset_id,
+        "content_hash": freeze_fingerprint(track, score, 44100),
+        "sample_rate": 44100,
+        "length": 1.0,
+        "rendered_at": "",
+    }
+    track.notes[0].end = 1.0
+    with pytest.raises(LiveUnsupported, match="过期"):
+        LiveTransport(EventBus())._manifest_for(_Project(score, tmp_path))
+
+
+def test_manifest_audio_track_preassembles_asset(tmp_path):
+    import numpy as np
+    import soundfile as sf
+
+    (tmp_path / "audio").mkdir()
+    sf.write(str(tmp_path / "audio" / "guitar.wav"),
+             np.zeros((4410, 2), dtype=np.float32), 44100, subtype="FLOAT")
+    track = Track(name="guitar", kind="audio", audio={"clips": [{
+        "file": "audio/guitar.wav", "start": 0.0, "src_offset": 0.0,
+        "src_len": None, "stretch": 1.0, "fade_in": 0.0, "fade_out": 0.0,
+    }]})
+    tracks, selected = LiveTransport(EventBus())._manifest_for(_Project(Score(tracks=[track]), tmp_path))
+    assert selected == [0]
+    assert tracks[0]["type"] == "audio"
+    assert Path(tracks[0]["path"]).is_file()
+
+
+def test_existing_client_revalidates_frozen_asset(tmp_path):
+    import numpy as np
+
+    from tsov.host.freeze import freeze_fingerprint
+
+    track = Track(name="frozen", instrument=Instrument(program="piano"), notes=[_note()])
+    score = Score(tracks=[track])
+    store = StemStore(tmp_path)
+    asset_id = track_key(track, 44100)
+    store.save(asset_id, np.zeros((44100, 2), dtype=np.float32), 44100)
+    track.freeze = {
+        "asset_id": asset_id, "content_hash": freeze_fingerprint(track, score, 44100),
+        "sample_rate": 44100, "length": 1.0, "rendered_at": "",
+    }
+    transport = LiveTransport(EventBus())
+    transport._client = object()
+    transport._project_name = "p"
+    project = _Project(score, tmp_path)
+    project.name = "p"
+    store.path_for(asset_id).unlink()
+    with pytest.raises(LiveUnsupported, match="资产缺失"):
+        transport._ensure_client(project)
 
 
 def test_device_fallback_to_shared(tmp_path, monkeypatch):

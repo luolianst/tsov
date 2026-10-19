@@ -278,6 +278,7 @@ body.chat-folded #rail-chat { display: flex; }
 .track-sub { color: var(--faint); font-size: var(--fs-xs); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .track-eye { padding: 0 6px; font-size: var(--fs-md); margin-left: auto; flex: none; border: none; background: none; }
 .track-eye:hover { background: var(--bg-sunken); }
+.track-freeze { flex: none; font-size: var(--fs-md); color: var(--accent); cursor: default; }
 .track-ctl { display: flex; align-items: center; gap: 6px; }
 .track-ctl input[type="range"] {
   -webkit-appearance: none; appearance: none;

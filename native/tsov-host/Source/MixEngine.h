@@ -71,6 +71,10 @@ public:
                     float pan = 0.0f,
                     int noteOffset = 0,
                     bool testPattern = false);
+    int addAudioTrack(std::unique_ptr<juce::AudioBuffer<float>> audio,
+                      const juce::String& name = {},
+                      float gain = 1.0f,
+                      float pan = 0.0f);
     void clearTracks();
     int trackCount() const { return (int) tracks.size(); }
     MixTrackInfo trackInfo(int index) const;
@@ -128,6 +132,7 @@ private:
         juce::String name;
         std::unique_ptr<juce::AudioPluginInstance> plugin;
         std::unique_ptr<SF2Synth> sf2;
+        std::unique_ptr<juce::AudioBuffer<float>> audio;
         juce::AudioBuffer<float> buffer;
         juce::MidiBuffer midi;
         std::vector<MixTimedEvent> events;

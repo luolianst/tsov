@@ -174,10 +174,17 @@ def register(app: FastAPI) -> None:
         engine = st().engine()
         store = StemStore(proj.root)
         keep = set(score_keys(proj.score, engine.samplerate))
+        # P83 ST1/FR1：冻结资产按引用 pin，不随指纹/内容变化被 GC 清掉
+        for tr in proj.score.tracks:
+            if isinstance(tr.freeze, dict) and tr.freeze.get("asset_id"):
+                keep.add(str(tr.freeze["asset_id"]))
         for fav in proj.favorites():
             s = proj.score_at(fav.get("tag") or "HEAD")
             if s is not None:
                 keep |= score_keys(s, engine.samplerate)
+                for tr in s.tracks:
+                    if isinstance(tr.freeze, dict) and tr.freeze.get("asset_id"):
+                        keep.add(str(tr.freeze["asset_id"]))
         report = store.gc(keep)
         report["keep"] = len(keep)
         report["size_mb"] = round(store.size_bytes() / 1024 / 1024, 2)
@@ -193,7 +200,12 @@ def register(app: FastAPI) -> None:
         engine = st().engine()
         # P62a（10-14）：导出前强制体检——命中静音 VST3 轨 → 拦下（推卡）；allow_silent=true 可强制
         if not body.allow_silent:
-            warns = _pre_export_silence_check(engine, proj)
+            try:
+                warns = _pre_export_silence_check(engine, proj)
+            except RuntimeError as e:
+                if "冻结轨" in str(e):
+                    raise HTTPException(409, {"error": str(e), "stale": True})
+                raise
             if warns:
                 raise HTTPException(409, {
                     "error": "存在「有音符但无输出」的 VST3 轨——请先处理（打开插件界面完成交互）再导出；"
@@ -210,6 +222,10 @@ def register(app: FastAPI) -> None:
                                    cache=StemStore(proj.root))
         except ValueError as e:   # E6 段2：位深/选段参数非法 → 400（契约 §五 {"error": ...}）
             raise HTTPException(400, str(e))
+        except RuntimeError as e:  # P83：冻结资产缺失/过期 → 409（不静默改走插件）
+            if "冻结轨" in str(e):
+                raise HTTPException(409, {"error": str(e), "stale": True})
+            raise
         finally:
             session.close()
         return report

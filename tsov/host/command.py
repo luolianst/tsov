@@ -115,6 +115,75 @@ class EditBatch:
         return out, BatchResult(ok=not errors, applied=applied, errors=errors)
 
 
+_FROZEN_ALLOWED_OPS = {
+    "set_track_mix", "rename_track", "set_track_folder", "move_track",
+    "remove_track", "add_lane", "remove_lane", "freeze_track", "unfreeze_track",
+}
+
+
+def _frozen_track_guard(track: Track, c: EditCommand) -> str | None:
+    """P83 LK1：冻结轨源侧锁定；混音/组织/轨管理继续开放。"""
+    if not getattr(track, "freeze", None):
+        return None
+    if c.op in _FROZEN_ALLOWED_OPS:
+        return None
+    v = c.value if isinstance(c.value, dict) else {}
+    target = str(v.get("target") or "track")
+    if c.op in ("add_effect", "remove_effect", "set_effect_params") and target != "track":
+        return None
+    if c.op == "set_automation":
+        if target != "track":
+            return None
+        if str(v.get("param") or "") in ("volume", "pan"):
+            return None
+        return f"轨道「{track.name}」已冻结：只允许 volume/pan 自动化（{v.get('param')!r} 需先解冻）"
+    return f"轨道「{track.name}」已冻结：{c.op} 会改变冻结音频内容，需先解冻"
+
+
+def _apply_freeze_track(track: Track, c: EditCommand) -> str | None:
+    """P83：写入显式冻结状态（资产/渲染由服务层准备；命令层只校验与落状态）。"""
+    if str(getattr(track, "kind", "midi") or "midi") != "midi":
+        return "只能冻结 MIDI/插件轨（音频轨不支持）"
+    if not track.notes:
+        return "空轨不能冻结（没有可渲染内容）"
+    program = str(getattr(track.instrument, "program", "") or "")
+    if program.startswith("vst2:") or program.lower().endswith(".dll"):
+        return "VST2 轨不支持冻结（可离线导出）"
+    v = c.value
+    if not isinstance(v, dict):
+        return "freeze_track value 需 {asset_id, content_hash, sample_rate, length, …}"
+    asset_id = str(v.get("asset_id") or "").strip()
+    content_hash = str(v.get("content_hash") or "").strip()
+    if not re.fullmatch(r"[0-9a-fA-F]{8,64}", asset_id):
+        return f"freeze_track asset_id 非法：{asset_id!r}"
+    if not re.fullmatch(r"[0-9a-fA-F]{8,64}", content_hash):
+        return f"freeze_track content_hash 非法：{content_hash!r}"
+    try:
+        sample_rate = int(v.get("sample_rate"))
+        length = float(v.get("length"))
+    except (TypeError, ValueError):
+        return "freeze_track 需要正数 sample_rate / length"
+    if sample_rate <= 0 or length <= 0:
+        return "freeze_track 需要正数 sample_rate / length"
+    if getattr(track, "freeze", None) and not bool(v.get("force")):
+        return f"轨道「{track.name}」已冻结（如需重冻请传 force=true）"
+    track.freeze = {
+        "asset_id": asset_id,
+        "content_hash": content_hash,
+        "sample_rate": sample_rate,
+        "length": round(length, 6),
+        "rendered_at": str(v.get("rendered_at") or ""),
+    }
+    return None
+
+
+def _apply_unfreeze_track(track: Track, c: EditCommand) -> str | None:
+    if not getattr(track, "freeze", None):
+        return f"轨道「{track.name}」未冻结"
+    track.freeze = None
+    return None
+
+
 def _parse_note_indices(raw: Any, count: int) -> tuple[list[int] | None, str | None]:
     """indices 参数解析（E5 选区批量操作共用）：非空数组、整数、在界内、去重保序。"""
     if not isinstance(raw, (list, tuple)) or len(raw) == 0:
@@ -171,6 +240,15 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
     track = score.tracks[c.track]
     notes = track.notes
 
+    # P83：冻结轨的源侧锁定（LK1）；混音/组织/轨管理仍允许。
+    frozen_error = _frozen_track_guard(track, c)
+    if frozen_error:
+        return frozen_error
+    if c.op == "freeze_track":
+        return _apply_freeze_track(track, c)
+    if c.op == "unfreeze_track":
+        return _apply_unfreeze_track(track, c)
+
     # ---- 轨道级参数命令（UI 批A：参数层与 agent 工具同出）----
     if c.op == "remove_track":
         return _apply_remove_track(score, c)
@@ -211,7 +289,7 @@ def _apply_one(score: Score, c: EditCommand) -> str | None:
         return _apply_move_folder(score, c)
     if c.op == "set_instrument":
         return _apply_set_instrument(track, c)
-    # S4.2：全局音源库挂载（VST3 / SFZ；SF2 待引擎级 soundfont 字段）
+    # S4.2：全局音源库挂载（VST3 / SFZ；SF2 走 soundfont 字段）
     if c.op == "mount_source":
         return _apply_mount_source(track, c)
     if c.op == "add_effect":
@@ -1090,6 +1168,10 @@ def _apply_set_automation(score: Score, c: EditCommand) -> str | None:
         if not (0 <= c.track < len(score.tracks)):
             return f"set_automation 越界：track {c.track}（共 {len(score.tracks)} 轨）"
         host = score.tracks[c.track]
+        if getattr(host, "freeze", None):
+            param_hint = str(v.get("param") or "")
+            if param_hint not in ("volume", "pan"):
+                return f"轨道「{host.name}」已冻结：只允许 volume/pan 自动化（{param_hint!r} 需先解冻）"
     elif target == "bus":
         name = str(v.get("ref") or "").strip()
         host = next((b for b in getattr(score, "buses", []) or [] if b.name == name), None)
@@ -1182,8 +1264,15 @@ def scale_score_times(score: Score, factor: float) -> dict:
     return stats
 
 
+def _frozen_track_names(score: Score) -> list[str]:
+    return [t.name or f"track-{i}" for i, t in enumerate(score.tracks) if getattr(t, "freeze", None)]
+
+
 def _apply_scale_time(score: Score, c: EditCommand) -> str | None:
     """value = {"factor": >0}（也接受裸数字）；全谱时间 × factor。"""
+    frozen = _frozen_track_names(score)
+    if frozen:
+        return "存在冻结轨，不能整体缩放时间（请先解冻：" + "、".join(frozen) + "）"
     v = c.value
     raw = v.get("factor") if isinstance(v, dict) else v
     if raw is None:
@@ -1203,6 +1292,9 @@ def _apply_set_tempo_remap(score: Score, c: EditCommand) -> str | None:
 
     单命令原子：任一部分校验不通过 → 整体拒绝，不会出现「缩放了但 tempo 没改」的分裂状态。
     """
+    frozen = _frozen_track_names(score)
+    if frozen:
+        return "存在冻结轨，不能变速重排（请先解冻：" + "、".join(frozen) + "）"
     v = c.value
     if not isinstance(v, dict) or v.get("tempo") is None:
         return "set_tempo_remap value 需 {tempo, time_signature?}"
@@ -1592,6 +1684,8 @@ def _apply_part_op(score: Score, track, c: EditCommand) -> str | None:
             return "move_part_to_track 目标轨相同；同轨移动请用 move_part"
         if str(getattr(target, "kind", "midi") or "midi") != "midi":
             return "move_part_to_track 目标必须是 MIDI 轨（audio→audio 不适用 Part）"
+        if getattr(target, "freeze", None):
+            return f"move_part_to_track 目标轨「{target.name}」已冻结，需先解冻"
         ensure_parts(score)
         try:
             start = float(v.get("start", part.start))

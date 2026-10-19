@@ -192,9 +192,29 @@ def render_buses(
             continue
 
         name = tr.name or f"track-{idx}"
+        # P83：冻结轨直接读 BK1 资产，不实例化插件；资产缺失/过期一律显式失败。
+        if getattr(tr, "freeze", None):
+            if cache is None:
+                raise RuntimeError(f"冻结轨「{name}」需要 StemStore 才能渲染/导出")
+            from .freeze import freeze_state
+
+            status = freeze_state(tr, session.score, cache, samplerate)
+            if status.get("state") != "frozen":
+                reason = "资产缺失" if status.get("state") == "missing" else "资产已过期"
+                raise RuntimeError(f"冻结轨「{name}」{reason}：请重新冻结或解冻（stale）")
+            buf = cache.load(str(tr.freeze.get("asset_id") or ""))
+            if buf is None:
+                raise RuntimeError(f"冻结轨「{name}」资产读取失败：{tr.freeze.get('asset_id')!r}")
+            if buf.shape[0] != n_frames:
+                if buf.shape[0] < n_frames:
+                    buf = np.pad(buf, ((0, n_frames - buf.shape[0]), (0, 0)))
+                else:
+                    buf = buf[:n_frames]
+            if stats is not None:
+                stats.setdefault("frozen", []).append(name)
         # 轨内前段（音源+效果）：ADR-0018 缓存路径（命中即读；未命中渲后入库）
         # E2：音频轨不走 stem 缓存（文件直读——入库素材不变；轨道级缓存留后续）
-        if cache is not None and not isinstance(ht.source, AudioClipSource):
+        elif cache is not None and not isinstance(ht.source, AudioClipSource):
             key = cache.key_for(tr, samplerate)
             buf = cache.load(key)
             if buf is None:

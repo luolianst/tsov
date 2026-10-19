@@ -34,6 +34,8 @@ TOOL_LABELS: dict[str, str] = {
     "duplicate_bars": "复制小节",
     "set_track_mix": "调音量/声像",
     "mount_source": "挂载音源",
+    "freeze_track": "冻结轨",
+    "unfreeze_track": "解冻轨",
     "remove_track": "删除轨",
     "rename_track": "重命名轨",
     "apply_effect": "加效果",
@@ -57,6 +59,7 @@ READ_TOOLS: frozenset[str] = frozenset({
 SCORE_WRITING_TOOLS: frozenset[str] = frozenset({
     "edit_score", "set_tempo", "voice_to_score", "create_track", "write_notes",
     "duplicate_bars", "set_track_mix", "mount_source", "remove_track", "rename_track", "apply_effect", "apply_pattern",
+    "freeze_track", "unfreeze_track",
     "set_instrument_param", "load_instrument_preset",
 })
 
@@ -109,6 +112,10 @@ def summarize_args(tool: str, args: dict | None) -> str:
             return " · ".join(bits)
         if tool == "mount_source":
             return f"轨 {a.get('track', 0)} · {_short(a.get('source_id'), 32)}"
+        if tool == "freeze_track":
+            return f"轨 {a.get('track', 0)}" + (" · 重冻" if a.get("force") else " · 冻结")
+        if tool == "unfreeze_track":
+            return f"轨 {a.get('track', 0)} · 解冻"
         if tool == "remove_track":
             return f"轨 {a.get('track', '?')}"
         if tool == "rename_track":

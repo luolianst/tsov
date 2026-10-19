@@ -238,6 +238,24 @@ int MixEngine::addSf2Track(std::unique_ptr<SF2Synth> synth,
     return (int) tracks.size() - 1;
 }
 
+int MixEngine::addAudioTrack(std::unique_ptr<juce::AudioBuffer<float>> audio,
+                             const juce::String& name,
+                             float gain,
+                             float pan)
+{
+    if (audio == nullptr || audio->getNumSamples() <= 0)
+        return -1;
+
+    auto track = std::make_unique<Track>();
+    track->name = name.isEmpty() ? juce::String("Audio") : name;
+    track->audio = std::move(audio);
+    track->gain = gain;
+    track->pan = juce::jlimit(-1.0f, 1.0f, pan);
+    track->buffer.setSize(2, 512);
+    tracks.push_back(std::move(track));
+    return (int) tracks.size() - 1;
+}
+
 void MixEngine::clearTracks()
 {
     releaseTracks();
@@ -354,7 +372,11 @@ void MixEngine::prepareTracks(double sampleRate, int blockSize)
 {
     for (auto& track : tracks)
     {
-        if (track->sf2 != nullptr)
+        if (track->audio != nullptr)
+        {
+            track->buffer.setSize(2, blockSize);
+        }
+        else if (track->sf2 != nullptr)
         {
             juce::String error;
             if (! track->sf2->prepare(sampleRate, error))
@@ -631,7 +653,7 @@ void MixEngine::renderBlock(juce::AudioBuffer<float>& buffer, int numSamples)
 
         for (auto& track : tracks)
         {
-            if (track->mute || (track->plugin == nullptr && track->sf2 == nullptr))
+            if (track->mute || (track->plugin == nullptr && track->sf2 == nullptr && track->audio == nullptr))
                 continue;
 
             const juce::SpinLock::ScopedTryLockType eventLock(track->eventsLock);
@@ -656,7 +678,24 @@ void MixEngine::renderBlock(juce::AudioBuffer<float>& buffer, int numSamples)
                 ++track->eventCursor;
             }
 
-            if (track->sf2 != nullptr)
+            if (track->audio != nullptr)
+            {
+                const auto* asset = track->audio.get();
+                const auto assetChannels = asset->getNumChannels();
+                const auto assetSamples = asset->getNumSamples();
+                auto* left = track->buffer.getWritePointer(0);
+                auto* right = track->buffer.getWritePointer(1);
+                for (int i = 0; i < numSamples; ++i)
+                {
+                    const auto sourceIndex = start + i;
+                    if (sourceIndex < 0 || sourceIndex >= assetSamples)
+                        continue;
+                    const auto l = asset->getSample(0, (int) sourceIndex);
+                    left[i] = l;
+                    right[i] = assetChannels > 1 ? asset->getSample(1, (int) sourceIndex) : l;
+                }
+            }
+            else if (track->sf2 != nullptr)
             {
                 auto* left = track->buffer.getWritePointer(0);
                 auto* right = track->buffer.getWritePointer(1);

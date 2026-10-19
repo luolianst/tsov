@@ -179,3 +179,16 @@ class TrackTemplateApplyIn(BaseModel):
     """S4.2：应用全局轨模板（追加到工程末尾）。"""
 
     name: str
+
+
+class FreezeIn(BaseModel):
+    """P83：冻结指定轨；force=true 允许重冻（stale 修复）。"""
+
+    track: int
+    force: bool = False
+
+
+class UnfreezeIn(BaseModel):
+    """P83：解冻指定轨。"""
+
+    track: int
